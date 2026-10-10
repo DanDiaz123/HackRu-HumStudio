@@ -200,6 +200,10 @@ export function createPlaybackEngine(backend: PlaybackBackend) {
       silence();
       return clicks.countIn(bpm, onBeat);
     },
+    /** Audio-clock seconds at which play() called now puts beat 0 (Tone adds its lookahead). */
+    nowSec() {
+      return backend.now();
+    },
     /** Audible transport position in quarter-note beats, wrapped to the visible loop. */
     positionBeats() {
       return (backend.positionTicks() / backend.ppq) % TOTAL_BEATS;

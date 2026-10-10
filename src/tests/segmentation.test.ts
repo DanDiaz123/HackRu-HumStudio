@@ -110,3 +110,36 @@ test("segmentation accepts immutable input and a single-frame median window", ()
   const frames = Object.freeze(pitchFrames([{ midi: 60, durationSec: 0.6 }]).map(f => Object.freeze(f)));
   assert.equal(segmentPitchFrames(frames, { medianWindow: 1 }).length, 1);
 });
+
+test("repeated syllables on one pitch re-strike when the level dips and returns", () => {
+  const syllable = [{ midi: 57, durationSec: 0.3 }, { midi: 57, durationSec: 0.06, rms: 0.03 }];
+  const notes = segmentPitchFrames(pitchFrames([...syllable, ...syllable, { midi: 57, durationSec: 0.3 }]));
+  assert.deepEqual(notes.map(n => n.midi), [57, 57, 57]);
+  assert.equal(new Set(notes.map(n => n.phraseId)).size, 3); // generation must not merge them back
+  assert.ok(Math.abs(notes[1].startSec - 0.36) < 1e-9, `re-strike at ${notes[1].startSec}`);
+});
+
+test("a short octave slip folds back into the held note, a sustained leap does not", () => {
+  const slip = segmentPitchFrames(pitchFrames([
+    { midi: 57, durationSec: 0.5 }, { midi: 69, durationSec: 0.2 }, { midi: 57, durationSec: 0.5 },
+  ]));
+  assert.deepEqual(slip.map(n => n.midi), [57]);
+  const leap = segmentPitchFrames(pitchFrames([{ midi: 57, durationSec: 0.5 }, { midi: 69, durationSec: 0.6 }]));
+  assert.deepEqual(leap.map(n => n.midi), [57, 69]);
+  assert.ok(Math.abs(leap[1].startSec - 0.5) <= 0.02, `leap starts at ${leap[1].startSec}`);
+});
+
+test("a scoop into a phrase's first note does not delay its start", () => {
+  const notes = segmentPitchFrames(pitchFrames([
+    { midi: null, durationSec: 0.3 }, { midi: 54, durationSec: 0.08 }, { midi: 57, durationSec: 0.6 },
+  ]));
+  assert.deepEqual(notes.map(n => n.midi), [57]);
+  assert.equal(notes[0].startSec, 0.3);
+});
+
+test("a pitch change starts where it was sung, not where the median noticed it", () => {
+  for (const hopSec of [0.01, 0.02, 0.04]) {
+    const notes = segmentPitchFrames(pitchFrames([{ midi: 60, durationSec: 0.8 }, { midi: 64, durationSec: 0.8 }], hopSec));
+    assert.ok(Math.abs(notes[1].startSec - 0.8) < 1e-9, `hop ${hopSec}: ${notes[1].startSec}`);
+  }
+});

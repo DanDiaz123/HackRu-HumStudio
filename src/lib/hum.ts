@@ -10,6 +10,7 @@ export interface HumFrame {
   bins: Float32Array; // BIN_COUNT log-spaced magnitudes 80..1000 Hz, 0..1, low -> high
   hz: number | null;
   rms: number;
+  zcrHz?: number; // zero crossings as a frequency: ~fundamental for a hum, several kHz for "ts" noise
 }
 
 const binHz = (i: number) => F_LO * Math.pow(F_HI / F_LO, i / (BIN_COUNT - 1));
@@ -25,49 +26,108 @@ export function micErrorMessage(err: unknown): string {
   return "The microphone could not start.";
 }
 
-export async function startMic(onFrame: (f: HumFrame) => void): Promise<() => void> {
+/** Samples Pitchy analyses per frame (~85 ms at 48 kHz). */
+export const WINDOW_SIZE = 4096;
+/** One frame per hop: 50 per second at any sample rate (spec: ~20 ms). */
+export const HOPS_PER_SEC = 50;
+
+/** Rolling buffer of the newest `size` samples; push a hop, get the full analysis window back. */
+export function slidingWindow(size: number) {
+  const buf = new Float32Array(size);
+  return (hop: Float32Array) => {
+    buf.copyWithin(0, hop.length);
+    buf.set(hop, size - hop.length);
+    return buf;
+  };
+}
+
+/** Audio-clock time a window's pitch belongs to: its centre, not its newest sample. */
+export const windowCenterSec = (endFrame: number, sampleRate: number, size = WINDOW_SIZE) =>
+  (endFrame - size / 2) / sampleRate;
+
+/**
+ * Pitchy fundamental, gated: too quiet, unclear, or out of hum range reads as unvoiced (null).
+ * zcrHz tells beatboxed hats (hiss, high) from snares (lower) above the spectrogram's 1 kHz.
+ */
+export function analyzeWindow(wave: Float32Array, sampleRate: number, detector: PitchDetector<Float32Array>) {
+  let sum = 0;
+  let crossings = 0;
+  for (let i = 0; i < wave.length; i++) {
+    sum += wave[i] * wave[i];
+    if (i && (wave[i] >= 0) !== (wave[i - 1] >= 0)) crossings++;
+  }
+  const rms = Math.sqrt(sum / wave.length);
+  const [pitch, clarity] = detector.findPitch(wave, sampleRate);
+  const hz = rms >= 0.01 && clarity >= 0.85 && pitch >= F_LO && pitch <= F_HI ? pitch : null;
+  return { hz, rms, zcrHz: (crossings * sampleRate) / (2 * wave.length) };
+}
+
+/** What the mic needs from an audio context. Studio passes Tone's, so frames share the click's clock. */
+export interface MicContext {
+  readonly sampleRate: number;
+  /** Seconds from scheduling a sound to it leaving the speakers. */
+  readonly outputLatencySec: number;
+  addModule(url: string): Promise<void>;
+  createMediaStreamSource(stream: MediaStream): MediaStreamAudioSourceNode;
+  createAnalyser(): AnalyserNode;
+  createWorklet(name: string, options: AudioWorkletNodeOptions): AudioWorkletNode;
+}
+
+/** Frames are stamped in `ctx`'s audio-clock seconds; the caller rebases them to recording start. */
+export async function startMic(ctx: MicContext, onFrame: (f: HumFrame) => void): Promise<() => void> {
   if (!navigator.mediaDevices?.getUserMedia) throw new DOMException("insecure", "SecurityError");
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
   });
-  const ctx = new AudioContext();
   const src = ctx.createMediaStreamSource(stream);
+  // The context is shared with playback, so it stays open.
+  const cleanup = () => {
+    src.disconnect();
+    stream.getTracks().forEach((t) => t.stop());
+  };
+
+  let tap: AudioWorkletNode;
+  try {
+    // The worklet delivers every sample on the audio thread; the main thread only analyses.
+    await ctx.addModule("/hum-worklet.js");
+    tap = ctx.createWorklet("hum-tap", {
+      numberOfInputs: 1,
+      numberOfOutputs: 0, // analysis only, never to ctx.destination
+      channelCount: 1,
+      channelCountMode: "explicit", // stereo mics are mixed down to mono
+      processorOptions: { hop: Math.round(ctx.sampleRate / HOPS_PER_SEC) },
+    });
+  } catch (e) {
+    cleanup();
+    throw e;
+  }
+  // The analyser only feeds the spectrogram display; pitch comes from the worklet's samples.
   const analyser = ctx.createAnalyser();
-  analyser.fftSize = 4096;
+  analyser.fftSize = WINDOW_SIZE;
   analyser.smoothingTimeConstant = 0.2;
-  src.connect(analyser); // analysis only, never to ctx.destination
+  src.connect(analyser);
+  src.connect(tap);
 
   const spec = new Float32Array(analyser.frequencyBinCount);
-  const wave = new Float32Array(analyser.fftSize);
   const hzPerBin = ctx.sampleRate / analyser.fftSize;
-  const detector = PitchDetector.forFloat32Array(analyser.fftSize);
-  const t0 = performance.now();
-  let raf = 0;
+  const detector = PitchDetector.forFloat32Array(WINDOW_SIZE);
+  const push = slidingWindow(WINDOW_SIZE);
 
-  const tick = () => {
+  tap.port.onmessage = (e: MessageEvent<{ samples: Float32Array; endFrame: number }>) => {
+    const { hz, rms, zcrHz } = analyzeWindow(push(e.data.samples), ctx.sampleRate, detector);
     analyser.getFloatFrequencyData(spec);
-    analyser.getFloatTimeDomainData(wave);
-    let sum = 0;
-    for (const s of wave) sum += s * s;
-    const rms = Math.sqrt(sum / wave.length);
-
     const bins = new Float32Array(BIN_COUNT);
     for (let i = 0; i < BIN_COUNT; i++) {
       const k = Math.min(spec.length - 1, Math.round(binHz(i) / hzPerBin));
       bins[i] = Math.min(1, Math.max(0, (spec[k] + 90) / 60)); // -90..-30 dB -> 0..1
     }
-    const [pitch, clarity] = detector.findPitch(wave, ctx.sampleRate);
-    const hz = rms >= 0.01 && clarity >= 0.85 && pitch >= F_LO && pitch <= F_HI ? pitch : null;
-    onFrame({ tSec: (performance.now() - t0) / 1000, bins, hz, rms });
-    raf = requestAnimationFrame(tick);
+    onFrame({ tSec: windowCenterSec(e.data.endFrame, ctx.sampleRate), bins, hz, rms, zcrHz });
   };
-  raf = requestAnimationFrame(tick);
 
   return () => {
-    cancelAnimationFrame(raf);
-    src.disconnect();
-    stream.getTracks().forEach((t) => t.stop());
-    void ctx.close();
+    tap.port.onmessage = null;
+    tap.disconnect();
+    cleanup();
   };
 }
 
@@ -94,6 +154,6 @@ export function startDemoHum(onFrame: (f: HumFrame) => void): () => void {
       for (let i = 0; i < BIN_COUNT; i++) bins[i] = Math.random() * 0.08;
     }
     onFrame({ tSec, bins, hz, rms: hz ? 0.1 : 0.003 });
-  }, 1000 / 60);
+  }, 1000 / HOPS_PER_SEC);
   return () => clearInterval(id);
 }

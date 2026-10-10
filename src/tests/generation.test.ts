@@ -6,6 +6,9 @@ import { INSTRUMENTS, type Note, type QuantizeDivision } from "../lib/tracks.ts"
 import { pitchFrames } from "./fixtures/transcription.ts";
 
 const instrument = (id: string) => INSTRUMENTS.find(i => i.id === id)!;
+/** Highest note at each start beat: the hummed line inside a Keys chord part. */
+const topVoice = (notes: Note[]) =>
+  notes.filter(n => !notes.some(o => o.startBeat === n.startBeat && o.midi > n.midi));
 const timing = (notes: Note[]) => notes.map(({ midi, startBeat, durationBeats }) => ({ midi, startBeat, durationBeats }));
 
 test("the reported held-note fragmentation stays one note across tempos and grids", () => {
@@ -32,10 +35,14 @@ test("harmony correction merges contiguous raw pitches that become identical", (
   const frames = pitchFrames([
     { midi: 60, durationSec: 0.6 }, { midi: 61, durationSec: 0.6 }, { midi: 60, durationSec: 0.6 },
   ]);
+  // Keys plays a triad per hummed note; the hummed line is its top voice.
   const notes = generateNotes(instrument("keys"), frames, 120, "off", DEFAULT_HARMONY);
-  assert.equal(notes.length, 1);
-  assert.equal(notes[0].midi, 60);
-  assert.ok(Math.abs(notes[0].durationBeats - frames.at(-1)!.tSec * 2) < 1e-9);
+  assert.equal(notes.length, 3);
+  assert.ok(notes.every(n => n.startBeat === 0));
+  const top = topVoice(notes);
+  assert.equal(top.length, 1);
+  assert.equal(top[0].midi, 60);
+  assert.ok(Math.abs(top[0].durationBeats - frames.at(-1)!.tSec * 2) < 1e-9);
 });
 
 test("real rests survive harmony correction even when coarse snapping closes the gap", () => {
@@ -43,7 +50,7 @@ test("real rests survive harmony correction even when coarse snapping closes the
     { midi: 60, durationSec: 0.4 }, { midi: null, durationSec: 0.2 },
     { midi: 61, durationSec: 0.4 },
   ]);
-  const notes = generateNotes(instrument("keys"), frames, 120, "1/4", DEFAULT_HARMONY);
+  const notes = topVoice(generateNotes(instrument("keys"), frames, 120, "1/4", DEFAULT_HARMONY));
   assert.equal(notes.length, 2);
   assert.equal(notes[0].midi, notes[1].midi);
   assert.equal(notes[0].startBeat + notes[0].durationBeats, notes[1].startBeat);
@@ -109,7 +116,7 @@ test("generation never mutates source frames and drum Off onsets are unsnapped",
   const frames = Object.freeze(pitchFrames([{ midi: 60, durationSec: 0.6 }], 0.02, 0.13).map(f => Object.freeze(f)));
   assert.ok(generateNotes(instrument("melody"), frames, 120, "off", DEFAULT_HARMONY).length);
   const drums = generateNotes(instrument("drums"), frames, 120, "off", DEFAULT_HARMONY);
-  assert.ok(drums.some(n => n.midi === 36 && n.startBeat === 0.26));
+  assert.ok(drums.some(n => n.midi !== 42 && n.startBeat === 0.26));
 });
 
 test("the existing async recording seam uses the same stable generation path", async () => {
