@@ -8,6 +8,7 @@ import { exportMidi } from "@/lib/midi";
 import {
   DEFAULT_HARMONY,
   type Harmony,
+  type Key,
   KEYS,
   type Mode,
   chordName,
@@ -83,6 +84,8 @@ export default function Studio() {
   const clearedRef = useRef<{ id: string; notes: Note[] } | null>(null);
   // Analysis frames of each part's latest take (never audio), so Sensitivity/Snap can re-read it. Not persisted.
   const takesRef = useRef<Record<string, HumFrame[]>>({});
+  // A key the user picked by hand; regeneration keeps it until the next Melody take sets a new one.
+  const pickedKeyRef = useRef<Key | null>(null);
   const playbackRequest = useRef(0);
   const arrangementRef = useRef({ tracks, bpm });
   const stopTake = useRef<() => void>(() => {});
@@ -316,6 +319,7 @@ export default function Studio() {
           setReveal((r) => r && { ...r, step: i });
         }
         if (h) setHarmony(h);
+        if (inst.id === "melody") pickedKeyRef.current = null;
         takesRef.current[inst.id] = taken;
         clearedRef.current = null;
         setTracks((ts) =>
@@ -413,7 +417,9 @@ export default function Studio() {
   /** A wrong key guess is one pick away: chords re-picked from the melody, every pitched part refitted. */
   function changeKey(value: string) {
     const [tonic, mode] = value.split(" ");
-    const h = withKey({ tonic: Number(tonic), mode: mode as Mode }, tracks.find((t) => t.instrument.id === "melody")?.notes ?? []);
+    const key: Key = { tonic: Number(tonic), mode: mode as Mode };
+    pickedKeyRef.current = key;
+    const h = withKey(key, tracks.find((t) => t.instrument.id === "melody")?.notes ?? []);
     setHarmony(h);
     setTracks((ts) => ts.map((t) => refit(t, h, true)));
   }
@@ -446,7 +452,7 @@ export default function Studio() {
       const notes = generateNotes(t.instrument, frames, bpm, division, h, level);
       if (!notes.length) continue; // keep what's there rather than erase a part
       fresh[t.instrument.id] = notes;
-      if (t.instrument.id === "melody") h = inferHarmony(notes);
+      if (t.instrument.id === "melody") h = pickedKeyRef.current ? withKey(pickedKeyRef.current, notes) : inferHarmony(notes);
       else if (t.instrument.id === "keys") h = chordsFromVoicing(notes, h);
     }
     if (h !== harmony) setHarmony(h);
