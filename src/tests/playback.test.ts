@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createPlaybackEngine, type PlaybackBackend, type PlaybackState, type PlaybackVoice } from "../lib/audio/playback-engine.ts";
 import * as playback from "../lib/playback.ts";
-import { TOTAL_BEATS } from "../lib/tracks.ts";
+import { TOTAL_BEATS, type Track } from "../lib/tracks.ts";
 import { playbackFixtureTracks } from "./fixtures/playback.ts";
 
 class FakeBackend implements PlaybackBackend {
@@ -307,4 +307,97 @@ test("a count-in scheduling error cleans partially scheduled timers and the clic
   assert.equal(backend.timers.size, 0);
   assert.equal(backend.calls.filter((call) => call.action === "dispose").length, 1);
   engine.stop();
+});
+
+class PresetBackend extends FakeBackend {
+  selected: { instrument: string; presetId?: string }[] = [];
+  prepared: string[][] = [];
+  readyListeners = new Set<() => void>();
+  freed = false;
+  createVoice(instrument: string, presetId?: string) {
+    this.selected.push({ instrument, presetId });
+    return super.createVoice(instrument);
+  }
+  async preparePresets(tracks: readonly Track[]) { this.prepared.push(tracks.map(t => t.instrument.id)); }
+  onPresetReady(listener: () => void) {
+    this.readyListeners.add(listener);
+    return () => { this.readyListeners.delete(listener); };
+  }
+  dispose() { this.freed = true; }
+}
+
+test("switching a live track changes only its sound, preserves position, and replaces old voices", () => {
+  const backend = new PresetBackend();
+  const engine = createPlaybackEngine(backend);
+  const tracks = playbackFixtureTracks();
+  engine.schedule(tracks, 120); engine.play(); backend.fire(0);
+  backend.tick = backend.ppq / 2;
+  const before = structuredClone(tracks);
+  const updated = tracks.map(t => t.instrument.id === "melody" ? { ...t, presetId: "melody.marimba" } : t);
+  engine.schedule(updated, 180);
+  assert.equal(engine.positionBeats(), 0.5);
+  assert.equal(engine.state(), "started");
+  assert.equal(backend.bpm, 180);
+  assert.deepEqual(tracks, before);
+  assert.equal(updated[0].notes, tracks[0].notes);
+  assert.equal(backend.selected.filter(s => s.instrument === "melody").at(-1)!.presetId, "melody.marimba");
+  assert.equal(backend.calls.filter(c => c.action === "dispose").length, 5);
+  engine.dispose();
+});
+
+test("automatic preload respects notes, mute, and solo; explicit preload never starts playback", async () => {
+  const backend = new PresetBackend();
+  const engine = createPlaybackEngine(backend);
+  const tracks = playbackFixtureTracks().map(t => ({ ...t, solo: t.instrument.id === "keys" }));
+  engine.schedule(tracks, 120);
+  assert.deepEqual(backend.prepared, [["keys"]]);
+  await engine.prepare(tracks.filter(t => t.instrument.id === "strings"));
+  assert.deepEqual(backend.prepared.at(-1), ["strings"]);
+  assert.equal(backend.starts, 0);
+  engine.dispose();
+});
+
+test("sample readiness refreshes the live schedule once and cannot resurrect a disposed engine", () => {
+  const backend = new PresetBackend();
+  const engine = createPlaybackEngine(backend);
+  engine.schedule(playbackFixtureTracks(), 120); engine.play(); backend.fire(0);
+  const count = backend.events.size;
+  backend.tick = backend.ppq / 2;
+  const ready = [...backend.readyListeners][0];
+  ready();
+  assert.equal(backend.events.size, count);
+  assert.equal(engine.positionBeats(), 0.5);
+  assert.equal(engine.state(), "started");
+  engine.dispose();
+  ready();
+  assert.equal(backend.events.size, 0);
+  assert.equal(backend.readyListeners.size, 0);
+  assert.equal(backend.freed, true);
+});
+
+test("missing legacy preset fields use defaults and invalid selections preserve the previous schedule", () => {
+  const backend = new PresetBackend();
+  const engine = createPlaybackEngine(backend);
+  const tracks = playbackFixtureTracks();
+  delete (tracks[0] as Partial<Track>).presetId;
+  engine.schedule(tracks, 120); engine.play(); backend.fire(0);
+  assert.equal(backend.selected.find(s => s.instrument === "melody")!.presetId, "melody.flute");
+  const count = backend.events.size;
+  assert.throws(() => engine.schedule(tracks.map(t => ({ ...t, presetId: "__proto__" })), 120), RangeError);
+  assert.equal(backend.events.size, count);
+  assert.equal(backend.state, "started");
+  engine.dispose();
+});
+
+test("background sample readiness does not cancel a click-only count-in", async () => {
+  const backend = new PresetBackend();
+  const engine = createPlaybackEngine(backend);
+  engine.schedule([], 120);
+  const counting = engine.countIn(120);
+  const timers = backend.timers.size;
+  [...backend.readyListeners][0]();
+  assert.equal(backend.timers.size, timers);
+  engine.stop();
+  assert.equal(await counting, false);
+  engine.dispose();
 });

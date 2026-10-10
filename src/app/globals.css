@@ -413,6 +413,10 @@ button.lane:focus-visible {
   padding: 14px 16px 16px;
   background: var(--flood);
   border-right: 1px solid rgb(0 0 0 / 0.3);
+  overflow-y: auto;
+}
+.row.zoomed .head > * {
+  flex-shrink: 0;
 }
 .back {
   align-self: flex-start;
@@ -444,6 +448,60 @@ button.lane:focus-visible {
   font-size: 14px;
   font-weight: 500;
   line-height: 1.35;
+}
+.sound-field {
+  margin-top: 14px;
+  min-width: 0;
+}
+.sound-field label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.sound-field select {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  padding: 0 6px;
+  border: 1.5px solid var(--ink);
+  border-radius: 0;
+  background: var(--flood);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+}
+.sound-feedback {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.sound-credits {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 11px;
+  color: inherit;
+  text-decoration: underline;
+}
+.sound-feedback p {
+  margin: 0;
+}
+.sound-retry {
+  margin-top: 6px;
+  text-decoration: underline;
+  font-weight: 700;
+}
+.sound-notice {
+  margin: 0;
+  padding: 6px 16px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--text);
+  background: var(--panel);
 }
 .rec-controls {
   margin-top: auto;

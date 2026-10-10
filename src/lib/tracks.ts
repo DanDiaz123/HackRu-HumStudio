@@ -1,4 +1,5 @@
 import { DEFAULT_HARMONY, voiceChords } from "./music/harmony.ts";
+import { presetForTrack } from "./audio/instrument-presets.ts";
 import type { Note, QuantizeDivision } from "./music/types";
 
 export type { Note, QuantizeDivision };
@@ -15,6 +16,8 @@ export interface Instrument {
 
 export interface Track {
   instrument: Instrument;
+  /** Serializable playback sound; category identity and MIDI notes stay unchanged. */
+  presetId: string;
   notes: Note[];
   muted: boolean;
   solo: boolean;
@@ -69,7 +72,7 @@ function sampleDrums(): Note[] {
 export function initialTracks(): Track[] {
   return INSTRUMENTS.map((instrument) => {
     const notes = instrument.id === "drums" ? sampleDrums() : instrument.id === "keys" ? voiceChords(DEFAULT_HARMONY) : [];
-    return { instrument, notes, muted: false, solo: false, sample: notes.length > 0 };
+    return { instrument, presetId: presetForTrack(instrument.id).id, notes, muted: false, solo: false, sample: notes.length > 0 };
   });
 }
 

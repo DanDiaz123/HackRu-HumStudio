@@ -4,10 +4,10 @@ let engine: PlaybackEngine | null = null;
 let initializing: Promise<PlaybackEngine> | null = null;
 let lifecycle = 0;
 
-/** The live engine once a Play click has unlocked audio; null before that and after dispose. */
+/** The live engine after a user gesture unlocks audio; null before that and after dispose. */
 export const getEngine = () => engine;
 
-/** Initialize browser-only synthesis from a real Play click; concurrent calls share one engine. */
+/** Initialize browser audio from a Play, Record, or Sound-selection gesture; concurrent calls share one engine. */
 export async function ensureAudio(): Promise<PlaybackEngine> {
   if (typeof window === "undefined") throw new Error("Playback is only available in a browser.");
   if (initializing) return initializing;
