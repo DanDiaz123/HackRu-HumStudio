@@ -15,6 +15,8 @@ import {
   harmonyLabel,
   inferHarmony,
   keyName,
+  romanNumeral,
+  scaleDegree,
   voiceChords,
   withKey,
 } from "@/lib/music/harmony";
@@ -48,6 +50,7 @@ function readout(beat: number) {
 export default function Studio() {
   const [tracks, setTracks] = useState<Track[]>(initialTracks);
   const [harmony, setHarmony] = useState(DEFAULT_HARMONY);
+  const [learn, setLearn] = useState(true);
   const [bpm, setBpm] = useState(120);
   const [quantize, setQuantize] = useState<QuantizeDivision>("1/4");
   const [zoomedId, setZoomedId] = useState<string | null>(null);
@@ -335,6 +338,8 @@ export default function Studio() {
     setTracks((ts) => ts.map((t) => (t.instrument.id === id ? { ...t, [key]: !t[key] } : t)));
   }
 
+  const noteLabel = (m: number) => `${midiName(m).replace(/-?\d+$/, "")} ${scaleDegree(m, harmony) ?? "·"}`;
+
   const rowH = (id: string) => {
     if (!zoomedId) return Math.max(56, avail / tracks.length);
     return id === zoomedId ? Math.max(240, avail - COLLAPSED_H * (tracks.length - 1)) : COLLAPSED_H;
@@ -361,6 +366,7 @@ export default function Studio() {
             setMetronome(!metronome);
           }}>M</button>
           <button className={countIn ? "t-btn play" : "t-btn"} aria-label="Four-beat count-in" title="Four-beat count-in before playback" aria-pressed={countIn} disabled={busy} onClick={() => setCountIn(!countIn)}>4</button>
+          <button className={learn ? "t-btn learn play" : "t-btn learn"} title="Learn: chords and scale degrees" aria-pressed={learn} onClick={() => setLearn(!learn)}>Learn</button>
           <output ref={posRef} className="position" aria-label="Position, bar.beat.sixteenth">
             1.1.1
           </output>
@@ -420,6 +426,19 @@ export default function Studio() {
         </div>
       </div>
 
+      {learn && (
+        <section className="chord-row" aria-label="Song theory">
+          <div className="ruler-corner chord-corner">{keyName(harmony)}</div>
+          <ol className="chord-strip">
+            {harmony.bars.map((c, bar) => (
+              <li key={bar} className="chord-cell" style={{ left: `${beatX(bar * 4)}%` }}>
+                <b>{chordName(c)}</b> <span>{romanNumeral(c, harmony)}</span>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+
       <div className="rows" ref={rowsRef} style={{ gridTemplateRows: tracks.map((t) => `${rowH(t.instrument.id)}px`).join(" ") }}>
         {tracks.map((t) => (
           <TrackRow
@@ -432,6 +451,7 @@ export default function Studio() {
             error={error}
             frames={frames}
             pending={pending}
+            noteLabel={learn ? noteLabel : undefined}
             demo={demo}
             elapsed={elapsed}
             stage={stage}

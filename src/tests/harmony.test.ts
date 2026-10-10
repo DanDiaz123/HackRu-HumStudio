@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { DEFAULT_HARMONY, chordName, detectKey, fitToHarmony, inferHarmony, pickChords, snapToScale, voiceChords, withKey } from "../lib/music/harmony.ts";
+import { DEFAULT_HARMONY, chordName, detectKey, fitToHarmony, inferHarmony, pickChords, romanNumeral, scaleDegree, snapToScale, voiceChords, withKey } from "../lib/music/harmony.ts";
 import { INSTRUMENTS, type Note } from "../lib/tracks.ts";
 
 const note = (midi: number, startBeat: number, durationBeats = 1): Note => ({ id: `${midi}-${startBeat}`, midi, startBeat, durationBeats, velocity: 0.8 });
@@ -62,4 +62,12 @@ test("withKey moves the sample progression to a picked key, or re-picks from the
   assert.deepEqual(withKey({ tonic: 2, mode: "major" }, []).bars.slice(0, 4).map(chordName), ["Bm", "G", "D", "A"]);
   const fromMelody = withKey({ tonic: 7, mode: "major" }, [...seq([67, 71, 74, 71])]);
   assert.equal(chordName(fromMelody.bars[0]), "G");
+});
+
+test("Learn mode names chords and scale degrees", () => {
+  const C = { tonic: 0, mode: "major" } as const;
+  assert.deepEqual([[0, 4, 7], [5, 9, 0], [7, 11, 2], [9, 0, 4], [11, 2, 5], [1, 5, 8]].map((c) => romanNumeral(c, C)), ["I", "IV", "V", "vi", "vii°", "?"]);
+  assert.deepEqual([[9, 0, 4], [2, 5, 9], [4, 7, 11]].map((c) => romanNumeral(c, { tonic: 9, mode: "minor" })), ["i", "iv", "v"]);
+  assert.equal(scaleDegree(64, C), 3);
+  assert.equal(scaleDegree(61, C), null);
 });

@@ -20,6 +20,8 @@ interface Props {
   error: string;
   frames: HumFrame[];
   pending: Note[];
+  /** Learn mode: text set inside each note bar of the zoomed lane. */
+  noteLabel?: (midi: number) => string;
   demo: boolean;
   elapsed: number;
   stage: number;
@@ -34,7 +36,7 @@ interface Props {
 
 const lastBeat = (notes: Note[]) => Math.max(1, ...notes.map((n) => n.startBeat + n.durationBeats));
 
-function NoteBars({ notes, inst, reveal }: { notes: Note[]; inst: Instrument; reveal?: boolean }) {
+function NoteBars({ notes, inst, reveal, label }: { notes: Note[]; inst: Instrument; reveal?: boolean; label?: (midi: number) => string }) {
   const h = noteH(inst);
   const end = lastBeat(notes);
   return notes.map((n) => (
@@ -50,7 +52,9 @@ function NoteBars({ notes, inst, reveal }: { notes: Note[]; inst: Instrument; re
           "--d": `${(n.startBeat / end) * REVEAL_SEC}s`,
         } as CSSProperties
       }
-    />
+    >
+      {label && <span className="note-label">{label(n.midi)}</span>}
+    </span>
   ));
 }
 
@@ -83,6 +87,7 @@ export default function TrackRow(p: Props) {
   const name = inst.name;
   const hasNotes = track.notes.length > 0;
   const style = { "--flood": inst.color } as CSSProperties;
+  const labels = inst.kind === "drums" ? undefined : p.noteLabel;
 
   if (!zoomed) {
     const bars = track.notes.map((n) => Math.floor(n.startBeat / 4));
@@ -169,9 +174,9 @@ export default function TrackRow(p: Props) {
         )}
         <div className="notes-area">
           {phase === "revealing" ? (
-            <NoteBars notes={p.pending} inst={inst} reveal />
+            <NoteBars notes={p.pending} inst={inst} reveal label={labels} />
           ) : (
-            !working && <NoteBars notes={track.notes} inst={inst} />
+            !working && <NoteBars notes={track.notes} inst={inst} label={labels} />
           )}
         </div>
         {phase === "generating" && (
