@@ -1,6 +1,6 @@
 # HumStudio - Software Design Document (SDD)
 
-**Status:** Studio UI, note editing, and deterministic melodic generation implemented; physical-microphone tuning, human listening, and persistence pending
+**Status:** Studio UI, note editing, deterministic generation, undo/redo, and project persistence implemented; physical-microphone tuning and human listening pending
 **Version:** 1.1 (multi-track revision)
 **Date:** 2026-10-10
 **Event:** HackRU Fall 2026  
@@ -15,7 +15,7 @@
 
 ## 1. Executive summary
 
-HumStudio is a browser-based, voice-first music composition tool laid out like a familiar DAW: five instrument tracks (Melody, Bass, Keys, Drums, Strings) over an 8-bar 4/4 timeline. The user opens a track, records a short **monophonic** hum, watches a live spectrogram, edits generated notes, and plays the arrangement through Tone.js with mute/solo. Multi-track MIDI export is implemented; project save/reopen is planned.
+HumStudio is a browser-based, voice-first music composition tool with five instrument tracks over an 8-bar 4/4 timeline. A user records a short monophonic hum, watches the spectrogram, edits generated notes, and plays the arrangement with mute/solo. MIDI export, project autosave/Save/Open, and undo/redo are implemented.
 
 The project's differentiator is the interface: a person can express a melody with their voice instead of entering notes one at a time. Pitch detection uses Pitchy and deterministic DSP segmentation, with rule-based instrument roles. No trained model or generation backend is implemented.
 
@@ -27,7 +27,7 @@ The project's differentiator is the interface: a person can express a melody wit
 4. Stop. A "Setting the session" loading state runs, then the generated notes set in left to right over a ghost of the hum.
 5. Return to all tracks and press **Play** to hear the arrangement; mute/solo tracks.
 6. Drag one wrong note to a new pitch, then play again.
-7. Export a `.mid` file; *(planned)* save the project to a `.humstudio.json` file.
+7. Export a `.mid` file or save the project to a `.humstudio.json` file.
 
 ## 2. Problem, users, and goals
 
@@ -62,7 +62,7 @@ Music software expects users to translate ideas into piano-roll clicks, keyboard
 
 | Tier | Deliverables | Rationale |
 |---|---|---|
-| **P0 - demo-critical** | Five-instrument arrangement view **(built)**; click-to-zoom track **(built)**; mic permission and capture with live spectrogram **(built)**; loading state and animated note reveal **(built)**; Tone.js playback of all tracks with mute/solo, BPM, play/pause/stop/rewind **(built)**; multi-track MIDI export **(built)**; demo-hum fallback and error states **(built)**; deterministic melodic generation (pitch, segmentation, quantization) **(built; real-device tuning pending)**; drag notes to change pitch/time and basic length edit *(planned)*; local autosave and JSON project export/import for all tracks *(planned)* | Completes the end-to-end promise and makes the output reusable. |
+| **P0 - demo-critical** | Five-instrument arrangement view **(built)**; click-to-zoom track **(built)**; mic permission and capture with live spectrogram **(built)**; loading state and animated note reveal **(built)**; Tone.js playback of all tracks with mute/solo, BPM, play/pause/stop/rewind **(built)**; multi-track MIDI export **(built)**; demo-hum fallback and error states **(built)**; deterministic melodic generation (pitch, segmentation, quantization) **(built; real-device tuning pending)**; drag notes to change pitch/time and basic length edit **(built)**; local autosave and JSON project export/import for all tracks **(built)** | Completes the end-to-end promise and makes the output reusable. |
 | **P1 - polish** | Four-beat playback count-in and metronome **(built; listening pending)**; recording count-in with click **(built; listening pending)**; manual add/delete; undo/redo; instrument sound polish; confirm before overwriting a generated part | Increases demo clarity and resilience. |
 | **P2 - stretch** | Generation backend or ML arrangement model; Supabase login/cloud saves; uploaded audio; MIDI import; chord estimation; user-created tracks; collaboration | Valuable later, but not required to demonstrate the core product. |
 
@@ -108,7 +108,7 @@ flowchart TD
     Pitch --> Gen[generateTrack: segment / quantize / fit to instrument]
     Gen --> State[Studio state: Track array]
     UI <--> State
-    State --> Piano[Track lanes: render, reveal, edit planned]
+    State --> Piano[Track lanes: render, reveal, edit]
     State --> Playback[Tone.js Transport + smplr / synth fallback]
     State --> Save[Local storage + JSON file]
     State --> Midi[@tonejs/midi export]
@@ -124,7 +124,7 @@ flowchart TD
 | Component/module | Responsibility | Status |
 |---|---|---|
 | `src/components/Studio.tsx` | App shell: transport bar, ruler, row layout, canonical `Track[]` state, record → generate → reveal flow, playhead. | Built |
-| `src/components/TrackRow.tsx` | One track: arrangement clip or zoomed lane with prompts, phases, pitch labels, note reveal. | Built (note editing planned) |
+| `src/components/TrackRow.tsx` | One track: arrangement clip or zoomed lane with prompts, phases, pitch labels, note reveal, and editing gestures. | Built |
 | `src/components/Spectrogram.tsx` | Live halftone canvas of the hum on the lane's pitch axis. Display only. | Built |
 | `src/lib/tracks.ts` | `Instrument`, `Track`, `INSTRUMENTS`, labeled sample parts, lane geometry helpers. | Built (shared contract) |
 | `src/lib/hum.ts` | `getUserMedia`, AnalyserNode, Pitchy pitch/RMS gating, `HumFrame` stream, demo hum, teardown, mic error messages. | Built (needs real-mic testing) |
@@ -133,7 +133,7 @@ flowchart TD
 | `src/lib/midi.ts` | `Track[]` → multi-track `.mid` download. | Built |
 | `src/lib/music/types.ts` | Shared `Note`/`QuantizeDivision` contract. `Project`/`PitchFrame` and shared timing/grid helpers remain targets; implemented segment types live in `audio/segment-notes.ts`. | Built (`Note` only) |
 | `src/lib/audio/segment-notes.ts` | Stabilize gated `HumFrame` pitch into second-based segments with rest boundaries. | Built (synthetic regression fixtures; real-device tuning pending) |
-| `src/lib/persistence/local-project.ts` | Validate/store/reopen multi-track project JSON. | Planned |
+| `src/lib/persistence/project.ts` | Validate/store/reopen multi-track project JSON, with v1 migration. | Built |
 
 ### Data flow: capture to MIDI notes
 
@@ -206,7 +206,7 @@ interface Track { instrument: Instrument; presetId: string; notes: Note[]; muted
 
 `Studio.tsx` holds `Track[]` (one per instrument in `INSTRUMENTS`), plus `bpm` and `quantize`. `sample: true` marks preset parts shown with a "Sample" label until a recording replaces them. Drum notes use General MIDI kit numbers (36 kick, 38 snare, 42 closed hat, 46 open hat, 49 crash).
 
-**Saved format is not decided yet.** `Project` v1 above stores one flat `notes[]`. Saving the multi-track arrangement needs a versioned format (for example `schemaVersion: 2` with `tracks: { instrumentId, presetId, notes, muted, solo }[]`) with an explicit migration from v1. Missing legacy preset IDs receive category defaults; unknown/cross-category selections reject. Person 4 owns this decision ([`WORKLOAD_SPLIT.md`](WORKLOAD_SPLIT.md)); do not silently change `Project` v1.
+**Saved format:** schema v2 stores all tracks, sounds, notes, mute/solo/sample flags, BPM, Snap, Sensitivity, harmony, and metadata. The original v1 note list migrates to Melody. Missing legacy preset IDs receive category defaults; invalid selections and unexpected fields reject. Runtime take/profile caches are not serialized. See `src/lib/persistence/project.ts` and `TECHNICAL_SPEC.md` §3.1.
 
 ## 8. Audio analysis design
 
@@ -275,18 +275,18 @@ A 1/16-note grid is `0.25` quarter-note beats; 1/8 is `0.5`, 1/4 is `1.0`. Snap 
 
 ### Proposed state ownership
 
-Today `Studio.tsx` owns `Track[]`, BPM, and quantize in React state and replaces arrays immutably. As editing and persistence land, move to one reducer with track-scoped actions such as `REPLACE_TRACK_NOTES`, `MOVE_NOTE`, `RESIZE_NOTE`, `DELETE_NOTE`, `TOGGLE_MUTE`, `SET_BPM`, `LOAD_PROJECT`. Audio objects/streams/timers stay in refs or service modules, **not** in serializable state.
+Today `Studio.tsx` owns tracks and settings in React state, replaces arrays immutably, and synchronizes an arrangement ref for asynchronous operations. Undo/redo snapshots also preserve metadata, key decisions, capture tempo, cached sensitivity variants, and original Snap sources. Open validates before applying and clears capture caches. A future reducer may consolidate these track-scoped mutations. Audio objects/streams/timers stay in refs or service modules, **not** in serializable state.
 
 ## 11. Persistence and export
 
-### Project JSON (planned)
+### Project JSON (implemented)
 
 - Save **all tracks** (instrument id, notes, mute/solo) plus BPM and quantize, in the versioned multi-track format from section 7.
-- Autosavevalid project JSON to `localStorage` key `humstudio:project:v1` after a short debounce.
+- Autosave project JSON to `localStorage` key `humstudio:project:v2` after a 400 ms debounce; skip incomplete recording states.
 - **Save Project:** download `<safe-name>.humstudio.json`.
 - **Open Project:** use an explicit user-selected `.json` file, validate schema/invariants, then replace current project on success only.
 - Handle unavailable/blocked/full local storage with a nonfatal UI warning.
-- Schema migration is out of scope for MVP; unsupported `schemaVersion` produces a helpful error.
+- v1 files migrate to Melody; unsupported versions or invalid input produce a helpful error without replacing notes.
 
 ### MIDI
 
@@ -314,7 +314,7 @@ Today `Studio.tsx` owns `Track[]`, BPM, and quantize in React state and replaces
 ### Automated checks
 
 - Implemented: TypeScript regressions using Node's built-in test runner cover playback, preset loading/voices, harmony, segmentation, generation, cached settings, microphone resource cleanup, and MIDI encoding. Fixtures include wobbles/dropouts, real rests, all three profiles, preserved Melody pitches, capture-tempo Snap, invalid input, stale callbacks, fallback/retry, sample lifetimes, independent MIDI channels, and download cleanup. Preset browser evidence and remaining human checks are in [`SMPLR_INTEGRATION.md`](SMPLR_INTEGRATION.md).
-- Target: round-trip test where project -> JSON -> validated project retains BPM, note count, positions and pitches.
+- Implemented: project JSON round-trip and v1 migration tests retain BPM, notes, settings, and track flags; malformed, oversized, and unexpected fields reject before changing the studio.
 - Implemented: time-stamped synthetic `HumFrame[]` fixtures with known pitches, vibrato, short noise, and dropouts.
 
 ### Manual test matrix

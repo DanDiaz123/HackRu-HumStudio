@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { Midi } from "@tonejs/midi/dist/Midi.js";
-import { createMidiBytes, exportMidi } from "../lib/midi.ts";
+import { createMidiBytes, exportMidi, midiBytes } from "../lib/midi.ts";
+import { download } from "../lib/download.ts";
 import { playbackFixtureTracks } from "./fixtures/playback.ts";
 
 test("MIDI preserves beat timing and tempo for every nonempty instrument", () => {
@@ -133,4 +134,36 @@ test("MIDI download revokes its URL when anchor creation fails", (t) => {
   assert.equal(state.clicks, 0);
   assert.deepEqual(state.delays, [1000]);
   assert.deepEqual(state.revoked, ["blob:humstudio-test"]);
+});
+
+test("both MIDI encoder names preserve isolated channels and reject invalid inputs", () => {
+  const tracks = playbackFixtureTracks();
+  assert.equal(midiBytes, createMidiBytes);
+  assert.deepEqual(midiBytes(tracks, 120), createMidiBytes(tracks, 120));
+  for (const encode of [midiBytes, createMidiBytes]) {
+    assert.throws(() => encode(tracks, 0), RangeError);
+    assert.throws(() => encode([{ ...tracks[0], notes: [{ ...tracks[0].notes[0], durationBeats: -1 }] }], 120), RangeError);
+    const midi = new Midi(encode(tracks, 120));
+    assert.equal(new Set(midi.tracks.map(track => track.channel)).size, 5);
+  }
+});
+
+test("shared file download preserves project content and revokes URLs on either DOM failure", async (t) => {
+  for (const failure of [undefined, "create", "click"] as const) {
+    await t.test(failure ?? "successful download", async (subtest) => {
+      const { state, element } = mockDownload(subtest, failure);
+      const content = '{"schemaVersion":2}';
+      if (failure) assert.throws(() => download(content, "application/json", "idea.humstudio.json"), /failed/);
+      else {
+        download(content, "application/json", "idea.humstudio.json");
+        assert.equal(element.download, "idea.humstudio.json");
+        assert.equal(element.href, "blob:humstudio-test");
+        assert.equal(state.clicks, 1);
+      }
+      assert.equal(state.blobs[0].type, "application/json");
+      assert.equal(await state.blobs[0].text(), content);
+      assert.deepEqual(state.delays, [1000]);
+      assert.deepEqual(state.revoked, ["blob:humstudio-test"]);
+    });
+  }
 });

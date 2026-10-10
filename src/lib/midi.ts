@@ -1,4 +1,5 @@
 import * as MidiModule from "@tonejs/midi";
+import { download } from "./download.ts";
 import type { Track } from "./tracks";
 
 // Node exposes the package's UMD build as default; the browser bundler exposes named exports.
@@ -42,14 +43,11 @@ export function createMidiBytes(tracks: readonly Track[], bpm: number): Uint8Arr
   return midi.toArray();
 }
 
+/** Compatibility name used by project export; shares the same validation and channel handling. */
+export const midiBytes = createMidiBytes;
+
 /** Download a local MIDI file; sound selections, mute, and solo do not remove stored notes. */
-export function exportMidi(tracks: Track[], bpm: number): void {
+export function exportMidi(tracks: readonly Track[], bpm: number): void {
   const bytes = createMidiBytes(tracks, bpm);
-  const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: "audio/midi" }));
-  try {
-    const a = Object.assign(document.createElement("a"), { href: url, download: "humstudio.mid" });
-    a.click();
-  } finally {
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }
+  download(bytes as BlobPart, "audio/midi", "humstudio.mid");
 }

@@ -10,7 +10,7 @@ This file tells implementers **what to build, which interfaces to share, what ed
 
 ## 0. Implementation priorities
 
-- **P0:** Five instrument tracks over 8 bars of 4/4 **(implemented)**; click-to-zoom **(implemented)**; BPM/play/pause/stop/rewind, mute/solo **(implemented)**; microphone acquisition, live spectrogram, loading state, animated reveal **(implemented)**; multi-track MIDI export **(implemented)**; clear errors and Demo hum fallback **(implemented)**; monophonic hum-to-notes for the selected instrument with Off/1/4/1/8/1/16 quantization **(implemented; real-microphone tuning pending)**; note editing in the zoomed track *(target)*; local autosave and JSON import/export of all tracks *(target)*.
+- **P0:** Five instrument tracks over 8 bars of 4/4 **(implemented)**; click-to-zoom **(implemented)**; BPM/play/pause/stop/rewind, mute/solo **(implemented)**; microphone acquisition, live spectrogram, loading state, animated reveal **(implemented)**; multi-track MIDI export **(implemented)**; clear errors and Demo hum fallback **(implemented)**; monophonic hum-to-notes for the selected instrument with Off/1/4/1/8/1/16 quantization **(implemented; real-microphone tuning pending)**; note editing in the zoomed track **(implemented)**; local autosave and JSON import/export of all tracks **(implemented)**; undo/redo and keyboard shortcuts **(implemented)**.
 - **P1:** Four-beat playback count-in and metronome **(implemented; listening pending)**; recording count-in with click **(implemented; listening pending)**; manual note creation/deletion; undo/redo; instrument sound polish; confirm before overwriting a generated part.
 - **P2:** Generation backend or ML model, Supabase, imported audio, effects, user-created tracks, collaboration.
 
@@ -29,7 +29,7 @@ This file tells implementers **what to build, which interfaces to share, what ed
 | Pitch | `pitchy` | `PitchDetector.forFloat32Array(4096)`. |
 | MIDI | `@tonejs/midi` | Encode a Standard MIDI File in browser. |
 | State | React state in `Studio.tsx` (implemented); `useReducer` when editing/persistence land | Canonical `Track[]`; no Zustand/Redux. |
-| Persistence | `localStorage` + browser file download/upload | *Target.* No auth/backend in MVP. |
+| Persistence | `localStorage` + browser file download/upload | Implemented (`src/lib/persistence/project.ts`). No auth/backend in MVP. |
 | Testing | TypeScript + Node's built-in test runner | Playback, harmony, segmentation, and generation fixtures implemented. Manual browser checks remain required. |
 
 Recommended: Node.js >= 20.9, npm, Chrome or Edge on desktop. Verify chosen package versions against the lockfile; do not rely on unverified snippets from a different Tone.js major version.
@@ -82,7 +82,7 @@ src/
       segment-notes.ts       # implemented: segmentPitchFrames(), tunable configuration
       note-sensitivity.ts    # implemented: centralized Low/Medium/High tuning profiles
     persistence/
-      local-project.ts       # target: multi-track save/load
+      project.ts             # implemented: strict v2 validation/save/load and v1 migration
   tests/                     # implemented: playback, harmony, segmentation, generation fixtures
 ```
 
@@ -179,18 +179,20 @@ export const MAX_RECORD_SEC = 15;
 
 Lane geometry is derived in percent: `beatX(beat) = beat / 32 * 100`, `noteY(midi, inst) = (hi - midi) / rows * 100`. Never store pixel coordinates.
 
-**Saved format (target).** `Project` v1 cannot hold tracks. The multi-track save format must be a new version, for example:
+**Saved format (implemented, `src/lib/persistence/project.ts`).** `Project` v1 cannot hold tracks, so files are schema v2:
 
 ```ts
 interface ProjectV2 {
   schemaVersion: 2;
   id: string; name: string; bpm: number; quantize: QuantizeDivision;
-  tracks: { instrumentId: string; presetId: string; notes: Note[]; muted: boolean; solo: boolean }[];
+  sensitivity: NoteSensitivity; // optional on read; defaults to Medium
+  harmony: Harmony;             // key + 8 triads
+  tracks: { instrumentId: string; presetId: string; notes: Note[]; muted: boolean; solo: boolean; sample: boolean }[];
   createdAt: string; updatedAt: string;
 }
 ```
 
-Person 4 decides the final shape; add it to `types.ts` and notify the team rather than changing `Project` v1 in place. A v1 file should load as the Melody track.
+A v1 file loads as the Melody track (other tracks empty, harmony inferred from it). Missing tracks load empty; a missing `presetId` gets the default sound.
 
 ### 3.2 Capture frame (implemented, `src/lib/hum.ts`)
 
@@ -470,7 +472,7 @@ Do **not** label a DSP pitch detector as a trained neural model unless a model i
 
 ### 8.1 Track lanes and note editing (implemented)
 
-- **Layout:** transport uses one compact row on desktop, two fixed rows at <=860 px, and three at <=480 px. The ruler is 28 px; five track rows share remaining height (min 56 px). Each row is a 232 px header (104 px at <=720 px) plus a lane. Zoomed names and the Key/Sensitivity labels remain visible. Zooming animates `grid-template-rows` while other tracks collapse to 36 px.
+- **Layout:** transport uses one compact row on desktop and wraps intact groups below 1060 px; below 480 px it uses brand/actions, transport, and settings rows. The ruler is 28 px; five track rows share remaining height (min 56 px). Each row is a 232 px header (104 px at <=720 px) plus a lane. Zoomed names and Key/Sensitivity labels remain visible. Zooming animates row heights while other tracks collapse to 36 px.
 - 4/4 time, 8 bars (beats 0..32), fitted to the lane width.
 - Vertical rows: one per semitone of the instrument's range (`Instrument.lo..hi`), or five named drum rows. C rows are labeled in the zoomed lane; the ruler corner shows the range (e.g. "C4-C6").
 - Coordinate mapping in percent of the lane: `x = beat / 32` and `y = (inst.hi - midi) / rows`.
@@ -486,11 +488,11 @@ Do **not** label a DSP pitch detector as a trained neural model unless a model i
 
 ### 8.2 Transport and recording controls
 
-- **Transport bar (implemented):** wordmark, Rewind, Play/Pause toggle (pause preserves position), separate Stop (resets to zero), metronome toggle, four-beat playback count-in toggle, position readout `bar.beat.sixteenth`, BPM number input (60-180), Key select (24 keys) with the first four bars' chords, Snap select (Off, 1/4, 1/8, 1/16), Sensitivity select (Low, Medium, High), Export MIDI. *Target:* Save Project, Open Project.
+- **Transport bar (implemented):** wordmark, Rewind, Play/Pause, Stop, metronome, count-in, position, BPM, Key/chords, Snap (Off/1/4/1/8/1/16), Sensitivity (Low/Medium/High), Undo, Redo, Open project, Save project, keyboard shortcut help, and Export MIDI.
 - **Zoomed header (implemented):** All tracks (back), instrument name, hint, Record / Stop / Re-record, Demo hum, and a status line with a filled-or-hollow mark plus text (e.g. "Demo hum 0:05.2", "Generating", "8 notes").
 - A first Play or Record gesture awaits `Tone.start()`. Recording shares Tone's audio context and click clock; microphone analysis never connects to the speakers.
 - **Defaults (implemented):** BPM = 120, quantization = 1/4, sensitivity = Medium, matching `Studio.tsx`. The original v1 Project baseline still specifies 1/16 quantization.
-- **Replace rule (implemented):** a successful take **replaces that track's notes** after the reveal; a failed or empty take changes nothing. The button reads "Re-record" when the track already holds a generated part. *P1:* confirm before overwriting a non-sample part.
+- **Replace rule (implemented):** confirm before recording over a non-sample part. A successful take replaces notes after reveal and is undoable; failed/empty takes retain them. Re-record labels fit compact sidebars.
 
 ### 8.3 Keyboard/accessibility
 
@@ -552,7 +554,7 @@ Contract and lifecycle:
 
 ### Per-track sample selection and lifecycle
 
-`instrument-presets.ts` holds 20 options (Melody 5, Bass 4, Keys 4, Strings 4, Drums 3), validated against installed smplr catalogs. The full catalog, exclusions, and verification are in [`SMPLR_INTEGRATION.md`](SMPLR_INTEGRATION.md). `presetForTrack(category, undefined)` supplies a missing legacy field's default; unknown/cross-category IDs reject before any schedule changes. Future JSON import must apply this migration and validation. Persistence itself is still unimplemented.
+`instrument-presets.ts` holds 20 options (Melody 5, Bass 4, Keys 4, Strings 4, Drums 3), validated against installed smplr catalogs. The full catalog, exclusions, and verification are in [`SMPLR_INTEGRATION.md`](SMPLR_INTEGRATION.md). `presetForTrack(category, undefined)` supplies a missing legacy field's default; unknown/cross-category IDs reject before any schedule changes. Project imports apply the same migration and validation (§10).
 
 The labeled native selector sits directly beneath each expanded title. Changing it updates only that track's `presetId`; note arrays, IDs, pitch/timing, mute/solo, and category remain unchanged. Loading and fallback status stay outside serializable state. Play awaits audible selections; an explicit choice preloads even an empty track. Audio starts only on a user gesture.
 
@@ -562,7 +564,7 @@ Sample resources are leased by independent voices and disposed only after their 
 
 ## 10. Project persistence
 
-**Status: target (Person 4).** Must save **every track** (instrument id, preset id, notes, mute/solo) plus BPM and quantize, using the versioned format from 3.1. Missing legacy preset IDs receive defaults; unknown/cross-category IDs reject. The v1 contract below remains the baseline and must stay loadable.
+**Status: implemented in `src/lib/persistence/project.ts`.** `parseProject(text)` validates the whole file or throws a user-facing message, and the studio only changes after it succeeds: size <= 2,000,000 chars, BPM 60..180, known Snap/Sensitivity, harmony shape with distinct chord tones, known instruments (no duplicates), known sounds per category, <= 10,000 notes, unique note IDs, `isValidNote` including `startBeat + durationBeats <= 32`, strings <= 200 chars, parseable timestamps. Unexpected fields reject at project, track, harmony, and note boundaries; values are never coerced to sound IDs. Save snapshots copy note/harmony arrays and omit capture analysis. `serializeProject` writes v2. Studio autosaves to `localStorage["humstudio:project:v2"]` 400 ms after a change (skipped mid-take, when the part being re-recorded is briefly empty), restores it once after mount (a bad save is ignored), shows a notice if storage is blocked, and offers Save (download) and Open (file picker; undoable). Generation, profile swaps, Add, and Repeat enforce the same note-count limit. The earlier single-track contract below is kept for reference; v1 files still load.
 
 ### Storage contract
 
@@ -639,7 +641,7 @@ The reference above describes the original v1 seconds mapping; the implemented m
 
 ## 12. State mutations and concurrency
 
-**Today:** `Studio.tsx` keeps `Track[]`, `bpm`, `quantize` in `useState` and replaces arrays immutably (`setTracks(ts => ts.map(...))`). **Target** reducer once editing and persistence land, scoped by track:
+**Today:** `Studio.tsx` owns immutable tracks and settings with a synchronized arrangement ref. Undo/redo snapshots include project metadata, key decisions, capture tempo, all three profile variants, and original Snap sources; only validated project data reaches JSON/autosave. Open resets capture caches and uses imported notes as Snap sources. A future reducer can consolidate the existing track-scoped mutations:
 
 ```ts
 type ProjectAction =
@@ -662,7 +664,7 @@ type ProjectAction =
 
 ### Unit tests (use synthetic fixtures)
 
-`npm test` runs the TypeScript fixtures with Node's test runner: transcription profiles, segmentation, instrument roles, harmony, cached settings, microphone teardown, playback/count-in, sample lifetimes/security, MIDI encoding, and take scoring. Settings regressions cover immediate cached swaps, capture-tempo Snap, Off restoration, key overrides, and manual edits/polyphony. Playback rejects stale callbacks and use after disposal. MIDI verifies timing, independent channels, invalid inputs, and positive tick durations. Real takes in `src/tests/takes/*.json` contain analysis frames only, with hand-written expected notes scored by pitch and onset within 50 ms. JSON persistence and physical-microphone/human-listening checks remain targets; previous browser sample checks are in [`SMPLR_INTEGRATION.md`](SMPLR_INTEGRATION.md).
+`npm test` runs TypeScript fixtures with Node's test runner: transcription profiles, segmentation, instrument roles, harmony, cached settings, microphone teardown, playback/count-in, sample lifetimes/security, MIDI encoding/downloads, editing rules, project validation/migration, and take scoring. Settings tests cover immediate swaps, capture-tempo Snap, Off restoration, key overrides, and edits/polyphony. Playback rejects stale callbacks and use after disposal. MIDI verifies timing, independent channels, invalid inputs, and positive ticks. Project tests exercise untrusted file boundaries and full round trips. Physical-microphone/human-listening checks remain open; current integration checks are in [`AUDIT.md`](AUDIT.md).
 
 | ID | Input | Expected result |
 |---|---|---|
@@ -700,10 +702,10 @@ type ProjectAction =
 - [x] Synthetic WAV through Edge's simulated microphone -> Pitchy -> generation -> note reveal: a held pitch with 100 ms semitone wobbles and 120 ms silent gaps produces one note; stable changes produce three notes at two pitches. Both takes stop their media tracks with no browser errors. This verifies the browser integration, not human-microphone accuracy or listening quality.
 - [x] Sensitivity browser regression (pre-merge branch build): nine generated-WAV recording cases (0.6, 1, and 2 semitone changes at all three levels). Low changes only on the 2-semitone fixture; Medium also changes on 1; High also changes on 0.6. Default/keyboard selection, navigation, busy-state disabling, unchanged existing notes, microphone teardown, and 1280/390/320 px menu layouts pass with no browser errors (2026-10-10). Not re-run after the merge into main's role pipeline; physical-microphone tuning remains open.
 - [ ] Edit note pitch/time/duration; synth reflects changes.
-- [ ] Save JSON, refresh, reopen JSON; every track, BPM, and mute/solo survive.
+- [x] Save JSON, refresh, reopen JSON; project notes, key, BPM, and settings survive. Invalid files preserve the current arrangement; pure round-trip tests also cover track flags.
 - [ ] MIDI export opens in a MIDI application with one track per instrument, correct pitches and tempo.
 - [ ] Stop/cancel/unmount releases mic; browser recording indicator clears.
-- [x] Merge audit: all 141 tests, lint, `npx tsc --noEmit`, and `npm run build` pass (2026-10-10). See [`AUDIT.md`](AUDIT.md) for current browser checks and limitations.
+- [x] Merge audit: all 168 tests, lint, `npx tsc --noEmit`, and `npm run build` pass (2026-10-10). See [`AUDIT.md`](AUDIT.md) for current browser checks and limitations.
 - [x] Automated desktop Edge checks load and play all 20 sampled sounds, preserve note bars and exported MIDI bytes, exercise fallback/retry and rapid/live switching, and confirm one shared audio clock. Output RMS is positive during playback and zero after Pause; this is audio analysis, not human listening.
 - [x] Automated Edge transport checks cover pause/resume, stop, rewind, 60/180 BPM, 32-beat looping, mute/solo, metronome, and playback count-in cancellation. Reload/navigation closes the old audio context. Human listening on the demo laptop remains required.
 
@@ -722,9 +724,9 @@ For a clean 5-10 second single-voice melody, target >= 80% correct stable-note p
 | Silence/no voiced pitch | "We didn't catch a hum. Get closer to the mic and try again." Existing notes kept. **(implemented)** |
 | Generator returns nothing | "No notes came out of that take. Try a longer, steadier hum." Existing notes kept. **(implemented)** |
 | Recording too long | Auto-stop at 15 s or the end of the timeline; process accumulated frames. **(implemented)** |
-| Bad JSON | "This is not a valid HumStudio v1 project." Preserve previous project. |
+| Bad JSON | "This is not a valid HumStudio project: <reason>." Preserve previous project. **(implemented)** |
 | Audio context suspended | Prompt user to click Play/Enable Audio and retry `Tone.start()`. |
-| Storage blocked | Warn that autosave is unavailable and offer Download Project. |
+| Storage blocked | "Autosave isn't available in this browser. Use Save to keep your project." **(implemented)** |
 
 The app ships labeled **Sample** parts (Keys, Drums) and a labeled **Demo hum**. Present them honestly as samples, never as live transcription.
 

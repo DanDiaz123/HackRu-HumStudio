@@ -4,7 +4,7 @@
 
 HumStudio is a browser-based music sketchpad for **HackRU Fall 2026**. It looks like a familiar multi-track editor: one track per instrument (Melody, Bass, Keys, Drums, Strings). Click a track to zoom into it, hum into your microphone while a live spectrogram prints your voice across the lane, and watch the track fill with generated notes. Then play the arrangement or export it as MIDI.
 
-> **Current repository status:** The Next.js studio includes arrangement view, track zoom, live hum spectrogram, animated note reveal, note editing, five-instrument playback, and multi-track MIDI export. Playback supports pause/stop, rewind, mute/solo, metronome, and count-in. **Melodic generation uses deterministic DSP segmentation** with instrument roles and quantization; Drums use RMS-onset heuristics. Sensitivity profiles are cached for immediate switching. Project save/load, physical-microphone tuning, and human listening remain open. See [`WORKLOAD_SPLIT.md`](WORKLOAD_SPLIT.md) for ownership.
+> **Current repository status:** The Next.js studio includes arrangement view, track zoom, live hum spectrogram, note editing, animated reveal, five-instrument playback, and MIDI export. Sensitivity profiles are cached for immediate switching. Undo/redo, collision-aware editing, Clear/Repeat, shortcuts, and project autosave/Save/Open are built. Generation uses deterministic DSP and instrument roles; no trained model is implemented. Physical-microphone tuning and human listening remain open. See [`WORKLOAD_SPLIT.md`](WORKLOAD_SPLIT.md) for ownership.
 
 ## What are we building?
 
@@ -42,9 +42,12 @@ Pick an instrument track
 - [x] **Export:** multi-track `.mid` (drums on MIDI channel 10).
 - [x] **Recover:** mic denial, insecure origin, missing device, and silent takes show a message plus a **Demo hum** fallback; failed takes never erase existing notes.
 - [ ] **Real-device tuning:** validate the DSP generation with human humming on the demo microphone (Person 1).
-- [x] **Edit:** in the zoomed track, drag to move, drag the right edge to resize, click empty space to add, double-click or Delete to remove, arrows to nudge (Shift+arrows resize). Edits snap to the Snap grid.
-- [ ] **Save/reopen:** local autosave and project file import/export for all tracks (Person 4).
-- [ ] **Recording count-in**, undo/redo, instrument polish (if time remains).
+- [x] **Edit:** in the zoomed track, drag to move, drag either edge to stretch, click empty space to add, double-click or Delete to remove, arrows to nudge (Shift+arrows stretch). Edits snap to the Snap grid. Notes on one pitch never overlap: a move onto another note slides to the nearest free spot (or stays put), a stretch stops at the neighbour, and a new note fits the gap.
+- [x] **Undo / redo:** buttons and Ctrl+Z / Ctrl+Shift+Z (Ctrl+Y) for edits, takes, key changes, Sensitivity/Snap regeneration, Clear/Repeat, and Open (100 steps, this session).
+- [x] **Part actions:** Clear a part, or Repeat bars 1–4 onto 5–8. Re-recording a part you recorded or edited asks first.
+- [x] **Save/reopen:** autosaves to this browser and restores on reload; Save downloads a `.humstudio.json` (all tracks, sounds, key/chords, BPM, Snap, Sensitivity); Open validates the whole file before replacing anything. v1 files load as the Melody track.
+- [x] **Keyboard:** Space play/pause, R record/stop, 1–5 open a track, Esc back, M/S mute/solo, K metronome, L Learn, Ctrl+S save, ? for the list.
+- [x] **Recording count-in** (four clicks, then the click continues under the take).
 
 The demo targets **clear, one-note-at-a-time humming** in a reasonably quiet room. It is **not** a full DAW and does not promise transcription of chords or complex singing.
 
@@ -63,7 +66,7 @@ The demo targets **clear, one-note-at-a-time humming** in a reasonably quiet roo
 | Transport / synth fallback | [Tone.js](https://tonejs.github.io/) v15; same underlying audio context as smplr |
 | MIDI export | [`@tonejs/midi`](https://github.com/Tonejs/Midi) |
 | State | React state in `src/components/Studio.tsx` (`Track[]`) |
-| Persistence | Not built yet (planned: local storage + JSON file) |
+| Persistence | `localStorage` autosave + `.humstudio.json` files, schema v2 (`src/lib/persistence/project.ts`) |
 | Cloud / accounts | **None.** Audio never leaves the browser. |
 
 **Important:** Nothing in this repo is a trained AI model. Pitch detection is DSP (Pitchy), and note generation uses deterministic heuristics. Describe it accurately when presenting.
@@ -143,7 +146,7 @@ src/
   tests/                 # playback, presets, harmony, segmentation, generation + synthetic fixtures
 ```
 
-Note editing is implemented in `TrackRow.tsx`; settings updates are coordinated by `src/lib/music/arrangement-settings.ts`. Persistence under `src/lib/persistence/` remains planned. Exact contracts are in [`TECHNICAL_SPEC.md`](TECHNICAL_SPEC.md).
+Note editing lives in `TrackRow.tsx` with pure rules in `src/lib/note-edit.ts`; settings updates use `src/lib/music/arrangement-settings.ts`, and persistence is `src/lib/persistence/project.ts`. Exact contracts are in [`TECHNICAL_SPEC.md`](TECHNICAL_SPEC.md).
 
 ## Key design choices
 
@@ -178,7 +181,7 @@ If the room or mic fails, use **Demo hum** and say it is a demo hum.
 
 ## Privacy and data
 
-Microphone samples are analyzed locally and discarded. Notes and the latest take's analysis features/profile caches remain only in memory today; a hand edit removes that take cache. Nothing is uploaded. Saved projects (once built) will store notes, never audio.
+Microphone samples are analyzed locally and discarded. Latest-take analysis features and sensitivity caches remain in memory only; hand edits remove that part's take cache. Saved projects and autosave contain notes and settings, never audio or analysis frames. Nothing is uploaded.
 
 ## Documentation
 
