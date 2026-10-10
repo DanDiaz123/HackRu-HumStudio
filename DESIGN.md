@@ -18,9 +18,9 @@ colors:
 typography:
   display:
     fontFamily: "Archivo, system-ui, sans-serif"
-    fontSize: "min(84px, 28cqw)"
+    fontSize: "min(84px, 20cqw)"
     fontWeight: 900
-    lineHeight: 0.8
+    lineHeight: 1
     letterSpacing: "-0.005em"
     fontVariation: "'wdth' 62"
   headline:
@@ -189,7 +189,7 @@ Lane grids are drawn with two repeating gradients: bar lines at #2a2a2a and beat
 **Character:** One family in two widths. Condensed 62% black caps are the sleeve lettering (names, the wordmark, prompts, the Record button); normal-width semibold is the console (transport, fields, hints).
 
 ### Hierarchy
-- **Display** (900, min(84px, 28cqw), 0.8, 62% width, caps): the zoomed track's name in its spine; sized against the head container so it always fits the spine.
+- **Display** (900, min(84px, 20cqw), 1, 62% width, caps): the zoomed track's name in its spine; sized against the head container so the longest name also fits with the fallback font.
 - **Headline** (900, clamp(40px, 6vw, 96px), 0.85, 62% width, caps): in-lane prompts ("Hum the melody", "Allow the microphone") and the generating title (clamp(48px, 7vw, 6rem), 0.82).
 - **Title** (900, 24px, 1, 0.01em, 62% width, caps): spine names in the arrangement; the wordmark (26px) and empty-lane "Click to hum" (26px) share it. Collapsed rows drop to 16px; compact layout to 18px.
 - **Title-label** (800, 14px, 0.02em, 62% width, caps): clip labels and the ruler corner. The Record button uses the same voice at 20px with 0.03em.
@@ -204,13 +204,15 @@ Lane grids are drawn with two repeating gradients: bar lines at #2a2a2a and beat
 
 ## Layout
 
-A fixed full-viewport studio (100dvh, no page scroll) in three bands: the 56px transport strip, the 28px bar ruler, and the rows region that fills the rest. Ruler and every row share one two-column grid: a fixed spine column (232px) and a fluid lane spanning 8 bars of 4/4. All lane geometry is derived in percent from beats and pitch; nothing is positioned in stored pixels.
+A fixed full-viewport studio (100dvh, no page scroll) in three bands: the transport strip (56px minimum), the 28px bar ruler, and the rows region that fills the rest. Transport groups wrap onto additional lines when needed; controls keep their intrinsic widths, and the key/chords readout stays visible. Ruler and every row share one two-column grid: a fixed spine column (232px) and a fluid lane spanning 8 bars of 4/4. All lane geometry is derived in percent from beats and pitch; nothing is positioned in stored pixels.
 
 In the arrangement, the five rows divide the available height equally with a 56px floor, so the shelf fills a projector. Zooming a row is a grid-template-rows change: the opened row takes all remaining height (240px floor) while the others collapse to 36px slivers, with their labels and empty prompts removed. Collapsed spines keep their full flood so the ink names stay readable; only their lanes dim to 45% (80% on hover).
 
 Spacing rhythm is small and functional: 16px left gutter for spine text, the wordmark and the ruler corner; 6px insets for clips and between transport controls; 20px between transport groups. The playhead track overlays the lane column only, offset by the spine width.
 
-**Compact (max-width 720px):** the spine column narrows to 104px; field labels, the Export label, the position readout, M/S marks and the instrument hint are hidden; spine names drop to 18px, the wordmark to 18px, and Record to 40px/16px.
+**Compact (max-width 720px):** the spine column narrows to 104px; BPM/Snap field labels, the Export label, the transport position readout, M/S marks and the instrument hint are hidden. The Key label and value remain visible. Spine names drop to 18px; the wordmark is 18px with intrinsic width; Record is 40px/13px with a 12px icon so its contents fit the narrow spine.
+
+Check layout at 320, 390, 720, 800, 1024, and 1280px widths: zoom each of the five tracks and confirm its full name fits, the Key value remains readable, and all toolbar controls stay on screen. Repeat with the fallback font and a longer key/chord label; wrapping must preserve the text.
 
 ## Elevation & Depth
 

@@ -91,12 +91,13 @@ button:disabled {
 
 /* ---------- Transport ---------- */
 .transport {
-  height: 56px;
+  min-height: 56px;
   flex: none;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 20px;
-  padding-right: 16px;
+  gap: 8px 20px;
+  padding: 9px 16px 9px 0;
   background: var(--panel);
   border-bottom: 1px solid var(--line);
 }
@@ -108,6 +109,7 @@ button:disabled {
   font-weight: 900;
   letter-spacing: 0.01em;
   line-height: 1;
+  white-space: nowrap;
 }
 .wordmark span {
   background: var(--text);
@@ -116,6 +118,7 @@ button:disabled {
   margin-right: 3px;
 }
 .transport-group {
+  flex: none;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -144,11 +147,21 @@ button:disabled {
   font-size: 15px;
   font-weight: 600;
   text-align: center;
+  white-space: nowrap;
 }
 .field {
+  flex: none;
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.harmony-field {
+  max-width: 100%;
+}
+.harmony-value {
+  margin-left: 0;
+  min-width: 0;
+  white-space: normal;
 }
 .field span {
   font-size: 11px;
@@ -171,6 +184,7 @@ button:disabled {
   width: 64px;
 }
 .export {
+  flex: none;
   margin-left: auto;
   height: 36px;
   padding: 0 14px;
@@ -180,6 +194,7 @@ button:disabled {
   border: 1px solid #3a3a3a;
   font-size: 14px;
   font-weight: 600;
+  white-space: nowrap;
 }
 .export:hover:not(:disabled) {
   border-color: var(--text);
@@ -417,9 +432,10 @@ button.lane:focus-visible {
 }
 .big-name {
   margin: 18px 0 0;
-  font-size: min(84px, 28cqw);
+  /* Leave room for the longest track name even when the font falls back. */
+  font-size: min(84px, 20cqw);
   font-weight: 900;
-  line-height: 0.8;
+  line-height: 1;
   letter-spacing: -0.005em;
 }
 .hint {
@@ -655,10 +671,11 @@ button.lane:focus-visible {
     --head: 104px;
   }
   .transport {
-    gap: 10px;
+    gap: 8px 10px;
     padding-right: 10px;
   }
   .wordmark {
+    width: auto;
     font-size: 18px;
     padding-left: 10px;
   }
@@ -667,8 +684,11 @@ button.lane:focus-visible {
   .ms {
     display: none;
   }
-  .position {
+  .transport-group .position {
     display: none;
+  }
+  .harmony-field span {
+    display: inline;
   }
   .export {
     padding: 0 10px;
@@ -691,8 +711,14 @@ button.lane:focus-visible {
   }
   .rec {
     height: 40px;
-    padding: 0 8px;
-    font-size: 16px;
+    padding: 0 4px;
+    gap: 4px;
+    font-size: 13px;
+  }
+  .rec svg {
+    width: 12px;
+    height: 12px;
+    flex: none;
   }
   .ghost-btn {
     padding: 0 6px;

@@ -344,9 +344,9 @@ export default function Studio() {
             }}
           />
         </label>
-        <div className="field" title={`Song chords, one per bar: ${harmonyLabel(harmony)}. A Melody take sets them.`}>
+        <div className="field harmony-field" title={`Song chords, one per bar: ${harmonyLabel(harmony)}. A Melody take sets them.`}>
           <span>Key</span>
-          <output className="position" aria-live="polite">{harmonyLabel(harmony, 4)}</output>
+          <output className="position harmony-value" aria-label="Song key and chords" aria-live="polite">{harmonyLabel(harmony, 4)}</output>
         </div>
         <label className="field">
           <span>Snap</span>

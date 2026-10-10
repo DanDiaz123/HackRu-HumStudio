@@ -418,7 +418,7 @@ Do **not** label a DSP pitch detector as a trained neural model unless a model i
 
 ### 8.1 Track lanes (implemented) and note editing (target)
 
-- **Layout:** transport bar 56 px, ruler 28 px, then five rows sharing the remaining height (min 56 px). Each row is a 232 px header (104 px at <= 720 px) plus a lane. Zooming animates `grid-template-rows` so the selected row takes the space and the others collapse to 36 px.
+- **Layout:** transport bar at least 56 px (groups wrap when needed), ruler 28 px, then five rows sharing the remaining height (min 56 px). Each row is a 232 px header (104 px at <= 720 px) plus a lane. Zoomed names fit the header even with the fallback font; the Key label/readout remains visible in compact layouts. Zooming animates `grid-template-rows` so the selected row takes the space and the others collapse to 36 px.
 - 4/4 time, 8 bars (beats 0..32), fitted to the lane width.
 - Vertical rows: one per semitone of the instrument's range (`Instrument.lo..hi`), or five named drum rows. C rows are labeled in the zoomed lane; the ruler corner shows the range (e.g. "C4-C6").
 - Coordinate mapping in percent of the lane: `x = beat / 32` and `y = (inst.hi - midi) / rows`.
