@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { DEFAULT_HARMONY, chordName, detectKey, fitToHarmony, inferHarmony, pickChords, romanNumeral, scaleDegree, snapToScale, voiceChords, withKey } from "../lib/music/harmony.ts";
+import { DEFAULT_HARMONY, chordName, detectKey, fitToHarmony, inferHarmony, pickChords, romanNumeral, scaleDegree, snapToScale, solfege, voiceChords, withKey } from "../lib/music/harmony.ts";
 import { INSTRUMENTS, type Note } from "../lib/tracks.ts";
 
 const note = (midi: number, startBeat: number, durationBeats = 1): Note => ({ id: `${midi}-${startBeat}`, midi, startBeat, durationBeats, velocity: 0.8 });
@@ -70,4 +70,6 @@ test("Learn mode names chords and scale degrees", () => {
   assert.deepEqual([[9, 0, 4], [2, 5, 9], [4, 7, 11]].map((c) => romanNumeral(c, { tonic: 9, mode: "minor" })), ["i", "iv", "v"]);
   assert.equal(scaleDegree(64, C), 3);
   assert.equal(scaleDegree(61, C), null);
+  assert.deepEqual([60, 64, 67, 61].map((m) => solfege(m, C)), ["do", "mi", "sol", null]);
+  assert.equal(solfege(63, { tonic: 0, mode: "minor" }), "me");
 });

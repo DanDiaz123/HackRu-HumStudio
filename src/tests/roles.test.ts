@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { alignmentSec, generateNotes } from "../lib/generate.ts";
 import type { HumFrame } from "../lib/hum.ts";
 import { DEFAULT_HARMONY, chordsFromVoicing } from "../lib/music/harmony.ts";
-import { INSTRUMENTS } from "../lib/tracks.ts";
+import { INSTRUMENTS, noteRow, pitchRows, rowMidi } from "../lib/tracks.ts";
 import { pitchFrames } from "./fixtures/transcription.ts";
 
 // DEFAULT_HARMONY is C major, Am F C G ×2: bar 0 = A C E, bar 1 = F A C.
@@ -91,4 +91,12 @@ test("a take sung consistently late is shifted back onto the grid", () => {
     { midi: 67, durationSec: 0.235 }, { midi: 72, durationSec: 0.25 },
   ], 0.005), 120, "1/16", DEFAULT_HARMONY);
   assert.deepEqual(notes.map(n => n.startBeat), [0, 0.5, 1, 1.5]);
+});
+
+test("rowMidi inverts noteRow: editing lands on the pitch drawn under the pointer", () => {
+  for (const inst of INSTRUMENTS) {
+    for (let row = 0; row < pitchRows(inst); row++) assert.equal(noteRow(rowMidi(row, inst), inst), row, `${inst.id} row ${row}`);
+    assert.equal(rowMidi(-3, inst), rowMidi(0, inst)); // clamped to the lane
+    assert.equal(rowMidi(999, inst), rowMidi(pitchRows(inst) - 1, inst));
+  }
 });

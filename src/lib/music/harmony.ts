@@ -215,6 +215,18 @@ export function romanNumeral(chord: number[], key: Key): string {
   return name.endsWith("dim") ? `${ROMAN[d].toLowerCase()}°` : name.endsWith("m") ? ROMAN[d].toLowerCase() : ROMAN[d];
 }
 
+// Movable do, do-based minor (the Kodály convention): degree 1 is always "do".
+const SOLFEGE: Record<Mode, string[]> = {
+  major: ["do", "re", "mi", "fa", "sol", "la", "ti"],
+  minor: ["do", "re", "me", "fa", "sol", "le", "te"],
+};
+
+/** Solfège syllable of a note in `key`, or null when it is outside the scale. */
+export function solfege(midi: number, key: Key): string | null {
+  const d = scaleDegree(midi, key);
+  return d === null ? null : SOLFEGE[key.mode][d - 1];
+}
+
 /** Scale degree 1..7 of a note in `key`, or null when it is outside the scale. */
 export function scaleDegree(midi: number, key: Key): number | null {
   const i = SCALES[key.mode].indexOf(pc(midi - key.tonic));

@@ -232,7 +232,7 @@ button:disabled {
   color: var(--muted);
 }
 
-/* ---------- Learn: chord strip ---------- */
+/* ---------- Learn ---------- */
 .t-btn.learn {
   width: auto;
   padding: 0 10px;
@@ -240,43 +240,6 @@ button:disabled {
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-}
-.chord-row {
-  flex: none;
-  display: grid;
-  grid-template-columns: var(--head) 1fr;
-  background: var(--panel);
-  border-bottom: 1px solid var(--line);
-}
-.chord-corner {
-  color: var(--text);
-}
-.chord-strip {
-  position: relative;
-  height: 28px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.chord-cell {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 12.5%;
-  padding-left: 6px;
-  border-left: 1px solid #3a3a3a;
-  line-height: 27px;
-  white-space: nowrap;
-  overflow: hidden;
-}
-.chord-cell b {
-  font-size: 14px;
-  font-weight: 800;
-}
-.chord-cell span {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--muted);
 }
 .note-label {
   display: block;
@@ -675,9 +638,10 @@ button.lane:focus-visible {
   inset: 0;
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  padding-left: 6%;
+  justify-content: flex-end;
+  padding: 0 0 28px 6%;
   overflow: hidden;
+  pointer-events: none;
 }
 .scan {
   position: absolute;
@@ -765,6 +729,141 @@ button.lane:focus-visible {
   box-shadow: 0 0 0 1px rgb(0 0 0 / 0.4);
 }
 
+/* Learn, inside the zoomed track: chords on the bar grid, key and role in the spine, live pitch. */
+.lane-chords {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  pointer-events: none;
+  color: var(--ink);
+}
+.lane-chords li {
+  position: absolute;
+  top: 0;
+  height: 14px;
+  padding: 0 5px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 14px;
+  white-space: nowrap;
+}
+.lane-chords b {
+  font-size: 11px;
+  font-weight: 800;
+}
+.lane-chords li.now {
+  background: var(--ink);
+  color: var(--flood);
+}
+.lane-chords.stamp li {
+  animation: stamp 260ms var(--ease) var(--d) both;
+}
+.theory {
+  margin: 12px 0 0;
+  display: grid;
+  gap: 4px;
+}
+.theory div {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.theory dt {
+  min-width: 34px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.theory dd {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 800;
+}
+.live-pitch {
+  position: absolute;
+  top: 22px;
+  right: 16px;
+  z-index: 1;
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+  color: var(--ink);
+  pointer-events: none;
+}
+.live-pitch b {
+  font-size: 40px;
+  font-weight: 900;
+  line-height: 0.9;
+}
+.live-pitch > span {
+  font-size: 12px;
+  font-weight: 700;
+}
+.tune {
+  position: relative;
+  width: 120px;
+  height: 10px;
+  margin-top: 4px;
+  border-bottom: 1.5px solid var(--ink);
+  background: linear-gradient(var(--ink), var(--ink)) center / 1.5px 100% no-repeat;
+}
+.needle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  margin-left: -2px;
+  background: var(--ink);
+  transition: left 80ms linear;
+}
+
+/* Editing in the zoomed lane */
+.notes-area.editable.on {
+  cursor: crosshair;
+  touch-action: none;
+}
+.notes-area.editable.on .note {
+  cursor: grab;
+}
+.notes-area.editable .note.dragging {
+  cursor: grabbing;
+  opacity: 0.7;
+}
+.note-edge {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: ew-resize;
+}
+.lane.flood .note:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+/* Generation: raw hummed notes print in, then slide to their fitted places */
+.note.raw {
+  opacity: 0.6;
+}
+.note.snap {
+  transition: left 700ms var(--ease), top 700ms var(--ease), width 700ms var(--ease), opacity 400ms ease;
+}
+.note.snap.gone {
+  animation: fade 400ms ease forwards;
+}
+.generating .gen-title {
+  transform-origin: left bottom;
+  animation: stamp 260ms var(--ease) both;
+}
+
+@keyframes stamp {
+  from { opacity: 0; transform: scale(1.15); }
+}
 @keyframes set-in {
   from { clip-path: inset(0 100% 0 0); }
   to { clip-path: inset(0); }
@@ -860,7 +959,8 @@ button.lane:focus-visible {
     transition: none !important;
   }
   .scan,
-  .sweep {
+  .sweep,
+  .needle {
     display: none;
   }
 }

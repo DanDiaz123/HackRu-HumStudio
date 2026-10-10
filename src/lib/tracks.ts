@@ -83,12 +83,18 @@ export function pitchRows(inst: Instrument): number {
   return inst.kind === "drums" ? DRUM_ROWS.length : inst.hi - inst.lo + 1;
 }
 
-function noteRow(midi: number, inst: Instrument): number {
+export function noteRow(midi: number, inst: Instrument): number {
   if (inst.kind === "drums") {
     const i = DRUM_ROWS.findIndex((r) => r.midi === midi);
     return i < 0 ? DRUM_ROWS.length - 1 : i;
   }
   return inst.hi - Math.min(inst.hi, Math.max(inst.lo, midi));
+}
+
+/** Inverse of noteRow: the pitch drawn on lane row `row` (0 = top), clamped to the lane. */
+export function rowMidi(row: number, inst: Instrument): number {
+  const r = Math.min(pitchRows(inst) - 1, Math.max(0, Math.floor(row)));
+  return inst.kind === "drums" ? DRUM_ROWS[r].midi : inst.hi - r;
 }
 
 export const noteY = (midi: number, inst: Instrument) => (noteRow(midi, inst) / pitchRows(inst)) * 100;
