@@ -21,7 +21,8 @@ Live hackathon demo: unknown laptop microphone, browser permission prompts, room
 ## Capabilities and Constraints
 - Multi-track is core (overrides the SDD's single-track P0): tracks per instrument in a DAW-style arrangement view.
 - Flow: click a track to zoom into it, record a hum, a live spectrogram draws over the track while recording, a loading state covers generation, then the music data is revealed with an animation.
-- The hum feeds a generated arrangement for that track, not necessarily a 1:1 transcription. Backend/generation is not built yet; UI work uses mocked data. This changes the docs' DSP-only positioning; how generation works is undecided.
+- The hum feeds a generated arrangement for that track, not necessarily a 1:1 transcription. The UI is built; generation is a mock behind `generateTrack(...)` in `src/lib/generate.ts`. How real generation works (DSP transcription, arrangement, or a backend) is undecided.
+- Five fixed instrument tracks: Melody, Bass, Keys, Drums, Strings.
 - Notes are stored in beats (`Note`: midi, startBeat, durationBeats, velocity), per TECHNICAL_SPEC.md.
 - Raw audio stays on device in the MVP.
 
@@ -29,7 +30,7 @@ Live hackathon demo: unknown laptop microphone, browser permission prompts, room
 Working name "HumStudio" (rename allowed). User-stated reference: should look like a familiar music editor (FL Studio, Chrome Music Lab).
 
 ## Evidence on Hand
-No real recordings, users, or testimonials. Sample melodies must be labeled as samples; never present a preset as live output.
+No real recordings, users, or testimonials. Keys and Drums ship with parts labeled "Sample", and the synthetic input is labeled "Demo hum"; never present either as live output.
 
 ## Product Principles
 1. The hum-to-music moment is the product; everything else supports it.
