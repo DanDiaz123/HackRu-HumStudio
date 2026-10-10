@@ -17,6 +17,7 @@ import {
   beatX,
   midiName,
   noteH,
+  noteId,
   noteRow,
   noteY,
   pitchRows,
@@ -234,7 +235,7 @@ function EditableNotes(p: {
   function add(e: PointerEvent) {
     if (p.disabled || e.button || e.target !== e.currentTarget) return;
     const { beat, row } = at(e);
-    const n: Note = { id: crypto.randomUUID(), midi: rowMidi(row, inst), startBeat: 0, durationBeats: minLen, velocity: 0.8 };
+    const n: Note = { id: noteId(), midi: rowMidi(row, inst), startBeat: 0, durationBeats: minLen, velocity: 0.8 };
     p.onEdit([...notes, { ...n, startBeat: place(n, Math.floor(beat / step) * step) }]);
   }
   function key(e: KeyboardEvent, n: Note) {
