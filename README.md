@@ -61,7 +61,7 @@ The demo targets **clear, one-note-at-a-time humming** in a reasonably quiet roo
 | Browser microphone | `navigator.mediaDevices.getUserMedia`, Web Audio `AnalyserNode` |
 | Fundamental pitch estimation | [Pitchy](https://github.com/ianprime0509/pitchy) |
 | Spectrogram | `<canvas>` halftone drawn from 48 log-spaced bins (80–1000 Hz) |
-| Note generation | `generateTrack(...)` in `src/lib/generate.ts`: local DSP segmentation, harmony fitting, then quantization |
+| Note generation | `generateNotes(...)` in `src/lib/generate.ts`: local DSP segmentation, harmony fitting, then quantization |
 | Sampled sounds | [smplr](https://github.com/danigb/smplr) 1.1.0; selected assets load on demand |
 | Transport / synth fallback | [Tone.js](https://tonejs.github.io/) v15; same underlying audio context as smplr |
 | MIDI export | [`@tonejs/midi`](https://github.com/Tonejs/Midi) |
@@ -138,7 +138,7 @@ src/
   lib/
     tracks.ts            # Instrument, Track, INSTRUMENTS, sample parts, lane geometry
     hum.ts               # startMic (Pitchy) / startDemoHum -> HumFrame stream; mic error messages
-    generate.ts          # generateTrack() async facade / generateNotes() pure DSP pipeline
+    generate.ts          # generateNotes(): pure DSP pipeline, the generation seam
     playback.ts          # browser-only playback facade: schedule, play/pause/stop, position, count-in
     midi.ts              # exportMidi(Track[], bpm) -> humstudio.mid
     music/               # shared contracts: types.ts (Note, QuantizeDivision)
@@ -152,7 +152,7 @@ Note editing lives in `TrackRow.tsx` with its rules in `src/lib/note-edit.ts`; p
 
 - **One `Note` shape everywhere:** `midi`, `startBeat`, `durationBeats`, `velocity`, timed in **quarter-note beats** so BPM changes don't move notes. Defined in `src/lib/music/types.ts`.
 - **Tracks per instrument:** app state is `Track[]` (`src/lib/tracks.ts`). Each track has an instrument (color, pitch range, synth/drums), its notes, and mute/solo flags.
-- **One seam for generation:** the UI only calls `generateTrack(instrument, frames, bpm, quantize, harmony): Promise<Note[]>`. Swap the implementation; keep the signature (or coordinate a change).
+- **One seam for generation:** the UI only calls `generateNotes(instrument, frames, bpm, quantize, harmony, sensitivity?, trace?): Note[]`. Swap the implementation; keep the signature (or coordinate a change).
 - **Pitch is not an FFT peak:** Pitchy estimates the fundamental; the spectrogram is display only.
 - **Honest samples:** Keys and Drums start with parts labeled **Sample**; the demo hum is labeled **Demo hum**. Never present a preset as live output.
 - **Local processing:** no account, API key, or network inference. Sampled presets fetch upstream assets on demand; the synth fallback works without them.

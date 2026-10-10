@@ -1,23 +1,12 @@
 import type { HumFrame } from "./hum";
 import { MAX_SEGMENTATION_FRAMES, type SegmentationConfig, segmentPitchFrames } from "./audio/segment-notes.ts";
 import { DEFAULT_NOTE_SENSITIVITY, type NoteSensitivity, noteSensitivityConfig } from "./audio/note-sensitivity.ts";
-import { type Harmony, type Key, chordAt, detectKey, fitToHarmony, nearest, pickChords, snapToScale } from "./music/harmony.ts";
+import { type Harmony, chordAt, detectKey, fitToHarmony, nearest, pickChords, snapToScale } from "./music/harmony.ts";
 import { DRUM_ROWS, type Instrument, type Note, type QuantizeDivision, QUANT_BEATS, TOTAL_BEATS, noteId } from "./tracks.ts";
 
-/** Generates canonical notes for the selected hum sensitivity (Medium by default); raw audio stays local. */
-export async function generateTrack(
-  inst: Instrument,
-  frames: HumFrame[],
-  bpm: number,
-  quantize: QuantizeDivision,
-  harmony: Harmony,
-  sensitivity: NoteSensitivity = DEFAULT_NOTE_SENSITIVITY,
-): Promise<Note[]> {
-  return generateNotes(inst, frames, bpm, quantize, harmony, sensitivity);
-}
-
 /**
- * Pure generation path. Every pitched track is first transcribed into one hummed line
+ * The generation seam: hum frames -> canonical notes for one instrument (raw audio stays local).
+ * Sensitivity defaults to Medium. Every pitched track is first transcribed into one hummed line
  * (segment seconds, octave-fit, correct pitch, merge fragments, snap beats), then shaped
  * by its role: Melody stays a singable line, Bass anchors chord roots on downbeats,
  * Keys picks a chord per bar and plays it, Strings sustains a two-voice pad.
@@ -47,7 +36,7 @@ export function generateNotes(
     return (tSec: number) => Math.max(0, ((tSec + shiftSec) * bpm) / 60);
   };
   const snap = (b: number) => grid ? Math.round(b / grid) * grid : b;
-  if (trace) Object.assign(trace, { voicedFrames: frames.filter((f) => f.hz !== null).length, raw: [], key: { tonic: harmony.tonic, mode: harmony.mode }, grid });
+  if (trace) Object.assign(trace, { voicedFrames: frames.filter((f) => f.hz !== null).length, raw: [], grid });
   if (inst.kind === "drums") return drums(frames, beatsFrom, snap, trace);
 
   const line = (fit: (notes: Note[]) => Note[]) => hummedLine(inst, frames, beatsFrom, snap, grid, bpm, fit, config, trace);
@@ -63,9 +52,7 @@ export function generateNotes(
       // Melody sets the key (Studio infers chords from it). Low snaps it to its own detected scale;
       // Medium/High trust the hummed pitches so confirmed chromatic steps survive.
       return melodyRole(line((n) => {
-        const key = detectKey(n);
-        if (trace) trace.key = key;
-        return sensitivity === "low" ? fitToHarmony(n, inst, { ...harmony, ...key }) : n;
+        return sensitivity === "low" ? fitToHarmony(n, inst, { ...harmony, ...detectKey(n) }) : n;
       }), inst);
   }
 }
@@ -78,7 +65,6 @@ export function generateNotes(
 export interface GenTrace {
   voicedFrames: number;
   raw: Note[];
-  key?: Key; // Melody: the key detected from the take; other tracks: the song's key
   grid: number; // beats; 0 = Off
 }
 

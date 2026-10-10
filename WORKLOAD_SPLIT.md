@@ -44,14 +44,14 @@ This split reflects the **existing repository**, not a blank project. At the tim
 - [ ] Stabilize Pitchy output: minimum RMS, confidence/clarity gating, octave-error handling where reasonable, and pitch smoothing.
 - [ ] Convert continuous `HumFrame[]` readings into discrete note onsets/offsets; suppress short pitch jitter, reject invalid notes, and handle pauses between notes.
 - [ ] Convert start/end seconds into **quarter-note beats** using current BPM; apply Off, 1/4, 1/8, and 1/16 snapping correctly.
-- [ ] Improve/replace the prototype logic in `generateTrack(inst, frames, bpm, quantize, harmony): Promise<Note[]>` while preserving that public integration point or coordinating an API change.
+- [ ] Improve/replace the prototype logic in `generateNotes(inst, frames, bpm, quantize, harmony, sensitivity?, trace?): Note[]` while preserving that public integration point or coordinating an API change.
 - [ ] Return notes appropriate for the selected instrument's range; document the limitations of drum/beatbox mapping separately from monophonic melodic pitch.
 - [ ] Ensure empty/failed recordings leave existing notes untouched.
 - [ ] Add deterministic tests using synthetic voiced/unvoiced frames; then verify live pitch-to-note output.
 
 **Primary files:** `src/lib/hum.ts`, `src/lib/generate.ts`, and any small extracted pure pitch/segmentation/quantization helpers under `src/lib/audio/` or `src/lib/music/`. Coordinate changes to `src/components/Spectrogram.tsx` with Person 3.
 
-**Handoff to Person 4:** The tested `generateTrack(...)` output as canonical `Note[]` plus accurate loading/error status and a short recorded-demo procedure.
+**Handoff to Person 4:** The tested `generateNotes(...)` output as canonical `Note[]` plus accurate loading/error status and a short recorded-demo procedure.
 
 **Definition of done:** A 5–15-second clean hum creates recognizably correct note pitches and approximate timing on the selected track; no microphone leaks or disappearing existing notes. This is a **DSP prototype**, not automatically a neural AI system.
 
@@ -188,7 +188,7 @@ automated scheduling tests do not establish audible quality.
 ### Application and integration — first priority
 
 - [ ] Keep the current Next.js app operational and own the **shared project/track state** in `Studio.tsx` (or a small extracted state module).
-- [ ] Coordinate the Person 1 `generateTrack(...)` result, Person 3 editing callbacks, and Person 2 scheduling so all use the same current `Track[]`.
+- [ ] Coordinate the Person 1 `generateNotes(...)` result, Person 3 editing callbacks, and Person 2 scheduling so all use the same current `Track[]`.
 - [ ] Implement local save/restore of **all tracks**, BPM, quantization, mute/solo flags, and note edits; validate imported JSON before replacing state.
 - [ ] Verify/finish multi-track MIDI export with `@tonejs/midi` and check the resulting file in a compatible music editor.
 - [ ] Make recording failures, stale asynchronous callbacks, and reloads safe; never replace good notes on an empty/failed take.

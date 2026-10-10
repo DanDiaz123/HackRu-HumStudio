@@ -83,7 +83,7 @@ Valid notes satisfy: integer MIDI 0..127; finite startBeat >= 0; finite duration
 **Multi-track contracts** (`src/lib/tracks.ts`, see `TECHNICAL_SPEC.md` 3.1-3.3): `Instrument`, `Track { instrument, presetId, notes, muted, solo, sample }`, `INSTRUMENTS` (Melody, Bass, Keys, Drums, Strings), `HumFrame`, and the generation seam:
 
 ```ts
-generateTrack(inst: Instrument, frames: HumFrame[], bpm: number, quantize: QuantizeDivision, harmony: Harmony, sensitivity?: NoteSensitivity): Promise<Note[]>
+generateNotes(inst: Instrument, frames: readonly HumFrame[], bpm: number, quantize: QuantizeDivision, harmony: Harmony, sensitivity?: NoteSensitivity, trace?: GenTrace): Note[]
 ```
 
 The song has one shared `Harmony` (`src/lib/music/harmony.ts`, `TECHNICAL_SPEC.md` 3.4): a Melody take sets the key and chords (snapped to that key only on Low sensitivity; Medium/High keep hummed semitones), a Keys take re-picks the chords, and other pitched tracks are fitted to them so separately hummed parts never clash. App state is `Track[]` plus `Harmony`; never flatten tracks when playing, exporting, or saving. `Project` v1 is single-track; the multi-track save format must be a **new schema version**, not an edit to v1.
@@ -98,7 +98,7 @@ src/lib/tracks.ts                # Instrument, Track, INSTRUMENTS, lane geometry
 src/lib/music/types.ts           # Note, QuantizeDivision; future project/capture contracts       (shared)
 src/lib/music/harmony.ts         # shared key/chords: detectKey, inferHarmony, fitToHarmony   (Person 1, shared)
 src/lib/hum.ts                   # mic lifecycle, Pitchy gating, demo hum -> HumFrame            (Person 1)
-src/lib/generate.ts              # generateTrack() facade / generateNotes() pure DSP pipeline    (Person 1)
+src/lib/generate.ts              # generateNotes(): the generation seam, pure DSP pipeline      (Person 1)
 src/lib/playback.ts              # browser-only playback facade                                 (Person 2)
 src/lib/audio/playback-engine.ts # testable transport/voices/scheduling                          (Person 2)
 src/lib/audio/tone-backend.ts    # Tone.js adapter                                               (Person 2)
@@ -180,7 +180,7 @@ Stable silence separates two different notes
 JSON export/import preserves notes + BPM
 MIDI export at 120 BPM maps beat 2 to 1.0 second
 Repeated Tone scheduling does not create duplicated playback
-generateTrack returns notes inside the instrument's range, and [] for silence
+generateNotes returns notes inside the instrument's range, and [] for silence
 detectKey: C-E-G-C melody -> C major; inferHarmony: C|F|G|C melody -> C F G C chords
 ```
 
@@ -195,7 +195,7 @@ Workstreams, owners, and checkpoints are defined in [`WORKLOAD_SPLIT.md`](WORKLO
 | Track editor (Person 3) | `TrackRow.tsx`, note editing gestures, lane geometry | `Track`, `Note` |
 | Integration (Person 4) | `Studio.tsx`, `globals.css`, `midi.ts`, persistence, deploy, docs | All of the above |
 
-For a change that affects shared types or APIs (`music/types.ts`, `tracks.ts`, `generateTrack`), update `TECHNICAL_SPEC.md` and notify teammates before integration. Favor small pull requests/commits that can be tested independently; avoid rewriting another stream's files just to clean up style.
+For a change that affects shared types or APIs (`music/types.ts`, `tracks.ts`, `generateNotes`), update `TECHNICAL_SPEC.md` and notify teammates before integration. Favor small pull requests/commits that can be tested independently; avoid rewriting another stream's files just to clean up style.
 
 ## 10. Definition of done per agent task
 
@@ -226,7 +226,7 @@ Summary:
 Files changed:
   List exact paths.
 Interfaces affected:
-  Note/Project/PitchFrame/Track/HumFrame/generateTrack contracts or none.
+  Note/Project/PitchFrame/Track/HumFrame/generateNotes contracts or none.
 Verification:
   Commands and real browser checks actually completed.
 Risks/limitations:

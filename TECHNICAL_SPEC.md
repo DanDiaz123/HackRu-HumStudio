@@ -6,7 +6,7 @@
 
 This file tells implementers **what to build, which interfaces to share, what edge cases to handle, and how to prove it works**. For product rationale and scope, read [`SOFTWARE_DESIGN_DOCUMENT.md`](SOFTWARE_DESIGN_DOCUMENT.md) and [`PRODUCT.md`](PRODUCT.md). Coding agents must also read [`AGENTS.md`](AGENTS.md). Ownership of each module is in [`WORKLOAD_SPLIT.md`](WORKLOAD_SPLIT.md).
 
-> The app is a **multi-track instrument editor** (five fixed tracks). Generation sits behind `generateTrack(...)` and now uses deterministic melodic segmentation, harmony fitting, and quantization. The `Note` contract is unchanged; real-microphone tuning remains open.
+> The app is a **multi-track instrument editor** (five fixed tracks). Generation sits behind `generateNotes(...)` and now uses deterministic melodic segmentation, harmony fitting, and quantization. The `Note` contract is unchanged; real-microphone tuning remains open.
 
 ## 0. Implementation priorities
 
@@ -14,7 +14,7 @@ This file tells implementers **what to build, which interfaces to share, what ed
 - **P1:** Four-beat playback count-in and metronome **(implemented; listening pending)**; recording count-in with click **(implemented; listening pending)**; manual note creation/deletion; undo/redo; instrument sound polish; confirm before overwriting a generated part.
 - **P2:** Generation backend or ML model, Supabase, imported audio, effects, user-created tracks, collaboration.
 
-**Integration milestone (implemented; listening pending):** sample `Note[]` (Keys, Drums) -> visible track clips -> Tone.js playback, with scheduling covered by regression fixtures. Next milestone: real hum -> `generateTrack` -> notes on the selected track.
+**Integration milestone (implemented; listening pending):** sample `Note[]` (Keys, Drums) -> visible track clips -> Tone.js playback, with scheduling covered by regression fixtures. Next milestone: real hum -> `generateNotes` -> notes on the selected track.
 
 ## 1. Stack and environment
 
@@ -64,7 +64,7 @@ src/
   lib/
     tracks.ts                # implemented: Instrument, Track, INSTRUMENTS, geometry
     hum.ts                   # implemented: mic + Pitchy + demo hum -> HumFrame
-    generate.ts              # implemented: generateTrack() / pure generateNotes()
+    generate.ts              # implemented: generateNotes() pure DSP pipeline (the generation seam)
     playback.ts              # implemented: browser-only playback facade
     midi.ts                  # implemented: multi-track export
     music/
@@ -211,17 +211,18 @@ export interface HumFrame {
 ### 3.3 Generation seam (implemented, `src/lib/generate.ts`)
 
 ```ts
-export async function generateTrack(
+export function generateNotes(
   inst: Instrument,
-  frames: HumFrame[],
+  frames: readonly HumFrame[],
   bpm: number,
   quantize: QuantizeDivision,
   harmony: Harmony,
   sensitivity?: NoteSensitivity, // "low" | "medium" | "high"; omitted = "medium"
-): Promise<Note[]>;
+  trace?: GenTrace,              // filled with the stages the reveal shows
+): Note[];
 ```
 
-The UI calls only this. It delegates to the pure `generateNotes(inst, frames, bpm, quantize, harmony, sensitivity?, trace?): Note[]`; `sensitivity` (`NoteSensitivity`, default Medium) picks the segmentation profile and does not affect drums. Melodic generation segments frames in seconds, octave-fits the instrument, corrects harmony, merges identical pitches within the same phrase, then converts/snaps beat boundaries into one hummed line. Off preserves raw beat timing. A confirmed rest changes the phrase ID so later correction or snapping cannot merge separate attacks. The line is then shaped by instrument role (`src/tests/roles.test.ts`):
+The UI calls only this pure, synchronous function (the earlier async `generateTrack` wrapper had no app callers and was removed). `sensitivity` (`NoteSensitivity`, default Medium) picks the segmentation profile and does not affect drums. Melodic generation segments frames in seconds, octave-fits the instrument, corrects harmony, merges identical pitches within the same phrase, then converts/snaps beat boundaries into one hummed line. Off preserves raw beat timing. A confirmed rest changes the phrase ID so later correction or snapping cannot merge separate attacks. The line is then shaped by instrument role (`src/tests/roles.test.ts`):
 
 - **Melody:** on Low sensitivity, snapped to its own detected scale; on Medium/High the hummed integer pitches are kept so confirmed chromatic steps survive. Either way a short note 10+ semitones from both neighbours in the same direction is an octave error and folds back; velocity accents beat 1 > beat 3 > other beats > off-beats.
 - **Bass:** root/fifth of each bar's chord; notes are split at barlines so a held note re-strikes on the new root, and a bar's first note within beat 1 is pulled onto the downbeat as the root.
@@ -230,7 +231,7 @@ The UI calls only this. It delegates to the pure `generateNotes(inst, frames, bp
 - **Drums:** onset = RMS above 0.02 and at least double its recent floor, at most one per 80 ms. In the next 60 ms, low pitch (<160 Hz) or a low spectral centroid is a kick; otherwise a mean `zcrHz` >= 3000 is a hat ("ts" hiss) and lower is a snare. Frames without `zcrHz` fall back to loudness (>= 60% of the take's loudest = snare). Eighth-note hats are added only when no hats were beatboxed.
 - **Timing (all tracks):** before snapping, the take is shifted by the constant offset (within +/-80 ms, 5 ms steps, smallest on ties) that puts its onsets closest to the grid (`alignmentSec`; needs 3+ onsets, skipped for Off). This absorbs unmeasured mic latency and singing consistently ahead of or behind the click. It can only resolve offsets under half a grid step.
 
- Tempo outside 60..180, unknown grid values, and more than 10,000 frames throw; unusable melodic input returns `[]` (the UI keeps existing notes). Unknown sensitivity values throw. Canonical note contracts are unchanged; `generateTrack` gained only the optional trailing `sensitivity` argument.
+ Tempo outside 60..180, unknown grid values, and more than 10,000 frames throw; unusable melodic input returns `[]` (the UI keeps existing notes). Unknown sensitivity values throw. Canonical note contracts are unchanged; `generateNotes` gained the optional `sensitivity` argument before `trace`.
 
 `Studio.tsx` keeps each part's latest take (`HumFrame[]` in a ref, never audio, never persisted). Changing Sensitivity or Snap re-runs `generateNotes` for every cached take: Melody first (re-infers harmony, or keeps a key the user picked until the next Melody take), then Keys (re-picks chords), then the rest; parts without a take are refitted if harmony changed. Implicit refits (after a take or regeneration) never move Melody; only the explicit Key pick below does. A hand edit drops that part's take. An empty regeneration keeps the existing notes.
 
@@ -663,7 +664,7 @@ type ProjectAction =
 
 ### Unit tests (use synthetic fixtures)
 
-`npm test` runs 110 tests: 5 persistence/MIDI (round trip, 13 rejected files, defaults, v1 import, beat-to-seconds and drum channel), 5 note-editing rules, playback (incl. duplicate metronome ticks), 11 sensitivity, 10 harmony, 16 segmentation, 11 generation, 7 per-instrument role, 3 capture (sliding window, window-centre timestamps, synthetic mic path), 2 scoring tests, and the preset loading/voice suite, plus one test per real take in `src/tests/takes/*.json`. Real takes are captured in `npm run dev` with `copy(__humTake)` in the console (analysis frames only, no audio), given hand-written `expected` notes, and scored by note F1 (pitch equal, onset within 50 ms); an optional `minF1` makes a take a regression gate. Transcription fixtures cover 100 ms pitch wobbles, vibrato, 120 ms dropouts at 10/20/40 ms frame hops, the 150 ms silence boundary, genuine pitch changes/rests, harmony merging, all grids across 60/120/180 BPM, Off timing, instrument ranges, invalid input, immutability, and the async UI seam. Playback covers repeated scheduling, five-track timing, tempo changes, mute/solo, overlapping notes, transport lifecycle, invalid inputs, teardown, metronome/count-in cancellation, and preset selection. Preset fixtures cover catalog/defaults, GM aliases, stale loads, failure/timeout/retry, shared leases, velocity conversion, and individual stop handles. Real-microphone checks below remain targets; browser MIDI byte preservation is documented in [`SMPLR_INTEGRATION.md`](SMPLR_INTEGRATION.md).
+`npm test` runs 108 tests: 5 persistence/MIDI (round trip, 13 rejected files, defaults, v1 import, beat-to-seconds and drum channel), 5 note-editing rules, playback (incl. duplicate metronome ticks), 11 sensitivity, 10 harmony, 16 segmentation, 11 generation, 7 per-instrument role, 3 capture (sliding window, window-centre timestamps, synthetic mic path), 2 scoring tests, and the preset loading/voice suite, plus one test per real take in `src/tests/takes/*.json`. Real takes are captured in `npm run dev` with `copy(__humTake)` in the console (analysis frames only, no audio), given hand-written `expected` notes, and scored by note F1 (pitch equal, onset within 50 ms); an optional `minF1` makes a take a regression gate. Transcription fixtures cover 100 ms pitch wobbles, vibrato, 120 ms dropouts at 10/20/40 ms frame hops, the 150 ms silence boundary, genuine pitch changes/rests, harmony merging, all grids across 60/120/180 BPM, Off timing, instrument ranges, invalid input, immutability, and the generation seam. Playback covers repeated scheduling, five-track timing, tempo changes, mute/solo, overlapping notes, transport lifecycle, invalid inputs, teardown, metronome/count-in cancellation, and preset selection. Preset fixtures cover catalog/defaults, GM aliases, stale loads, failure/timeout/retry, shared leases, velocity conversion, and individual stop handles. Real-microphone checks below remain targets; browser MIDI byte preservation is documented in [`SMPLR_INTEGRATION.md`](SMPLR_INTEGRATION.md).
 
 | ID | Input | Expected result |
 |---|---|---|
@@ -679,8 +680,8 @@ type ProjectAction =
 | T-10 | MIDI C4 at beat 2, duration 1, 120 BPM | Note start=1.0 s, duration=0.5 s |
 | T-11 | Consecutive `schedule()` calls | No duplicated playback events |
 | T-12 | Start/stop mic twice | No orphaned media tracks or loops |
-| T-13 | `generateTrack` with synthetic C4-E4-G4 frames for Bass | Notes inside 28..52, each a root or fifth of its bar's chord |
-| T-14 | `generateTrack` with all-unvoiced frames | `[]` (UI keeps existing notes) |
+| T-13 | `generateNotes` with synthetic C4-E4-G4 frames for Bass | Notes inside 28..52, each a root or fifth of its bar's chord |
+| T-14 | `generateNotes` with all-unvoiced frames | `[]` (UI keeps existing notes) |
 | T-15 | `exportMidi` bytes for Keys + Drums | Two MIDI tracks; drums on channel index 9 |
 | T-16 | `detectKey` on C-E-G-C... / A-C-E-A... | C major / A minor **(implemented)** |
 | T-17 | `snapToScale(61)` in C major | 60 (ties go down) **(implemented)** |
@@ -736,7 +737,7 @@ The app ships labeled **Sample** parts (Keys, Drums) and a labeled **Demo hum**.
 3. ~~Tone playback service with BPM and event cleanup.~~ Done; verify by ear.
 4. ~~Mic session, timestamps, Pitchy readout, spectrogram.~~ Done; verify with a real mic.
 5. ~~Test segmentation with fixture frames independently of the microphone.~~ Done; real-device tuning remains (Person 1).
-6. ~~Replace run grouping in `generateTrack`.~~ Done: segment -> instrument/harmony fitting -> merge -> quantize.
+6. ~~Replace run grouping in generation.~~ Done: segment -> instrument/harmony fitting -> merge -> quantize.
 7. Note editing in the zoomed track, wired to state and playback (Person 3).
 8. Multi-track JSON autosave + file round trip (Person 4).
 9. Exercise denied permissions, silence, repeated recordings, and bad import.

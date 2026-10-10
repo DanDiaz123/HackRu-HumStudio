@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type GenTrace, generateNotes, generateTrack } from "../lib/generate.ts";
+import { type GenTrace, generateNotes } from "../lib/generate.ts";
 import { DEFAULT_HARMONY } from "../lib/music/harmony.ts";
 import { INSTRUMENTS, type Note, type QuantizeDivision } from "../lib/tracks.ts";
 import { pitchFrames } from "./fixtures/transcription.ts";
@@ -9,7 +9,6 @@ const instrument = (id: string) => INSTRUMENTS.find(i => i.id === id)!;
 /** Highest note at each start beat: the hummed line inside a Keys chord part. */
 const topVoice = (notes: Note[]) =>
   notes.filter(n => !notes.some(o => o.startBeat === n.startBeat && o.midi > n.midi));
-const timing = (notes: Note[]) => notes.map(({ midi, startBeat, durationBeats }) => ({ midi, startBeat, durationBeats }));
 
 test("the reported held-note fragmentation stays one note across tempos and grids", () => {
   const frames = pitchFrames(Array.from({ length: 6 }, () => [
@@ -119,13 +118,6 @@ test("generation never mutates source frames and drum Off onsets are unsnapped",
   assert.ok(drums.some(n => n.midi !== 42 && n.startBeat === 0.26));
 });
 
-test("the existing async recording seam uses the same stable generation path", async () => {
-  const frames = pitchFrames([{ midi: 60, durationSec: 0.6 }]);
-  const expected = generateNotes(instrument("melody"), frames, 120, "off", DEFAULT_HARMONY);
-  const actual = await generateTrack(instrument("melody"), frames, 120, "off", DEFAULT_HARMONY);
-  assert.deepEqual(timing(actual), timing(expected));
-});
-
 test("a silent drum take returns no notes, not fill-in hats", () => {
   const frames = pitchFrames([{ midi: null, durationSec: 2 }]);
   assert.deepEqual(generateNotes(instrument("drums"), frames, 120, "1/8", DEFAULT_HARMONY), []);
@@ -139,7 +131,6 @@ test("the trace records the unsnapped hummed line, and melody ids come from it",
   const notes = generateNotes(instrument("melody"), frames, 120, "1/4", DEFAULT_HARMONY, undefined, trace);
   assert.ok(trace.voicedFrames > 0);
   assert.equal(trace.grid, 1);
-  assert.deepEqual(trace.key, { tonic: 0, mode: "major" });
   assert.ok(trace.raw.length >= notes.length && notes.length >= 1);
   const rawIds = new Set(trace.raw.map((n) => n.id));
   for (const n of notes) assert.ok(rawIds.has(n.id), n.id);

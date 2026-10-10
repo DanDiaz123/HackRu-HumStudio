@@ -17,7 +17,7 @@
 
 HumStudio is a browser-based, voice-first music composition tool laid out like a familiar DAW: five instrument tracks (Melody, Bass, Keys, Drums, Strings) over an 8-bar 4/4 timeline. The user opens a track, records a short **monophonic** hum, watches a live spectrogram print across the lane, and sees generated notes for that instrument revealed on the track. The arrangement plays through Tone.js with mute/solo and exports as multi-track MIDI. Note editing and project save/reopen are planned.
 
-The project's differentiator is the interface: a person can express a melody with their voice instead of entering notes one at a time. Pitch detection is **digital signal processing (DSP)** via Pitchy. The current generator is a placeholder heuristic; do not describe it as a trained model. A real generator (transcription and/or arrangement, possibly a backend) replaces `generateTrack(...)` later.
+The project's differentiator is the interface: a person can express a melody with their voice instead of entering notes one at a time. Pitch detection is **digital signal processing (DSP)** via Pitchy. The current generator is a placeholder heuristic; do not describe it as a trained model. A real generator (transcription and/or arrangement, possibly a backend) replaces `generateNotes(...)` later.
 
 ### Success scenario
 
@@ -105,7 +105,7 @@ flowchart TD
     Mic --> Frames[Web Audio time-domain frames]
     Frames --> Pitch[Pitchy pitch + clarity]
     Frames --> Spec[Spectrogram bins, display only]
-    Pitch --> Gen[generateTrack: segment / quantize / fit to instrument]
+    Pitch --> Gen[generateNotes: segment / quantize / fit to instrument]
     Gen --> State[Studio state: Track array]
     UI <--> State
     State --> Piano[Track lanes: render, reveal, edit planned]
@@ -117,7 +117,7 @@ flowchart TD
 
 ### Architectural boundary
 
-**Client-side today.** Next.js provides the shell; interactive audio/editor code runs in Client Components (`'use client'`) or browser-only modules. No API routes exist. A future generation backend plugs in behind `generateTrack(...)`; if it is remote, sending audio or pitch data off-device needs an explicit team decision and user consent (see privacy). Supabase is deliberately excluded until the core flow is proven.
+**Client-side today.** Next.js provides the shell; interactive audio/editor code runs in Client Components (`'use client'`) or browser-only modules. No API routes exist. A future generation backend plugs in behind `generateNotes(...)`; if it is remote, sending audio or pitch data off-device needs an explicit team decision and user consent (see privacy). Supabase is deliberately excluded until the core flow is proven.
 
 ### Component responsibilities
 
@@ -128,7 +128,7 @@ flowchart TD
 | `src/components/Spectrogram.tsx` | Live halftone canvas of the hum on the lane's pitch axis. Display only. | Built |
 | `src/lib/tracks.ts` | `Instrument`, `Track`, `INSTRUMENTS`, labeled sample parts, lane geometry helpers. | Built (shared contract) |
 | `src/lib/hum.ts` | `getUserMedia`, AnalyserNode, Pitchy pitch/RMS gating, `HumFrame` stream, demo hum, teardown, mic error messages. | Built (needs real-mic testing) |
-| `src/lib/generate.ts` | `generateTrack(instrument, frames, bpm, quantize, harmony) → Promise<Note[]>`; pure `generateNotes` for fixtures. | Built (DSP heuristics; real-device tuning pending) |
+| `src/lib/generate.ts` | `generateNotes(instrument, frames, bpm, quantize, harmony, sensitivity?, trace?) → Note[]`, pure and synchronous. | Built (DSP heuristics; real-device tuning pending) |
 | `src/lib/playback.ts` | Browser-only facade for scheduling, play/pause/stop/rewind/position, metronome, count-in, and teardown; delegates to `src/lib/audio/`. | Built (playback regression tests; listening pending) |
 | `src/lib/midi.ts` | `Track[]` → multi-track `.mid` download. | Built |
 | `src/lib/music/types.ts` | Shared `Note`/`QuantizeDivision` contract. `Project`/`PitchFrame` and shared timing/grid helpers remain targets; implemented segment types live in `audio/segment-notes.ts`. | Built (`Note` only) |
@@ -339,7 +339,7 @@ A team member can run the app locally, open a track, hum a short single-voice me
 | 2. Studio + playback | Tracks, zoom, transport, BPM, synths, MIDI export, record/spectrogram/reveal flow **(done)** | Shared note contract |
 | 3. Capture + analysis | Mic input, Pitchy frames, clear statuses | Browser setup |
 | 4. Segmentation + quantization | `HumFrame[] -> Note[]` working with fixtures **(done; real-microphone tuning pending)** | HumFrame contract |
-| 5. Integration | Real `generateTrack` output lands on the selected track; notes editable; arrangement plays | Phases 2-4 |
+| 5. Integration | Real `generateNotes` output lands on the selected track; notes editable; arrangement plays | Phases 2-4 |
 | 6. Finish | JSON persistence, MIDI export, tests, deploy, demo rehearsal | Stable main workflow |
 
 Ownership is assigned in [`WORKLOAD_SPLIT.md`](WORKLOAD_SPLIT.md): **voice-to-notes**, **playback/transport**, **track editor**, and **integration/branding/persistence**. Work in parallel behind the interfaces in `TECHNICAL_SPEC.md`.
@@ -356,7 +356,7 @@ Ownership is assigned in [`WORKLOAD_SPLIT.md`](WORKLOAD_SPLIT.md): **voice-to-no
 | ADR-006 | Desktop Chrome/Edge first | Limit browser variability during a weekend build. |
 | ADR-007 | DSP terminology is accurate | Do not advertise model training or neural AI that is not implemented. |
 | ADR-008 | Multi-track instrument editor is P0 | `PRODUCT.md`: the demo is "pick an instrument, hum, watch it fill"; overrides the original single-track P0. |
-| ADR-009 | Generation behind one function (`generateTrack`) | Keep the UI independent of DSP implementation or a future generation backend. |
+| ADR-009 | Generation behind one function (`generateNotes`) | Keep the UI independent of DSP implementation or a future generation backend. |
 
 ## 16. Future iterations (not HackRU commitments)
 

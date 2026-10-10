@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { PitchDetector } from "pitchy";
-import { generateTrack } from "../lib/generate.ts";
+import { generateNotes } from "../lib/generate.ts";
 import { type HumFrame, HOPS_PER_SEC, WINDOW_SIZE, analyzeWindow, slidingWindow, windowCenterSec } from "../lib/hum.ts";
 import { DEFAULT_HARMONY } from "../lib/music/harmony.ts";
 import { INSTRUMENTS } from "../lib/tracks.ts";
@@ -38,7 +38,7 @@ test("mic path: a hummed G4 with a 5 ms dropout becomes one G4", async () => {
   }
 
   const melody = INSTRUMENTS.find((i) => i.id === "melody")!;
-  const notes = await generateTrack(melody, frames.filter((f) => f.tSec >= 0), 120, "1/16", DEFAULT_HARMONY);
+  const notes = generateNotes(melody, frames.filter((f) => f.tSec >= 0), 120, "1/16", DEFAULT_HARMONY);
   assert.deepEqual(notes.map((n) => n.midi), [67]);
   assert.ok(notes[0].durationBeats >= 3.5);
 });
