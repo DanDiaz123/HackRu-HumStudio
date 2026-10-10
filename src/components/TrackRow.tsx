@@ -97,8 +97,9 @@ export default function TrackRow(p: Props) {
             {name}
           </button>
           <div className="ms">
-            <button aria-pressed={track.muted} aria-label={`Mute ${name}`} onClick={() => p.onToggle("muted")}>M</button>
-            <button aria-pressed={track.solo} aria-label={`Solo ${name}`} onClick={() => p.onToggle("solo")}>S</button>
+            {/* Disabled while busy: re-scheduling mid-take would play the backing tracks into the mic. */}
+            <button aria-pressed={track.muted} aria-label={`Mute ${name}`} onClick={() => p.onToggle("muted")} disabled={p.busy}>M</button>
+            <button aria-pressed={track.solo} aria-label={`Solo ${name}`} onClick={() => p.onToggle("solo")} disabled={p.busy}>S</button>
           </div>
         </div>
         <button className="lane" onClick={p.onOpen} disabled={p.busy} aria-label={`Open ${name} track to record a hum`}>

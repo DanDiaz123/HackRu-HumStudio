@@ -35,6 +35,8 @@ export default function Spectrogram({
     let raf = 0;
 
     const draw = () => {
+      // Keep the live loop alive even when a frame has nothing to draw yet (empty take, 0-size canvas).
+      if (live) raf = requestAnimationFrame(draw);
       const dpr = window.devicePixelRatio || 1;
       const w = canvas.clientWidth;
       const h = canvas.clientHeight;
@@ -104,10 +106,7 @@ export default function Spectrogram({
       }
       ctx.fill();
 
-      if (live) {
-        ctx.fillRect(Math.min(w, frames[frames.length - 1].tSec * pxPerSec) - 1, 0, 2, h);
-        raf = requestAnimationFrame(draw);
-      }
+      if (live) ctx.fillRect(Math.min(w, frames[frames.length - 1].tSec * pxPerSec) - 1, 0, 2, h);
     };
 
     draw();

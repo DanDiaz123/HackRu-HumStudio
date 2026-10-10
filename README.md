@@ -97,7 +97,7 @@ npm run build
 npm test
 ```
 
-`npm test` runs playback, harmony, segmentation, and generation regression suites using TypeScript and Node's built-in test runner, without adding a testing dependency. Fixtures cover held-note wobbles, short dropouts across frame rates and tempos, genuine rests, harmony merging, and Off timing. Real browser listening and microphone tests are still necessary. The production build downloads the existing Archivo font from Google Fonts when it is not cached. If an old `.test-build/` directory remains from an earlier test runner, exclude it with `npm run lint -- --ignore-pattern .test-build/**`.
+`npm test` runs playback, harmony, segmentation, and generation regression suites using TypeScript and Node's built-in test runner, without adding a testing dependency. Fixtures cover held-note wobbles, short dropouts across frame rates and tempos, genuine rests, harmony merging, and Off timing. Real browser listening and microphone tests are still necessary. The production build downloads the existing Archivo font from Google Fonts when it is not cached.
 
 ## File structure
 

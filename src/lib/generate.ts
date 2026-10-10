@@ -44,7 +44,7 @@ export function generateNotes(
   const snap = (b: number) => grid ? Math.round(b / grid) * grid : b;
   if (inst.kind === "drums") return drums(frames, beatsFrom, snap);
 
-  const line = (fit: (notes: Note[]) => Note[]) => hummedLine(inst, frames, beatsFrom, snap, grid, fit);
+  const line = (fit: (notes: Note[]) => Note[]) => hummedLine(inst, frames, beatsFrom, snap, grid, bpm, fit);
   switch (inst.id) {
     case "bass":
       return bassRole(line((n) => fitToHarmony(n, inst, harmony)), inst, harmony);
@@ -108,6 +108,7 @@ function hummedLine(
   beatsFrom: (onsetsSec: number[]) => (t: number) => number,
   snap: (b: number) => number,
   grid: number,
+  bpm: number,
   fit: (notes: Note[]) => Note[],
 ): Note[] {
   const segments = segmentPitchFrames(frames);
@@ -124,7 +125,8 @@ function hummedLine(
   // Correction can make different raw pitches identical; merging must follow it.
   const fitted = fit(staged.map(({ note }) => note));
   const merged: { note: Note; phraseId: number }[] = [];
-  const mergeGapBeats = beatOf(SEGMENTATION_DEFAULTS.silenceHoldMs / 1000);
+  // A duration, not a time: beatOf would add the alignment shift.
+  const mergeGapBeats = ((SEGMENTATION_DEFAULTS.silenceHoldMs / 1000) * bpm) / 60;
   for (let i = 0; i < fitted.length; i++) {
     const note = fitted[i];
     const phraseId = staged[i].phraseId;
@@ -323,6 +325,7 @@ function drums(
       hiss: zcr.length ? zcr.reduce((a, b) => a + b, 0) / zcr.length >= HAT_ZCR_HZ : null,
     });
   }
+  if (!hits.length) return []; // silence: no fill-in hats over an empty take
   const beatOf = beatsFrom(hits.map((h) => h.tSec));
 
   const loudest = Math.max(0, ...hits.map((h) => h.peak));
