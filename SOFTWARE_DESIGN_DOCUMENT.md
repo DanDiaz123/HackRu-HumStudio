@@ -109,7 +109,7 @@ flowchart TD
     Gen --> State[Studio state: Track array]
     UI <--> State
     State --> Piano[Track lanes: render, reveal, edit planned]
-    State --> Playback[Tone.js Transport + Synth]
+    State --> Playback[Tone.js Transport + smplr / synth fallback]
     State --> Save[Local storage + JSON file]
     State --> Midi[@tonejs/midi export]
     Playback --> Out[Audio output]
@@ -201,12 +201,12 @@ export interface Project {
 
 ```ts
 interface Instrument { id: string; name: string; color: string; lo: number; hi: number; kind: "synth" | "drums"; hint: string }
-interface Track { instrument: Instrument; notes: Note[]; muted: boolean; solo: boolean; sample: boolean }
+interface Track { instrument: Instrument; presetId: string; notes: Note[]; muted: boolean; solo: boolean; sample: boolean }
 ```
 
 `Studio.tsx` holds `Track[]` (one per instrument in `INSTRUMENTS`), plus `bpm` and `quantize`. `sample: true` marks preset parts shown with a "Sample" label until a recording replaces them. Drum notes use General MIDI kit numbers (36 kick, 38 snare, 42 closed hat, 46 open hat, 49 crash).
 
-**Saved format is not decided yet.** `Project` v1 above stores one flat `notes[]`. Saving the multi-track arrangement needs a versioned format (for example `schemaVersion: 2` with `tracks: { instrumentId, notes, muted, solo }[]`) with an explicit migration from v1. Person 4 owns this decision ([`WORKLOAD_SPLIT.md`](WORKLOAD_SPLIT.md)); do not silently change `Project` v1.
+**Saved format is not decided yet.** `Project` v1 above stores one flat `notes[]`. Saving the multi-track arrangement needs a versioned format (for example `schemaVersion: 2` with `tracks: { instrumentId, presetId, notes, muted, solo }[]`) with an explicit migration from v1. Missing legacy preset IDs receive category defaults; unknown/cross-category selections reject. Person 4 owns this decision ([`WORKLOAD_SPLIT.md`](WORKLOAD_SPLIT.md)); do not silently change `Project` v1.
 
 ## 8. Audio analysis design
 
@@ -251,7 +251,7 @@ A 1/16-note grid is `0.25` quarter-note beats; 1/8 is `0.5`, 1/4 is `1.0`. Snap 
 ## 9. Audio playback design
 
 - Initialize audio **only in a user gesture handler**, awaiting `Tone.start()` before playback.
-- Instrument voices on one shared `Tone.getTransport()`: `PolySynth`s with different oscillators for Melody/Bass/Keys/Strings, and a `MembraneSynth` plus four `NoiseSynth`s for Drums (`src/lib/audio/tone-backend.ts`). Independent melodic lanes preserve overlapping notes at the same pitch. Mute/solo are applied at schedule time.
+- Instrument voices on one shared `Tone.getTransport()`: smplr presets on Tone's underlying audio context, with the existing `PolySynth`/percussion sounds retained as fallback. Expanded tracks select their own serializable `presetId` without changing notes. Lazy loading, stale-request guards, and shared buffer reuse live in `preset-manager.ts`/`smplr-backend.ts`. Unique per-attack stop handles preserve overlapping equal pitches. Kit-specific aliases play the same GM drum notes; regular note-offs leave one-shots intact. Mute/solo are applied at schedule time.
 - Set transport BPM from the canonical studio BPM state; schedule track notes at their beat positions, converting beats to musical ticks/transport positions rather than hard-coding wall-clock seconds.
 - Schedule synth triggers with the **precise audio time argument** provided by the transport callback.
 - On project updates, stop or safely reschedule the old events. Track the scheduled event IDs and clear them; do not accumulate duplicated notes.
@@ -313,7 +313,7 @@ Today `Studio.tsx` owns `Track[]`, BPM, and quantize in React state and replaces
 
 ### Automated checks
 
-- Implemented: 46 regression tests using TypeScript and Node's built-in test runner, covering playback (17), harmony (6), segmentation (12), and generation (11), including short wobbles/dropouts, real rests, tempo independence, Off timing, and invalid input.
+- Implemented: 65 regression tests using TypeScript and Node's built-in test runner, covering playback (22), preset loading/voices (14), harmony (6), segmentation (12), and generation (11), including short wobbles/dropouts, real rests, tempo independence, Off timing, invalid input, stale loads, fallback/retry, and sample lifetimes. Browser evidence and remaining human checks are documented in [`SMPLR_INTEGRATION.md`](SMPLR_INTEGRATION.md).
 - Target: pure unit tests for `frequencyToMidi`, `secondsToBeats`, grid snapping, segment merging, note invariants, and MIDI export time conversion.
 - Target: round-trip test where project -> JSON -> validated project retains BPM, note count, positions and pitches.
 - Implemented: time-stamped synthetic `HumFrame[]` fixtures with known pitches, vibrato, short noise, and dropouts.

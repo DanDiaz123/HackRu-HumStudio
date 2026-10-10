@@ -1,5 +1,7 @@
 import { TOTAL_BEATS, type Track } from "../tracks.ts";
 import { createClickTrack } from "./click-track.ts";
+import { presetForTrack } from "./instrument-presets.ts";
+import type { PresetStatus } from "./preset-manager";
 
 export type PlaybackState = "started" | "paused" | "stopped";
 
@@ -28,11 +30,17 @@ export interface PlaybackBackend {
   setTimeout(callback: () => void, delaySec: number): number;
   clearTimeout(id: number): void;
   onLoopEnd(callback: (time: number) => void): () => void;
-  createVoice(instrumentId: string): PlaybackVoice;
+  createVoice(instrumentId: string, presetId?: string): PlaybackVoice;
+  syncPresets?(tracks: readonly Track[]): void;
+  preparePresets?(tracks: readonly Track[], retry?: boolean): Promise<void>;
+  subscribePresets?(listener: (status: PresetStatus) => void): () => void;
+  onPresetReady?(listener: () => void): () => void;
+  dispose?(): void;
 }
 
 interface ScheduledNote {
   instrumentId: string;
+  presetId: string;
   voiceKey: string;
   midi: number;
   velocity: number;
@@ -43,11 +51,13 @@ interface ScheduledNote {
 function arrangement(tracks: readonly Track[], ppq: number): ScheduledNote[] {
   const solo = tracks.some((track) => track.solo);
   const notes = tracks.flatMap((track) => {
+    const presetId = presetForTrack(track.instrument.id, track.presetId).id;
     if (track.muted || (solo && !track.solo)) return [];
     return track.notes.filter((note) => note.startBeat < TOTAL_BEATS && note.velocity > 0).map((note) => {
       const startTick = Math.min(TOTAL_BEATS * ppq - 1, Math.round(note.startBeat * ppq));
       return {
         instrumentId: track.instrument.id,
+        presetId,
         voiceKey: track.instrument.id,
         midi: note.midi,
         velocity: note.velocity,
@@ -79,11 +89,14 @@ export function createPlaybackEngine(backend: PlaybackBackend) {
   const clicks = createClickTrack(backend);
   let metronome = false;
   let clickEventIds: number[] = [];
+  let currentTracks: readonly Track[] = [];
+  let currentBpm = 120;
+  let disposed = false;
 
   function voice(note: ScheduledNote) {
     let value = voices.get(note.voiceKey);
     if (!value) {
-      value = backend.createVoice(note.instrumentId);
+      value = backend.createVoice(note.instrumentId, note.presetId);
       voices.set(note.voiceKey, value);
     }
     return value;
@@ -127,14 +140,31 @@ export function createPlaybackEngine(backend: PlaybackBackend) {
   const removeLoopListener = backend.onLoopEnd((time) => {
     voices.forEach((value) => value.releaseAll(time));
   });
+  const removePresetListener = backend.onPresetReady?.(() => {
+    // A paused/stopped engine has no leased voices to replace. Rescheduling it
+    // would cancel an unrelated playback or microphone count-in.
+    if (!disposed && backend.state === "started") engine.schedule(currentTracks, currentBpm);
+  });
 
-  return {
+  const engine = {
+    /** Preload selected sounds without starting transport; failures keep a working fallback. */
+    prepare(tracks: readonly Track[], retry = false): Promise<void> {
+      return disposed ? Promise.resolve() : backend.preparePresets?.(tracks, retry) ?? Promise.resolve();
+    },
+    /** Runtime sample status, kept outside canonical track state. */
+    subscribePresets(listener: (status: PresetStatus) => void): () => void {
+      return backend.subscribePresets?.(listener) ?? (() => {});
+    },
     /** Replace derived playback atomically. Invalid data preserves the previous arrangement. */
     schedule(tracks: readonly Track[], bpm: number) {
       if (!Number.isFinite(bpm) || bpm < 60 || bpm > 180) {
         throw new RangeError("BPM must be finite and between 60 and 180.");
       }
       const next = arrangement(tracks, backend.ppq);
+      if (disposed) return;
+      backend.syncPresets?.(tracks);
+      currentTracks = tracks;
+      currentBpm = bpm;
       clicks.cancelCountIn();
       const running = backend.state === "started";
       const tick = backend.positionTicks();
@@ -163,6 +193,8 @@ export function createPlaybackEngine(backend: PlaybackBackend) {
         resumeHeldNotes(tick);
         backend.start();
       }
+      const solo = tracks.some(track => track.solo);
+      void backend.preparePresets?.(tracks.filter(track => track.notes.length && !track.muted && (!solo || track.solo)));
     },
     /** Start or resume at the current beat, including any interrupted sustained notes. */
     play() {
@@ -209,15 +241,21 @@ export function createPlaybackEngine(backend: PlaybackBackend) {
     },
     /** Stop audio, clear only owned callbacks, and free every synth/listener. */
     dispose() {
+      if (disposed) return;
+      disposed = true;
       backend.stop();
       clearEvents();
       scheduleMetronome(false);
       clicks.dispose();
       silence();
       removeLoopListener();
+      removePresetListener?.();
+      backend.dispose?.();
       notes = [];
+      currentTracks = [];
     },
   };
+  return engine;
 }
 
 export type PlaybackEngine = ReturnType<typeof createPlaybackEngine>;

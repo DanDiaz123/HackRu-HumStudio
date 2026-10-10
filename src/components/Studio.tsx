@@ -6,6 +6,8 @@ import { type HumFrame, micErrorMessage, startDemoHum, startMic } from "@/lib/hu
 import { exportMidi } from "@/lib/midi";
 import { DEFAULT_HARMONY, fitToHarmony, harmonyLabel, inferHarmony, voiceChords } from "@/lib/music/harmony";
 import * as playback from "@/lib/playback";
+import { presetForTrack } from "@/lib/audio/instrument-presets";
+import type { PresetStatus } from "@/lib/audio/preset-manager";
 import {
   MAX_RECORD_SEC,
   type Note,
@@ -44,6 +46,7 @@ export default function Studio() {
   const [playing, setPlaying] = useState(false);
   const [startingAudio, setStartingAudio] = useState(false);
   const [playbackError, setPlaybackError] = useState("");
+  const [presetStatuses, setPresetStatuses] = useState<Record<string, PresetStatus>>({});
   const [metronome, setMetronome] = useState(false);
   const [countIn, setCountIn] = useState(false);
   const [countInBeat, setCountInBeat] = useState<number | null>(null);
@@ -56,6 +59,7 @@ export default function Studio() {
   const playbackRequest = useRef(0);
   const arrangementRef = useRef({ tracks, bpm });
   const stopTake = useRef<() => void>(() => {});
+  const unsubscribePresets = useRef<(() => void) | null>(null);
 
   const busy = startingAudio || phase === "requesting" || phase === "recording" || phase === "generating" || phase === "revealing";
   const zoomed = tracks.find((t) => t.instrument.id === zoomedId) ?? null;
@@ -100,6 +104,7 @@ export default function Studio() {
   useEffect(() => () => {
     stopRef.current?.();
     playbackRequest.current++;
+    unsubscribePresets.current?.();
     playback.dispose();
   }, []);
 
@@ -110,6 +115,37 @@ export default function Studio() {
     setPos(live.positionBeats());
     setPlaying(false);
     return true;
+  }
+
+  /** Connect runtime loading feedback after a user gesture, outside serializable Track[]. */
+  async function connectAudio() {
+    const engine = await playback.ensureAudio();
+    unsubscribePresets.current ??= engine.subscribePresets(status => {
+      setPresetStatuses(previous => ({ ...previous, [status.trackId]: status }));
+    });
+    return engine;
+  }
+
+  /** Change only playback timbre; retain the category, note array, and all note IDs. */
+  async function changePreset(trackId: string, presetId: string) {
+    const preset = presetForTrack(trackId, presetId);
+    const current = arrangementRef.current;
+    const next = current.tracks.map(track => track.instrument.id === trackId ? { ...track, presetId: preset.id } : track);
+    arrangementRef.current = { ...current, tracks: next };
+    setTracks(next);
+    setPresetStatuses(previous => ({ ...previous, [trackId]: { trackId, presetId, state: "loading" } }));
+    try {
+      const engine = await connectAudio();
+      const latest = arrangementRef.current;
+      const track = latest.tracks.find(t => t.instrument.id === trackId)!;
+      if (track.presetId !== preset.id) return;
+      engine.schedule(latest.tracks, latest.bpm);
+      await engine.prepare([track], true);
+    } catch {
+      if (arrangementRef.current.tracks.find(t => t.instrument.id === trackId)?.presetId !== preset.id) return;
+      setPresetStatuses(previous => ({ ...previous, [trackId]: { trackId, presetId, state: "fallback",
+        message: "Audio could not start. Check your output device and retry this sound." } }));
+    }
   }
 
   /** Put the arrangement and metronome setting back after a click-only recording. */
@@ -129,13 +165,18 @@ export default function Studio() {
     setStartingAudio(true);
     setPlaybackError("");
     try {
-      const engine = await playback.ensureAudio();
+      const engine = await connectAudio();
       if (request !== playbackRequest.current) return;
       const current = arrangementRef.current;
       engine.schedule(current.tracks, current.bpm);
+      const solo = current.tracks.some(track => track.solo);
+      await engine.prepare(current.tracks.filter(track => track.notes.length && !track.muted && (!solo || track.solo)));
+      if (request !== playbackRequest.current) return;
+      const latest = arrangementRef.current;
+      engine.schedule(latest.tracks, latest.bpm);
       engine.setMetronome(metronome);
       if (countIn) {
-        const completed = await engine.countIn(current.bpm, setCountInBeat);
+        const completed = await engine.countIn(latest.bpm, setCountInBeat);
         if (!completed || request !== playbackRequest.current) return;
       }
       setCountInBeat(null);
@@ -273,7 +314,7 @@ export default function Studio() {
           restoreTransport();
         };
         // Count in, then keep the click going so the hum lands on the beat grid. No backing tracks: the mic would hear them.
-        const engine = await playback.ensureAudio();
+        const engine = await connectAudio();
         engine.schedule([], bpm);
         engine.setMetronome(true);
         const counted = await engine.countIn(bpm, setCountInBeat);
@@ -363,6 +404,12 @@ export default function Studio() {
       </header>
 
       {playbackError && <p role="alert">{playbackError}</p>}
+      {Object.values(presetStatuses).some(status => status.state === "loading") && (
+        <p className="sound-notice" role="status">Loading selected sounds…</p>
+      )}
+      {Object.values(presetStatuses).filter(status => status.state === "fallback").map(status => (
+        <p key={status.trackId} className="sound-notice" role="status">{status.message}</p>
+      ))}
       {countInBeat !== null && <p role="status" aria-live="polite">Count-in: {countInBeat}</p>}
 
       <div className="ruler-row">
@@ -397,6 +444,8 @@ export default function Studio() {
             stage={stage}
             bpm={bpm}
             countIn={t.instrument.id === zoomedId ? countInBeat : null}
+            presetStatus={presetStatuses[t.instrument.id]}
+            onPresetChange={id => { void changePreset(t.instrument.id, id); }}
             onOpen={() => open(t.instrument.id)}
             onBack={back}
             onRecord={record}

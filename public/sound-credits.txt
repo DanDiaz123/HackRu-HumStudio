@@ -1,0 +1,61 @@
+HumStudio sound credits
+=======================
+
+HumStudio uses smplr 1.1.0 by danigb (MIT license):
+https://github.com/danigb/smplr
+https://github.com/danigb/smplr#license
+
+Sampled sounds are fetched from the sources below when selected or played.
+HumStudio does not bundle or modify the sample audio files. smplr decodes them
+and selects/pitches samples for playback. MIDI export contains notes, not audio.
+Raw microphone audio is never sent to these hosts.
+
+General MIDI / FluidR3_GM
+------------------------
+Flute, Marimba, Trumpet, Clean Electric Guitar, Synth Lead, Fingered Electric
+Bass, Picked Electric Bass, Acoustic Bass, Synth Bass, Violin, Cello,
+String Ensemble, and Synth Strings use the FluidR3_GM soundfont rendered
+for MIDI.js by the gleitz/midi-js-soundfonts project.
+Source and attribution: https://github.com/gleitz/midi-js-soundfonts
+Asset host: https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/
+License stated by that source: Creative Commons Attribution 3.0 US.
+https://creativecommons.org/licenses/by/3.0/us/
+Retain this attribution, source link, and license link when distributing
+HumStudio or redistributing these samples. HumStudio does not use MusyngKite.
+
+Splendid Grand Piano
+--------------------
+Public-domain Steinway piano samples released by Akai, mapped/fixed by kinwie,
+with contributions from Peter Eastman; conversions hosted by smpldsnds.
+https://github.com/smpldsnds/sfzinstruments-splendid-grand-piano
+Asset host: https://smpldsnds.github.io/sfzinstruments-splendid-grand-piano/
+The source README identifies the samples as public domain.
+
+Greg Sullivan electric pianos
+----------------------------
+Wurlitzer EP200 and Hohner Pianet T samples by Greg Sullivan,
+mapped to SFZ and fixed by kinwie; OGG/AAC conversions hosted by smpldsnds.
+https://github.com/smpldsnds/sfzinstruments-greg-sullivan-e-pianos
+Original author: http://www.sullivang.net/
+License stated by that source: Creative Commons Attribution 3.0 Unported.
+https://creativecommons.org/licenses/by/3.0/
+Retain attribution to Greg Sullivan and these source/license links.
+
+TX81Z FM Piano
+--------------
+Versilian Community Sample Library (VCSL), created by Versilian Studios LLC;
+SFZ support includes Peter Eastman's work; conversions hosted by smpldsnds.
+https://github.com/smpldsnds/sgossner-vcsl
+https://github.com/sgossner/VCSL
+License stated by that source: Creative Commons Zero (CC0).
+https://creativecommons.org/publicdomain/zero/1.0/
+
+Drum machines
+-------------
+TR-808, LinnDrum LM-2, and Casio RZ-1 samples from smpldsnds/drum-machines.
+https://github.com/smpldsnds/drum-machines
+Asset host: https://smpldsnds.github.io/drum-machines/
+The source README identifies this collection as public-domain samples.
+
+These are sample-source credits, not a license for HumStudio's own code.
+Source descriptions and license links were checked on 2026-10-10.

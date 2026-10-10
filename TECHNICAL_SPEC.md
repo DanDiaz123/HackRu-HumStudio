@@ -24,6 +24,7 @@ This file tells implementers **what to build, which interfaces to share, what ed
 | Styling | Plain CSS (no framework) | Studio styles and tokens live in `src/app/globals.css`; see `DESIGN.md`. |
 | Font | Archivo via `next/font/google` | `axes: ["wdth"]` for the condensed display width. |
 | Audio playback | `tone` v15 | User-gesture audio start, transport, `PolySynth`/`MembraneSynth`/`NoiseSynth`. |
+| Sampled sounds | `smplr` 1.1.0 | Lazy per-track sounds on Tone's underlying context; original synth fallback. |
 | Microphone | `getUserMedia`, Web Audio | HTTPS/localhost, mic permission, client-only. |
 | Pitch | `pitchy` | `PitchDetector.forFloat32Array(4096)`. |
 | MIDI | `@tonejs/midi` | Encode a Standard MIDI File in browser. |
@@ -73,6 +74,10 @@ src/
     audio/
       playback-engine.ts     # implemented: testable scheduling and lifecycle
       tone-backend.ts        # implemented: Tone.js adapter and instrument voices
+      instrument-presets.ts  # implemented: stable IDs, defaults, catalog and drum mapping
+      smplr-backend.ts        # implemented: browser-only sampled instrument factory
+      preset-manager.ts      # implemented: async loading, fallback, resource leases
+      sampled-voice.ts       # implemented: per-note sample stop handles and velocity adapter
       click-track.ts         # implemented: metronome and playback count-in
       segment-notes.ts       # implemented: segmentPitchFrames(), tunable configuration
     persistence/
@@ -152,6 +157,7 @@ export interface Instrument {
 
 export interface Track {
   instrument: Instrument;
+  presetId: string;           // Stable category-specific sound ID; never an audio node or URL
   notes: Note[];
   muted: boolean;
   solo: boolean;
@@ -164,11 +170,11 @@ export const MAX_RECORD_SEC = 15;
 
 | Instrument | MIDI range | Notes |
 |---|---|---|
-| Melody | 60-84 (C4-C6) | sawtooth `PolySynth` |
-| Bass | 28-52 (E1-E3) | square `PolySynth` |
-| Keys | 48-72 (C3-C5) | triangle `PolySynth`; starts with a sample Am-F-C-G part |
-| Drums | rows 49 crash, 46 open hat, 42 hat, 38 snare, 36 kick | `MembraneSynth` + `NoiseSynth`s; starts with a sample beat |
-| Strings | 55-79 (G3-G5) | sine `PolySynth` |
+| Melody | 60-84 (C4-C6) | `melody.flute`; sawtooth `PolySynth` fallback |
+| Bass | 28-52 (E1-E3) | `bass.finger`; square `PolySynth` fallback |
+| Keys | 48-72 (C3-C5) | `keys.grand`; triangle `PolySynth` fallback; sample Am-F-C-G part |
+| Drums | rows 49 crash, 46 open hat, 42 hat, 38 snare, 36 kick | `drums.tr808`; `MembraneSynth`/`NoiseSynth` fallback; sample beat |
+| Strings | 55-79 (G3-G5) | `strings.ensemble`; sine `PolySynth` fallback |
 
 Lane geometry is derived in percent: `beatX(beat) = beat / 32 * 100`, `noteY(midi, inst) = (hi - midi) / rows * 100`. Never store pixel coordinates.
 
@@ -178,7 +184,7 @@ Lane geometry is derived in percent: `beatX(beat) = beat / 32 * 100`, `noteY(mid
 interface ProjectV2 {
   schemaVersion: 2;
   id: string; name: string; bpm: number; quantize: QuantizeDivision;
-  tracks: { instrumentId: string; notes: Note[]; muted: boolean; solo: boolean }[];
+  tracks: { instrumentId: string; presetId: string; notes: Note[]; muted: boolean; solo: boolean }[];
   createdAt: string; updatedAt: string;
 }
 ```
@@ -469,21 +475,29 @@ Person 2 assignment. Playback does not change the canonical `Note` fields or
 store audio resources in tracks. The versioned multi-track persistence contract
 in section 3.1 remains an integration-owner task.
 
-### Public interface (implemented, `src/lib/playback.ts`)
+### Public interface (implemented, `src/lib/playback.ts` and engine)
 
 ```ts
 // Public functions exported by src/lib/playback.ts:
-export function ensureAudio(): Promise<void>;
-export function schedule(tracks: readonly Track[], bpm: number): void;
-export function play(): void;
-export function pause(): void;
-export function stop(): void;
-export function rewind(): void;
-export function positionBeats(): number;
-export function state(): "started" | "paused" | "stopped";
-export function setMetronome(enabled: boolean): void;
-export function countIn(bpm: number, onBeat?: (remaining: number) => void): Promise<boolean>;
+export function ensureAudio(): Promise<PlaybackEngine>;
+export function getEngine(): PlaybackEngine | null;
 export function dispose(): void;
+
+// Methods of the returned PlaybackEngine:
+interface PlaybackEngine {
+schedule(tracks: readonly Track[], bpm: number): void;
+prepare(tracks: readonly Track[], retry?: boolean): Promise<void>;
+subscribePresets(listener: (status: PresetStatus) => void): () => void;
+play(): void;
+pause(): void;
+stop(): void;
+rewind(): void;
+positionBeats(): number;
+state(): "started" | "paused" | "stopped";
+setMetronome(enabled: boolean): void;
+countIn(bpm: number, onBeat?: (remaining: number) => void): Promise<boolean>;
+dispose(): void;
+}
 ```
 
 `playback.ts` exposes `ensureAudio()` (resolves to the engine), `getEngine()` (null until a Play click) and `dispose()`. `Studio.tsx` re-calls `engine.schedule()` whenever `tracks` or `bpm` change (once an engine exists), reads `positionBeats()` in a `requestAnimationFrame` loop, and uses `state()` to keep the controls aligned with the transport. It calls `dispose()` on unmount and shows an error if audio startup fails.
@@ -491,7 +505,7 @@ export function dispose(): void;
 Contract and lifecycle:
 
 - Use `Tone.start()` in the user-gesture initialization path and await its promise.
-- Import Tone only during browser initialization after a Play gesture. Use a shared `Tone.getTransport()` and simple `Tone.PolySynth`; use synthesized percussion rather than downloaded samples.
+- Import Tone and smplr only during browser initialization after a Play, Record, or Sound-selection gesture. Use a shared `Tone.getTransport()` and `Tone.getContext().rawContext`; never introduce smplr's sequencer or a second playback clock. Original synths remain the fallback and supply the metronome.
 - Convert `startBeat` to transport ticks (`Math.round(startBeat * transport.PPQ)`) and use supported tick/musical-time scheduling; this avoids hard-coding an absolute seconds timeline that becomes wrong when BPM changes.
 - Use the transport callback's scheduled `time` parameter for synth attacks/releases, not `Date.now()`/`setTimeout()`.
 - Schedule melodic note releases in ticks as well as attacks, so note lengths remain aligned to beats after tempo changes. Release boundary notes through the transport's `loopEnd` event because the loop resets before processing beat 32.
@@ -500,13 +514,23 @@ Contract and lifecycle:
 - Validate BPM 60..180 before replacing the existing schedule. `Track[]` is typed app state and is not re-validated here; untrusted note data is validated once at JSON import (section 10). Playback covers the visible 32-beat loop; later onsets are silent and note ends are clipped at its boundary.
 - Muted tracks are silent even when soloed. Multiple solo tracks play together. Independent synth lanes preserve durations of overlapping notes at the same pitch. Synthesized drums support MIDI 36, 38, 42, 46, and 49 with fixed percussive envelopes rather than sustained pitched-note durations.
 - `positionBeats` reads transport ticks at the current audible AudioContext time, excluding Tone's lookahead. Before initialization `getEngine()` returns `null`.
-- The optional metronome accents every four beats. `countIn` schedules four clicks on the audio clock without advancing the arrangement, and resolves `false` on pause/stop/rewind/reschedule/disposal. Count-in currently precedes playback; recording count-in remains a Person 1/4 integration decision, and must start microphone-relative timestamps only after counting completes.
+- The optional metronome accents every four beats. `countIn` schedules four clicks on the audio clock without advancing the arrangement, and resolves `false` on pause/stop/rewind/reschedule/disposal. Recording also counts in, then plays only clicks; microphone-relative timestamps start after counting completes. Background sample readiness while paused/stopped must not cancel this count-in.
 - MIDI pitch is numeric in state. At synth boundary convert to note name/frequency with Tone helpers or verified pitch conversion; never change canonical note format.
 - The editor is the canonical state. Tone.js scheduling is a **derived side effect**, never the only copy of the arrangement.
 
+### Per-track sample selection and lifecycle
+
+`instrument-presets.ts` holds 20 options (Melody 5, Bass 4, Keys 4, Strings 4, Drums 3), validated against installed smplr catalogs. The full catalog, exclusions, and verification are in [`SMPLR_INTEGRATION.md`](SMPLR_INTEGRATION.md). `presetForTrack(category, undefined)` supplies a missing legacy field's default; unknown/cross-category IDs reject before any schedule changes. Future JSON import must apply this migration and validation. Persistence itself is still unimplemented.
+
+The labeled native selector sits directly beneath each expanded title. Changing it updates only that track's `presetId`; note arrays, IDs, pitch/timing, mute/solo, and category remain unchanged. Loading and fallback status stay outside serializable state. Play awaits audible selections; an explicit choice preloads even an empty track. Audio starts only on a user gesture.
+
+`preset-manager.ts` deduplicates loads, ignores stale completions, retains the previous working sound on failure, and times out after 20 seconds. `smplr-backend.ts` caches decoded buffers, loads the category's pitch range/all velocity layers, rejects missing samples, and fetches only HTTPS assets from fixed sources without credentials. Asset sources/licenses are listed in [`public/sound-credits.txt`](public/sound-credits.txt), also linked from the selector. Raw microphone data is never sent to those hosts.
+
+Sample resources are leased by independent voices and disposed only after their last lease ends. Each attack has a unique stop ID and owned stop handle. Absolute start/release times come from Tone callbacks; normalized velocity is clamped and rounded to 0..127. Pause immediately cancels even lookahead attacks and scheduled release tails. GM drum 36/38/42/46/49 maps to each loaded kit's verified group/sample aliases; melodic note-off does not choke one-shot drums, while pause/loop-end/disposal still stops them. A ready sound reschedules active playback at the same beat; paused/stopped playback has no voices to replace.
+
 ## 10. Project persistence
 
-**Status: target (Person 4).** Must save **every track** (instrument id, notes, mute/solo) plus BPM and quantize, using the versioned format from 3.1. The v1 contract below remains the baseline and must stay loadable.
+**Status: target (Person 4).** Must save **every track** (instrument id, preset id, notes, mute/solo) plus BPM and quantize, using the versioned format from 3.1. Missing legacy preset IDs receive defaults; unknown/cross-category IDs reject. The v1 contract below remains the baseline and must stay loadable.
 
 ### Storage contract
 
@@ -605,7 +629,7 @@ type ProjectAction =
 
 ### Unit tests (use synthetic fixtures)
 
-`npm test` runs 46 tests: 17 playback, 6 harmony, 12 segmentation, and 11 generation tests. Transcription fixtures cover 100 ms pitch wobbles, vibrato, 120 ms dropouts at 10/20/40 ms frame hops, the 150 ms silence boundary, genuine pitch changes/rests, harmony merging, all grids across 60/120/180 BPM, Off timing, instrument ranges, invalid input, immutability, and the async UI seam. Playback covers repeated scheduling, five-track timing, tempo changes, mute/solo, overlapping notes, transport lifecycle, invalid inputs, teardown, and metronome/count-in cancellation. Persistence, MIDI, and real-microphone checks below remain targets.
+`npm test` runs 65 tests: 22 playback, 14 preset loading/voice, 6 harmony, 12 segmentation, and 11 generation tests. Transcription fixtures cover 100 ms pitch wobbles, vibrato, 120 ms dropouts at 10/20/40 ms frame hops, the 150 ms silence boundary, genuine pitch changes/rests, harmony merging, all grids across 60/120/180 BPM, Off timing, instrument ranges, invalid input, immutability, and the async UI seam. Playback covers repeated scheduling, five-track timing, tempo changes, mute/solo, overlapping notes, transport lifecycle, invalid inputs, teardown, metronome/count-in cancellation, and preset selection. Preset fixtures cover catalog/defaults, GM aliases, stale loads, failure/timeout/retry, shared leases, velocity conversion, and individual stop handles. Persistence and real-microphone checks below remain targets; browser MIDI byte preservation is documented in [`SMPLR_INTEGRATION.md`](SMPLR_INTEGRATION.md).
 
 | ID | Input | Expected result |
 |---|---|---|
@@ -645,7 +669,9 @@ type ProjectAction =
 - [ ] Save JSON, refresh, reopen JSON; every track, BPM, and mute/solo survive.
 - [ ] MIDI export opens in a MIDI application with one track per instrument, correct pitches and tempo.
 - [ ] Stop/cancel/unmount releases mic; browser recording indicator clears.
-- [x] `npm test` (46 tests), lint (excluding stale `.test-build/**`), `npx tsc --noEmit`, and `npm run build` pass (2026-10-10).
+- [x] `npm test` (65 tests), `npm run lint` (legacy `.test-build/**` ignored), `npx tsc --noEmit`, and `npm run build` pass for the preset integration (2026-10-10; final validation in [`SMPLR_INTEGRATION.md`](SMPLR_INTEGRATION.md)).
+- [x] Automated desktop Edge checks load and play all 20 sampled sounds, preserve note bars and exported MIDI bytes, exercise fallback/retry and rapid/live switching, and confirm one shared audio clock. Output RMS is positive during playback and zero after Pause; this is audio analysis, not human listening.
+- [x] Automated Edge transport checks cover pause/resume, stop, rewind, 60/180 BPM, 32-beat looping, mute/solo, metronome, and playback count-in cancellation. Reload/navigation closes the old audio context. Human listening on the demo laptop remains required.
 
 ### Benchmarks, explicitly aspirational
 

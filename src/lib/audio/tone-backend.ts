@@ -1,5 +1,7 @@
 import * as Tone from "tone";
 import type { PlaybackBackend, PlaybackVoice } from "./playback-engine";
+import { createPresetManager } from "./preset-manager";
+import { createSmplrFactory } from "./smplr-backend";
 
 /** Resume the shared AudioContext only after a user gesture. */
 export const unlockAudio = () => Tone.start();
@@ -48,6 +50,20 @@ function drumKit(): PlaybackVoice {
 /** Adapt Tone 15 transport to tick scheduling; owns no canonical project state. */
 export function createToneBackend(): PlaybackBackend {
   const transport = Tone.getTransport();
+  // Tone exposes a standardized-audio-context wrapper. smplr accepts that same
+  // underlying context; the cast bridges declarations without creating a new clock.
+  const context = Tone.getContext().rawContext as unknown as AudioContext;
+  const createFallback = (id: string): PlaybackVoice => {
+    switch (id) {
+      case "melody": return synth("sawtooth", 0.15, -18);
+      case "bass": return synth("square", 0.1, -18);
+      case "keys": return synth("triangle", 0.3, -18);
+      case "strings": return synth("sine", 0.6, -16);
+      case "drums": return drumKit();
+      default: throw new RangeError("Unsupported playback instrument.");
+    }
+  };
+  const presets = createPresetManager(createSmplrFactory(context), createFallback, () => context.currentTime);
   return {
     ppq: transport.PPQ,
     get state() { return transport.state; },
@@ -73,24 +89,22 @@ export function createToneBackend(): PlaybackBackend {
       transport.on("loopEnd", callback);
       return () => { transport.off("loopEnd", callback); };
     },
-    createVoice: (id) => {
-      switch (id) {
-        case "melody": return synth("sawtooth", 0.15, -18);
-        case "bass": return synth("square", 0.1, -18);
-        case "keys": return synth("triangle", 0.3, -18);
-        case "strings": return synth("sine", 0.6, -16);
-        case "drums": return drumKit();
-        case "metronome": {
-          const click = new Tone.Synth({ volume: -20, oscillator: { type: "sine" }, envelope: { attack: 0.001, decay: 0.02, sustain: 0, release: 0.01 } }).toDestination();
-          return {
-            attack: (midi, time, velocity) => { click.triggerAttackRelease(Tone.Frequency(midi, "midi").toFrequency(), 0.025, time, velocity); },
-            release: () => {},
-            releaseAll: (time) => { click.triggerRelease(time); },
-            dispose: () => { click.dispose(); },
-          };
-        }
-        default: throw new RangeError("Unsupported playback instrument.");
+    syncPresets: presets.sync,
+    preparePresets: presets.prepare,
+    subscribePresets: presets.subscribe,
+    onPresetReady: presets.onReady,
+    dispose: presets.dispose,
+    createVoice: (id, presetId) => {
+      if (id === "metronome") {
+        const click = new Tone.Synth({ volume: -20, oscillator: { type: "sine" }, envelope: { attack: 0.001, decay: 0.02, sustain: 0, release: 0.01 } }).toDestination();
+        return {
+          attack: (midi, time, velocity) => { click.triggerAttackRelease(Tone.Frequency(midi, "midi").toFrequency(), 0.025, time, velocity); },
+          release: () => {},
+          releaseAll: (time) => { click.triggerRelease(time); },
+          dispose: () => { click.dispose(); },
+        };
       }
+      return presets.createVoice(id, presetId);
     },
   };
 }
