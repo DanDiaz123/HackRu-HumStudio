@@ -2,7 +2,7 @@ import type { HumFrame } from "./hum";
 import { MAX_SEGMENTATION_FRAMES, segmentPitchFrames, type SegmentationConfig } from "./audio/segment-notes.ts";
 import { DEFAULT_NOTE_SENSITIVITY, NOTE_SENSITIVITY_LEVELS, noteSensitivityConfig, type NoteSensitivity } from "./audio/note-sensitivity.ts";
 import { type Harmony, type Key, chordAt, detectKey, fitToHarmony, nearest, pickChords, snapToScale } from "./music/harmony.ts";
-import { DRUM_ROWS, type Instrument, type Note, type QuantizeDivision, QUANT_BEATS, TOTAL_BEATS, noteId } from "./tracks.ts";
+import { DRUM_ROWS, drumPart, type DrumPart, type Instrument, type Note, type QuantizeDivision, QUANT_BEATS, TOTAL_BEATS, noteId } from "./tracks.ts";
 
 export type NoteSensitivityVariants = Record<NoteSensitivity, Note[]>;
 
@@ -27,9 +27,10 @@ export async function generateTrack(
   quantize: QuantizeDivision,
   harmony: Harmony,
   sensitivity: NoteSensitivity = DEFAULT_NOTE_SENSITIVITY,
+  selectedDrumPart?: DrumPart,
 ): Promise<Note[]> {
   noteSensitivityConfig(sensitivity);
-  return generateNotes(inst, frames, bpm, quantize, harmony, undefined, sensitivity);
+  return generateNotes(inst, frames, bpm, quantize, harmony, undefined, sensitivity, selectedDrumPart);
 }
 
 /** Generate Low, Medium, and High from one take so changing the menu never needs another recording. */
@@ -41,12 +42,13 @@ export function generateTrackVariants(
   harmony: Harmony,
   selected: NoteSensitivity = DEFAULT_NOTE_SENSITIVITY,
   trace?: GenTrace,
+  selectedDrumPart?: DrumPart,
 ): NoteSensitivityVariants {
   // The selected profile also determines the trace; reject it before generating any variants.
   noteSensitivityConfig(selected);
   const variants = {} as NoteSensitivityVariants;
   if (inst.kind === "drums") {
-    const notes = generateNotes(inst, frames, bpm, quantize, harmony, trace, selected);
+    const notes = generateNotes(inst, frames, bpm, quantize, harmony, trace, selected, selectedDrumPart);
     for (const level of NOTE_SENSITIVITY_LEVELS) variants[level] = notes.map((note) => ({ ...note }));
     return variants;
   }
@@ -74,6 +76,7 @@ export function generateNotes(
   harmony: Harmony,
   traceOrSensitivity?: GenTrace | NoteSensitivity,
   sensitivityOrTrace?: NoteSensitivity | GenTrace,
+  selectedDrumPart?: DrumPart,
 ): Note[] {
   if (!Number.isFinite(bpm) || bpm < 60 || bpm > 180) throw new RangeError("BPM must be between 60 and 180.");
   if (!Object.hasOwn(QUANT_BEATS, quantize)) throw new RangeError("Unsupported quantization.");
@@ -114,7 +117,7 @@ export function generateNotes(
       f.hz >= 80 && f.hz <= 1000 && Number.isFinite(f.rms) && f.rms >= 0.01).length,
     raw: [], key: { tonic: harmony.tonic, mode: harmony.mode }, grid,
   });
-  if (inst.kind === "drums") return drums(frames, beatsFrom, snap, trace);
+  if (inst.kind === "drums") return drums(frames, beatsFrom, snap, trace, selectedDrumPart);
 
   const line = (fit: (notes: Note[]) => Note[]) => hummedLine(inst, frames, beatsFrom, snap, grid, bpm, fit, config, trace);
   switch (inst.id) {
@@ -395,6 +398,7 @@ function drums(
   beatsFrom: (onsetsSec: number[]) => (t: number) => number,
   snap: (b: number) => number,
   trace?: GenTrace,
+  selectedPart?: DrumPart,
 ): Note[] {
   // Match segmentation's ordered, finite timestamp boundary; invalid amplitude cannot become velocity.
   let lastFrameSec = -Infinity;
@@ -445,14 +449,16 @@ function drums(
   for (const h of hits) {
     const raw = beatOf(h.tSec);
     const b = snap(raw);
-    const midi = h.kick ? KICK : (h.hiss ?? h.peak < 0.6 * loudest) ? HAT : SNARE;
+    // A selected drum part uses the detected onset rhythm only; vocal pitch/spectral shape
+    // never changes which lane receives the hit. Without a selection, retain the full kit classifier.
+    const midi = selectedPart ? drumPart(selectedPart).midi : h.kick ? KICK : (h.hiss ?? h.peak < 0.6 * loudest) ? HAT : SNARE;
     const note = { id: noteId(), midi, startBeat: b, durationBeats: midi === HAT ? 0.25 : 0.5, velocity: 0.5 + 0.45 * (h.peak / loudest) };
     if (raw < TOTAL_BEATS) trace?.raw.push({ ...note, startBeat: raw });
     if (b >= TOTAL_BEATS || taken.has(`${b}:${midi}`)) continue;
     taken.add(`${b}:${midi}`);
     out.push({ ...note, durationBeats: Math.min(note.durationBeats, TOTAL_BEATS - b) });
   }
-  if (out.length && !out.some((n) => n.midi === HAT)) {
+  if (!selectedPart && out.length && !out.some((n) => n.midi === HAT)) {
     const end = Math.min(TOTAL_BEATS, Math.ceil(beatOf(usable.at(-1)?.tSec ?? 0) / 4) * 4);
     for (let b = 0; b < end; b += 0.5)
       out.push({ id: noteId(), midi: HAT, startBeat: b, durationBeats: 0.25, velocity: b % 1 ? 0.45 : 0.7 });

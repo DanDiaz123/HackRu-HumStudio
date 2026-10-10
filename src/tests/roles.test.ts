@@ -78,6 +78,20 @@ test("drums: zero-crossing rate, not loudness, tells a hat from a snare", () => 
   assert.deepEqual(notes.map(n => n.midi), [42, 38]);
 });
 
+test("a selected drum part keeps the detected onset rhythm but uses only that lane", () => {
+  const frames: HumFrame[] = [];
+  const hit = (t: number) => {
+    for (let i = 0; i < 4; i++) frames.push({ tSec: t + i * 0.02, rms: 0.2, hz: 90, bins: new Float32Array(48) });
+    for (let i = 0; i < 21; i++) frames.push({ tSec: t + 0.08 + i * 0.02, rms: 0.003, hz: null, bins: new Float32Array(48) });
+  };
+  hit(0); hit(0.5); hit(1);
+  const notes = generateNotes(instrument("drums"), frames, 120, "1/16", DEFAULT_HARMONY,
+    undefined, undefined, "snare");
+  assert.ok(notes.length >= 3);
+  assert.ok(notes.every(note => note.midi === 38));
+  assert.deepEqual(notes.map(note => note.startBeat), [0, 1, 2]);
+});
+
 test("a take sung consistently late is shifted back onto the grid", () => {
   const lateSec = 0.07;
   const onsets = [0, 0.5, 1, 1.25, 1.75].map(t => t + lateSec);

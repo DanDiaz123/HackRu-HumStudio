@@ -4,7 +4,7 @@ import { DEFAULT_NOTE_SENSITIVITY, type NoteSensitivity, isNoteSensitivity } fro
 import { presetForTrack } from "../audio/instrument-presets.ts";
 import { DEFAULT_HARMONY, type Harmony, inferHarmony } from "../music/harmony.ts";
 import type { Note, QuantizeDivision } from "../music/types.ts";
-import { INSTRUMENTS, QUANT_BEATS, TOTAL_BEATS, type Track } from "../tracks.ts";
+import { DRUM_PARTS, INSTRUMENTS, QUANT_BEATS, TOTAL_BEATS, drumPart, type DrumPart, type Track } from "../tracks.ts";
 
 export const STORAGE_KEY = "humstudio:project:v2";
 export const MAX_PROJECT_CHARS = 2_000_000;
@@ -20,7 +20,7 @@ export interface ProjectV2 {
   quantize: QuantizeDivision;
   sensitivity: NoteSensitivity;
   harmony: Harmony;
-  tracks: { instrumentId: string; presetId: string; notes: Note[]; muted: boolean; solo: boolean; sample: boolean }[];
+  tracks: { instrumentId: string; presetId: string; drumPart?: DrumPart; notes: Note[]; muted: boolean; solo: boolean; sample: boolean }[];
   createdAt: string;
   updatedAt: string;
 }
@@ -48,6 +48,7 @@ export function toProject(p: LoadedProject, now = new Date()): ProjectV2 {
     harmony: { tonic: p.harmony.tonic, mode: p.harmony.mode, bars: p.harmony.bars.map((chord) => [...chord]) },
     tracks: p.tracks.map((t) => ({
       instrumentId: t.instrument.id, presetId: t.presetId,
+      ...(t.instrument.kind === "drums" ? { drumPart: drumPart(t.drumPart).id } : {}),
       notes: t.notes.map(({ id, midi, startBeat, durationBeats, velocity }) => ({ id, midi, startBeat, durationBeats, velocity })),
       muted: t.muted, solo: t.solo, sample: t.sample,
     })),
@@ -112,7 +113,7 @@ function harmony(v: unknown): Harmony {
 }
 
 const emptyTrack = (i: (typeof INSTRUMENTS)[number]): Track =>
-  ({ instrument: i, presetId: presetForTrack(i.id).id, notes: [], muted: false, solo: false, sample: false });
+  ({ instrument: i, presetId: presetForTrack(i.id).id, ...(i.kind === "drums" ? { drumPart: drumPart(undefined).id } : {}), notes: [], muted: false, solo: false, sample: false });
 
 /** Validate untrusted JSON fully, or throw with a user-facing message. Never partially applies. */
 export function parseProject(input: string): LoadedProject {
@@ -150,7 +151,7 @@ export function parseProject(input: string): LoadedProject {
   if (!Array.isArray(raw.tracks) || raw.tracks.length > INSTRUMENTS.length) fail("bad track list");
   const saved = new Map<string, Track>();
   for (const t of raw.tracks as unknown[]) {
-    const rec = strictObject(t, ["instrumentId", "presetId", "notes", "muted", "solo", "sample"], "track");
+    const rec = strictObject(t, ["instrumentId", "presetId", "drumPart", "notes", "muted", "solo", "sample"], "track");
     const inst = INSTRUMENTS.find((i) => i.id === rec.instrumentId) ?? fail("unknown instrument");
     if (saved.has(inst.id)) fail("duplicate track");
     let presetId: string;
@@ -160,8 +161,15 @@ export function parseProject(input: string): LoadedProject {
     } catch {
       return fail("unknown sound");
     }
+    let selectedDrumPart: DrumPart | undefined;
+    if (rec.drumPart !== undefined) {
+      if (inst.kind !== "drums" || !DRUM_PARTS.some((part) => part.id === rec.drumPart)) fail("bad drum part");
+      selectedDrumPart = rec.drumPart as DrumPart;
+    } else if (inst.kind === "drums") {
+      selectedDrumPart = drumPart(undefined).id;
+    }
     saved.set(inst.id, {
-      instrument: inst, presetId, notes: notes(rec.notes, seen),
+      instrument: inst, presetId, ...(selectedDrumPart ? { drumPart: selectedDrumPart } : {}), notes: notes(rec.notes, seen),
       muted: bool(rec.muted, "mute"), solo: bool(rec.solo, "solo"), sample: bool(rec.sample, "sample"),
     });
   }

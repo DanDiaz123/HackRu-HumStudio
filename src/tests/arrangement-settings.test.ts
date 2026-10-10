@@ -77,6 +77,19 @@ test("Snap updates overlapping manual chord notes, retains IDs, and restores uns
   assert.equal(restored.tracks.find(track => track.instrument.id === "drums")!.sample, true);
 });
 
+test("Snap rebuilds a selected Drum part without dropping the other rhythm lanes", () => {
+  const drums = inst("drums");
+  const frames = pitchFrames([{ midi: null, durationSec: 0.18, rms: 0.2 }, { midi: null, durationSec: 0.32, rms: 0.003 },
+    { midi: null, durationSec: 0.18, rms: 0.2 }]);
+  const take = { frames, bpm: 120, drumPart: "snare" as const,
+    variants: generateTrackVariants(drums, frames, 120, "off", DEFAULT_HARMONY, "medium", undefined, "snare") };
+  const next = applyNoteSettings(input({ takes: { drums: take }, quantize: "1/4", resnap: true }));
+  const notes = next.tracks.find(track => track.instrument.id === "drums")!.notes;
+  assert.ok(notes.some(note => note.midi === 36), "existing kick lane survives");
+  assert.ok(notes.some(note => note.midi === 38), "selected snare lane is generated");
+  assert.ok(notes.every(note => note.midi !== 42 || note.startBeat < 32), "other lanes remain valid");
+});
+
 test("a stricter profile that finds no notes retains the working part", () => {
   const melody = take("melody");
   melody.variants.low = [];
