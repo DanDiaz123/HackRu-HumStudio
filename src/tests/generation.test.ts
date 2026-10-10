@@ -125,3 +125,8 @@ test("the existing async recording seam uses the same stable generation path", a
   const actual = await generateTrack(instrument("melody"), frames, 120, "off", DEFAULT_HARMONY);
   assert.deepEqual(timing(actual), timing(expected));
 });
+
+test("a silent drum take returns no notes, not fill-in hats", () => {
+  const frames = pitchFrames([{ midi: null, durationSec: 2 }]);
+  assert.deepEqual(generateNotes(instrument("drums"), frames, 120, "1/8", DEFAULT_HARMONY), []);
+});

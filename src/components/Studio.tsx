@@ -214,7 +214,9 @@ export default function Studio() {
       stopRef.current?.();
       stopRef.current = null;
       if (!zoomed) return;
-      if (taken.filter((f) => f.hz).length < 10) {
+      // Beatbox hits are mostly unvoiced, so drums count loud frames instead of pitched ones.
+      const heard = zoomed.instrument.kind === "drums" ? (f: HumFrame) => f.rms > 0.02 : (f: HumFrame) => f.hz !== null;
+      if (taken.filter(heard).length < 10) {
         setPhase("error");
         setError("We didn't catch a hum. Get closer to the mic and try again.");
         return;
@@ -315,6 +317,7 @@ export default function Studio() {
     }
     // Stop button finishes with the live array.
     stopTake.current = () => {
+      if (done) return; // a double-click or the time limit already finished this take
       done = true;
       void finish(taken);
     };

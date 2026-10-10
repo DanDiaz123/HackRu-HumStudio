@@ -661,7 +661,7 @@ type ProjectAction =
 - [ ] Save JSON, refresh, reopen JSON; every track, BPM, and mute/solo survive.
 - [ ] MIDI export opens in a MIDI application with one track per instrument, correct pitches and tempo.
 - [ ] Stop/cancel/unmount releases mic; browser recording indicator clears.
-- [x] `npm test` (46 tests), lint (excluding stale `.test-build/**`), `npx tsc --noEmit`, and `npm run build` pass (2026-10-10).
+- [x] `npm test` (66 tests), lint, `npx tsc --noEmit`, and `npm run build` pass (2026-10-10).
 
 ### Benchmarks, explicitly aspirational
 
