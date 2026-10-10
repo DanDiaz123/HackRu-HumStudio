@@ -32,8 +32,9 @@ Pick an instrument track
 - [x] **Arrangement view:** five instrument tracks over 8 bars of 4/4, with a transport bar (play/pause/stop, rewind, position, metronome, playback count-in, BPM, snap, Export MIDI).
 - [x] **Zoom:** clicking a track floods it with its color and collapses the others; Escape or "All tracks" returns.
 - [x] **Record:** microphone capture (up to 15 s or the end of the timeline) with Pitchy pitch estimation and a live spectrogram.
-- [x] **Generate:** stable pitch segmentation, harmony fitting, and Off/1/4/1/8/1/16 timing for melodic tracks.
-- [x] **Reveal:** shows the pipeline's real stages: the hummed notes print in, slide onto the grid and into the key, then the key and chords stamp in. Skipped under reduced motion.
+- [x] **Generate:** stable pitch segmentation, instrument-role shaping, and Off/1/4/1/8/1/16 timing for captured parts.
+- [x] **Sensitivity:** Low, Medium, and High profiles are generated from each take and can be swapped from the transport; changing Snap immediately regenerates captured parts on the selected grid.
+- [x] **Reveal:** shows the pipeline's real stages: the hummed notes print in, move onto the grid where applicable, then the key and chords stamp in. Skipped under reduced motion.
 - [x] **Learn:** chord names and roman numerals on the zoomed lane's bar grid (the current chord lights during playback), key and part role in the track panel, do-re-mi on notes, and a live pitch readout (note, degree, cents) while recording.
 - [x] **Play:** Tone.js playback of all tracks with mute/solo and BPM 60–180.
 - [x] **Track sounds:** independent smplr preset dropdowns beneath expanded track titles, with lazy loading, retry, and the original synth fallback.
@@ -67,7 +68,7 @@ The demo targets **clear, one-note-at-a-time humming** in a reasonably quiet roo
 
 **Important:** Nothing in this repo is a trained AI model. Pitch detection is DSP (Pitchy), and note generation uses deterministic heuristics. Describe it accurately when presenting.
 
-Held notes tolerate short pitch wobbles and unvoiced gaps: defaults are 120 ms of stable pitch before a change, 150 ms of silence hold, and a five-frame median with a 0.7-semitone hold region. Harmony correction happens before merging; confirmed rests still separate notes. Off preserves unsnapped beat timing. Repeated syllables on one pitch split on a level dip, and short octave slips are folded back. These values are tunable in `SEGMENTATION_DEFAULTS`; repeated notes separated only by near-silence of 150 ms or less can merge.
+Held notes tolerate short pitch wobbles and unvoiced gaps. Choose Low for large, sustained pitch changes, Medium for balanced response, or High for smaller, faster changes; the thresholds are grouped in `src/lib/audio/note-sensitivity.ts`. Each take stores all three generated note sets, so changing sensitivity swaps the visible notes without recording again. Changing Snap regenerates captured tracks immediately from local pitch-analysis frames. Melody keeps confirmed semitone changes instead of forcing every note into its detected scale; the detected melody still drives the song key and chords. Repeated syllables on one pitch split on a level dip, and short octave slips are folded back. Repeated notes separated only by near-silence of 150 ms or less can merge.
 
 ## Getting started
 
@@ -87,7 +88,7 @@ npm ci
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). Keys and Drums start with labeled sample notes. Press Play to unlock audio; Pause holds the position, Stop resets it, and Rewind returns to the start while preserving playback state. The **M** transport button toggles the metronome; **4** toggles a count-in before playback. Stop also cancels a pending count-in. A default tempo of 120 BPM and 1/16 snapping follow the shared contract.
+Open [http://localhost:3000](http://localhost:3000). Keys and Drums start with labeled sample notes. Press Play to unlock audio; Pause holds the position, Stop resets it, and Rewind returns to the start while preserving playback state. The **M** transport button toggles the metronome; **4** toggles a count-in before playback. Stop also cancels a pending count-in. A default tempo of 120 BPM, 1/4 snapping, and Medium note sensitivity follow the shared contract.
 
 No microphone handy? Open a track and press **Demo hum**: it feeds a synthetic, clearly labeled hum through the same pipeline.
 

@@ -904,7 +904,8 @@ button.lane:focus-visible {
   .transport-group .position {
     display: none;
   }
-  .harmony-field span {
+  .harmony-field span,
+  .sensitivity-field span {
     display: inline;
   }
   .export {
