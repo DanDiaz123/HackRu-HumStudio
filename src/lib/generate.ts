@@ -1,17 +1,19 @@
 import type { HumFrame } from "./hum";
-import { MAX_SEGMENTATION_FRAMES, SEGMENTATION_DEFAULTS, segmentPitchFrames } from "./audio/segment-notes.ts";
+import { MAX_SEGMENTATION_FRAMES, type SegmentationConfig, segmentPitchFrames } from "./audio/segment-notes.ts";
+import { DEFAULT_NOTE_SENSITIVITY, type NoteSensitivity, noteSensitivityConfig } from "./audio/note-sensitivity.ts";
 import { type Harmony, type Key, chordAt, detectKey, fitToHarmony, nearest, pickChords, snapToScale } from "./music/harmony.ts";
 import { DRUM_ROWS, type Instrument, type Note, type QuantizeDivision, QUANT_BEATS, TOTAL_BEATS, noteId } from "./tracks.ts";
 
-/** Generates canonical notes; raw audio stays local. */
+/** Generates canonical notes for the selected hum sensitivity (Medium by default); raw audio stays local. */
 export async function generateTrack(
   inst: Instrument,
   frames: HumFrame[],
   bpm: number,
   quantize: QuantizeDivision,
   harmony: Harmony,
+  sensitivity: NoteSensitivity = DEFAULT_NOTE_SENSITIVITY,
 ): Promise<Note[]> {
-  return generateNotes(inst, frames, bpm, quantize, harmony);
+  return generateNotes(inst, frames, bpm, quantize, harmony, sensitivity);
 }
 
 /**
@@ -23,6 +25,7 @@ export async function generateTrack(
  * Invalid tempo/grid or oversized input throws; unusable melodic frames return []
  * so the recording UI can preserve existing notes.
  * Pass `trace` to read back the intermediate stages (for the reveal animation).
+ * Sensitivity affects melodic pitch segmentation; drum onsets and rhythm snapping are separate.
  */
 export function generateNotes(
   inst: Instrument,
@@ -30,11 +33,13 @@ export function generateNotes(
   bpm: number,
   quantize: QuantizeDivision,
   harmony: Harmony,
+  sensitivity: NoteSensitivity = DEFAULT_NOTE_SENSITIVITY,
   trace?: GenTrace,
 ): Note[] {
   if (!Number.isFinite(bpm) || bpm < 60 || bpm > 180) throw new RangeError("BPM must be between 60 and 180.");
   if (!Object.hasOwn(QUANT_BEATS, quantize)) throw new RangeError("Unsupported quantization.");
   if (!Array.isArray(frames) || frames.length > MAX_SEGMENTATION_FRAMES) throw new RangeError("Too many analysis frames.");
+  const config = noteSensitivityConfig(sensitivity);
   const grid = QUANT_BEATS[quantize];
   // Shift the whole take by the constant offset that best fits its onsets to the grid, then convert to beats.
   const beatsFrom = (onsetsSec: number[]) => {
@@ -45,7 +50,7 @@ export function generateNotes(
   if (trace) Object.assign(trace, { voicedFrames: frames.filter((f) => f.hz !== null).length, raw: [], key: { tonic: harmony.tonic, mode: harmony.mode }, grid });
   if (inst.kind === "drums") return drums(frames, beatsFrom, snap, trace);
 
-  const line = (fit: (notes: Note[]) => Note[]) => hummedLine(inst, frames, beatsFrom, snap, grid, bpm, fit, trace);
+  const line = (fit: (notes: Note[]) => Note[]) => hummedLine(inst, frames, beatsFrom, snap, grid, bpm, fit, config, trace);
   switch (inst.id) {
     case "bass":
       return bassRole(line((n) => fitToHarmony(n, inst, harmony)), inst, harmony);
@@ -55,11 +60,12 @@ export function generateNotes(
     case "strings":
       return stringsRole(line((n) => fitToHarmony(n, inst, harmony)), inst, harmony);
     default:
-      // Melody sets the key (Studio infers chords from it), so it snaps to its own detected scale.
+      // Melody sets the key (Studio infers chords from it). Low snaps it to its own detected scale;
+      // Medium/High trust the hummed pitches so confirmed chromatic steps survive.
       return melodyRole(line((n) => {
         const key = detectKey(n);
         if (trace) trace.key = key;
-        return fitToHarmony(n, inst, { ...harmony, ...key });
+        return sensitivity === "low" ? fitToHarmony(n, inst, { ...harmony, ...key }) : n;
       }), inst);
   }
 }
@@ -127,9 +133,10 @@ function hummedLine(
   grid: number,
   bpm: number,
   fit: (notes: Note[]) => Note[],
+  config: Readonly<SegmentationConfig>,
   trace?: GenTrace,
 ): Note[] {
-  const segments = segmentPitchFrames(frames);
+  const segments = segmentPitchFrames(frames, config);
   const beatOf = beatsFrom(segments.map((r) => r.startSec));
   const shift = octaveShift(inst, segments.map((r) => r.midi));
   const staged = segments.map((r) => {
@@ -145,7 +152,7 @@ function hummedLine(
   const fitted = fit(staged.map(({ note }) => note));
   const merged: { note: Note; phraseId: number }[] = [];
   // A duration, not a time: beatOf would add the alignment shift.
-  const mergeGapBeats = ((SEGMENTATION_DEFAULTS.silenceHoldMs / 1000) * bpm) / 60;
+  const mergeGapBeats = ((config.silenceHoldMs / 1000) * bpm) / 60;
   for (let i = 0; i < fitted.length; i++) {
     const note = fitted[i];
     const phraseId = staged[i].phraseId;

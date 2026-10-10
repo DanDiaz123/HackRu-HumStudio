@@ -101,7 +101,8 @@ test("bounded configuration and input size reject pathological work", () => {
     assert.throws(() => segmentPitchFrames([], { stableMs }), RangeError);
   assert.throws(() => segmentPitchFrames([], { medianWindow: 0 }), RangeError);
   assert.throws(() => segmentPitchFrames([], { medianWindow: 32 }), RangeError);
-  assert.throws(() => segmentPitchFrames([], { pitchToleranceSemitones: 1 }), RangeError);
+  for (const pitchToleranceSemitones of [NaN, Infinity, -1, 0.49, 3.01])
+    assert.throws(() => segmentPitchFrames([], { pitchToleranceSemitones }), RangeError);
   const frame = pitchFrames([{ midi: 60, durationSec: 0.2 }])[0];
   assert.throws(() => segmentPitchFrames(Array(MAX_SEGMENTATION_FRAMES + 1).fill(frame)), RangeError);
 });

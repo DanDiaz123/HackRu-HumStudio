@@ -232,10 +232,10 @@ interface Track { instrument: Instrument; presetId: string; notes: Note[]; muted
 2. Require 120 ms of consistent pitch before opening a note; retain the active/candidate pitch within a 0.7-semitone hold region to suppress vibrato.
 3. When a different pitch is stable for 120 ms, close the previous segment and start the next one at the candidate onset.
 4. Preserve pitch history across unvoiced gaps <= 150 ms. Longer silence closes at the last voiced frame and marks a new phrase; missing-frame gaps also separate phrases. Thresholds are measured in seconds independently of BPM.
-5. After harmony fitting, merge identical pitches within the same phrase before snapping. Confirmed rests still separate notes. Reject fragments shorter than 100 ms.
+5. Melody retains confirmed rounded pitches and defines harmony after the take; other melodic parts fit that harmony. Merge identical pitches within the same phrase before snapping. Confirmed rests still separate notes. Reject fragments shorter than 100 ms in Medium.
 6. Preserve the first and last observed voiced timestamps within the recording window.
 
-These constants are **starting heuristics**, configured in `SEGMENTATION_DEFAULTS`, not guaranteed-optimal thresholds. A level dip and return on one pitch re-strikes the note (1.8x RMS), but identical notes separated only by near-silence <= 150 ms still merge; fast pitch changes shorter than 120 ms can be suppressed. Real-device tuning uses the scored takes in `src/tests/takes/`.
+These constants are **starting heuristics**, configured as the Medium profile in `src/lib/audio/note-sensitivity.ts` (`SEGMENTATION_DEFAULTS`), not guaranteed-optimal thresholds. A level dip and return on one pitch re-strikes the note (1.8x RMS), but identical notes separated only by near-silence <= 150 ms still merge; fast pitch changes shorter than 120 ms can be suppressed. Real-device tuning uses the scored takes in `src/tests/takes/`. The top-menu Sensitivity select adds Low (1.5-semitone hold, 200 ms stability, seven-frame median) and High (0.5-semitone hold, 60 ms stability/minimum note, three-frame median); changing it or Snap re-generates every part that still has its take cached.
 
 ### 8.4 Beat conversion and quantization
 
@@ -313,7 +313,7 @@ Today `Studio.tsx` owns `Track[]`, BPM, and quantize in React state and replaces
 
 ### Automated checks
 
-- Implemented: 65 regression tests using TypeScript and Node's built-in test runner, covering playback (22), preset loading/voices (14), harmony (6), segmentation (12), and generation (11), including short wobbles/dropouts, real rests, tempo independence, Off timing, invalid input, stale loads, fallback/retry, and sample lifetimes. Browser evidence and remaining human checks are documented in [`SMPLR_INTEGRATION.md`](SMPLR_INTEGRATION.md).
+- Implemented: 77 regression tests using TypeScript and Node's built-in test runner, covering playback (23), preset loading/voices (14), harmony (6), segmentation (12), generation (11), and sensitivity (11). Fixtures include short wobbles/dropouts, real rests, the three sensitivity profiles, preserved Melody semitone changes, tempo independence, Off timing, invalid input, duplicate metronome ticks, stale loads, fallback/retry, and sample lifetimes. Preset browser evidence and remaining human checks are documented in [`SMPLR_INTEGRATION.md`](SMPLR_INTEGRATION.md).
 - Target: pure unit tests for `frequencyToMidi`, `secondsToBeats`, grid snapping, segment merging, note invariants, and MIDI export time conversion.
 - Target: round-trip test where project -> JSON -> validated project retains BPM, note count, positions and pitches.
 - Implemented: time-stamped synthetic `HumFrame[]` fixtures with known pitches, vibrato, short noise, and dropouts.

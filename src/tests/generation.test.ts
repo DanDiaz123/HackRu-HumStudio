@@ -136,7 +136,7 @@ test("the trace records the unsnapped hummed line, and melody ids come from it",
     { midi: 60, durationSec: 0.55 }, { midi: 64, durationSec: 0.55 }, { midi: 67, durationSec: 0.55 }, { midi: 72, durationSec: 0.55 },
   ]);
   const trace = {} as GenTrace;
-  const notes = generateNotes(instrument("melody"), frames, 120, "1/4", DEFAULT_HARMONY, trace);
+  const notes = generateNotes(instrument("melody"), frames, 120, "1/4", DEFAULT_HARMONY, undefined, trace);
   assert.ok(trace.voicedFrames > 0);
   assert.equal(trace.grid, 1);
   assert.deepEqual(trace.key, { tonic: 0, mode: "major" });
@@ -145,6 +145,6 @@ test("the trace records the unsnapped hummed line, and melody ids come from it",
   for (const n of notes) assert.ok(rawIds.has(n.id), n.id);
   // Bass splits at barlines and Keys/Strings add voices, so only some of their ids come from raw.
   const drumTrace = {} as GenTrace;
-  generateNotes(instrument("drums"), frames, 120, "1/4", DEFAULT_HARMONY, drumTrace);
+  generateNotes(instrument("drums"), frames, 120, "1/4", DEFAULT_HARMONY, undefined, drumTrace);
   assert.ok(Array.isArray(drumTrace.raw));
 });

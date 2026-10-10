@@ -1,4 +1,5 @@
 import type { HumFrame } from "../hum";
+import { noteSensitivityConfig } from "./note-sensitivity.ts";
 
 /** Analysis data needed for segmentation; spectrogram bins are deliberately ignored. */
 export type SegmentationFrame = Pick<HumFrame, "tSec" | "hz" | "rms">;
@@ -12,7 +13,7 @@ export interface SegmentedNote {
   phraseId: number;
 }
 
-/** Timing thresholds are milliseconds, independent of project tempo and frame rate. */
+/** Time thresholds are milliseconds; pitch tolerance is semitones from the held MIDI note. */
 export interface SegmentationConfig {
   stableMs: number;
   silenceHoldMs: number;
@@ -25,15 +26,7 @@ export interface SegmentationConfig {
   octaveHoldMs: number;
 }
 
-export const SEGMENTATION_DEFAULTS: Readonly<SegmentationConfig> = {
-  stableMs: 120,
-  silenceHoldMs: 150,
-  minNoteMs: 100,
-  medianWindow: 5,
-  pitchToleranceSemitones: 0.7,
-  reattackRatio: 1.8,
-  octaveHoldMs: 250,
-};
+export const SEGMENTATION_DEFAULTS: Readonly<SegmentationConfig> = noteSensitivityConfig();
 
 export const MAX_SEGMENTATION_FRAMES = 10_000;
 const EPSILON_SEC = 1e-9;
@@ -62,8 +55,8 @@ export function segmentPitchFrames(
   }
   if (!Number.isInteger(config.medianWindow) || config.medianWindow < 1 || config.medianWindow > 31)
     throw new RangeError("Median window must contain 1 to 31 frames.");
-  if (!Number.isFinite(config.pitchToleranceSemitones) || config.pitchToleranceSemitones < 0.5 || config.pitchToleranceSemitones >= 1)
-    throw new RangeError("Pitch tolerance must be at least 0.5 and less than 1 semitone.");
+  if (!Number.isFinite(config.pitchToleranceSemitones) || config.pitchToleranceSemitones < 0.5 || config.pitchToleranceSemitones > 3)
+    throw new RangeError("Pitch tolerance must be between 0.5 and 3 semitones.");
   if (!Number.isFinite(config.reattackRatio) || config.reattackRatio <= 1 || config.reattackRatio > 10)
     throw new RangeError("Re-attack ratio must be above 1 and at most 10.");
 

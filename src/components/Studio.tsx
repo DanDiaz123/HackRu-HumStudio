@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { type GenTrace, generateNotes } from "@/lib/generate";
+import { DEFAULT_NOTE_SENSITIVITY, NOTE_SENSITIVITY_LEVELS, NOTE_SENSITIVITY_PRESETS, isNoteSensitivity, type NoteSensitivity } from "@/lib/audio/note-sensitivity";
 import { type HumFrame, micErrorMessage, startDemoHum, startMic } from "@/lib/hum";
 import { exportMidi } from "@/lib/midi";
 import {
@@ -54,6 +55,7 @@ export default function Studio() {
   const [learn, setLearn] = useState(true);
   const [bpm, setBpm] = useState(120);
   const [quantize, setQuantize] = useState<QuantizeDivision>("1/4");
+  const [sensitivity, setSensitivity] = useState<NoteSensitivity>(DEFAULT_NOTE_SENSITIVITY);
   const [zoomedId, setZoomedId] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState("");
@@ -75,6 +77,8 @@ export default function Studio() {
   const stopRef = useRef<(() => void) | null>(null);
   // Re-record clears the part up front; a failed take puts it back (never lose a part to an empty take).
   const clearedRef = useRef<{ id: string; notes: Note[] } | null>(null);
+  // Analysis frames of each part's latest take (never audio), so Sensitivity/Snap can re-read it. Not persisted.
+  const takesRef = useRef<Record<string, HumFrame[]>>({});
   const playbackRequest = useRef(0);
   const arrangementRef = useRef({ tracks, bpm });
   const stopTake = useRef<() => void>(() => {});
@@ -277,7 +281,7 @@ export default function Studio() {
       try {
         const inst = zoomed.instrument;
         const trace = {} as GenTrace;
-        const notes = generateNotes(inst, taken, bpm, quantize, harmony, trace);
+        const notes = generateNotes(inst, taken, bpm, quantize, harmony, sensitivity, trace);
         if (!notes.length) throw new Error("empty");
         // A Melody take sets the key and chords, a Keys take re-picks the chords; other pitched parts
         // are re-fitted (moved, never deleted).
@@ -305,6 +309,7 @@ export default function Studio() {
           setReveal((r) => r && { ...r, step: i });
         }
         if (h) setHarmony(h);
+        takesRef.current[inst.id] = taken;
         clearedRef.current = null;
         setTracks((ts) =>
           ts.map((t) => {
@@ -321,7 +326,7 @@ export default function Studio() {
         setError("No notes came out of that take. Try a longer, steadier hum.");
       }
     },
-    [zoomed, bpm, quantize, harmony],
+    [zoomed, bpm, quantize, harmony, sensitivity],
   );
 
   function restoreCleared() {
@@ -408,6 +413,7 @@ export default function Studio() {
 
   /** A hand edit replaces the part's notes; an edited Sample is the user's part from then on. */
   function editNotes(id: string, notes: Note[]) {
+    delete takesRef.current[id];
     setTracks((ts) => ts.map((t) => (t.instrument.id === id ? { ...t, notes, sample: false } : t)));
   }
 
@@ -416,6 +422,29 @@ export default function Studio() {
   }
 
   const noteLabel = (m: number) => `${midiName(m).replace(/-?\d+$/, "")} ${solfege(m, harmony) ?? ""}`;
+
+  /**
+   * Re-read every kept take at a new sensitivity/snap without re-recording: Melody first (it sets the chords),
+   * then Keys (it re-picks them), then the rest. Hand-edited parts drop their take, so edits are never overwritten.
+   */
+  function regenerate(level: NoteSensitivity, division: QuantizeDivision) {
+    const takes = takesRef.current;
+    if (!Object.keys(takes).length) return;
+    const order = (id: string) => (id === "melody" ? 0 : id === "keys" ? 1 : 2);
+    let h = harmony;
+    const fresh: Record<string, Note[]> = {};
+    for (const t of [...tracks].sort((a, b) => order(a.instrument.id) - order(b.instrument.id))) {
+      const frames = takes[t.instrument.id];
+      if (!frames) continue;
+      const notes = generateNotes(t.instrument, frames, bpm, division, h, level);
+      if (!notes.length) continue; // keep what's there rather than erase a part
+      fresh[t.instrument.id] = notes;
+      if (t.instrument.id === "melody") h = inferHarmony(notes);
+      else if (t.instrument.id === "keys") h = chordsFromVoicing(notes, h);
+    }
+    if (h !== harmony) setHarmony(h);
+    setTracks((ts) => ts.map((t) => (fresh[t.instrument.id] ? { ...t, notes: fresh[t.instrument.id], sample: false } : h !== harmony ? refit(t, h) : t)));
+  }
 
   const rowH = (id: string) => {
     if (!zoomedId) return Math.max(56, avail / tracks.length);
@@ -473,11 +502,22 @@ export default function Studio() {
         </div>
         <label className="field">
           <span>Snap</span>
-          <select value={quantize} onChange={(e) => setQuantize(e.target.value as QuantizeDivision)} disabled={busy}>
+          <select value={quantize} onChange={(e) => { const d = e.target.value as QuantizeDivision; setQuantize(d); regenerate(sensitivity, d); }} disabled={busy}>
             <option value="off">Off</option>
             <option value="1/4">1/4</option>
             <option value="1/8">1/8</option>
             <option value="1/16">1/16</option>
+          </select>
+        </label>
+        <label className="field sensitivity-field">
+          <span>Sensitivity</span>
+          <select aria-label="Note sensitivity" value={sensitivity} disabled={busy}
+            title={`${NOTE_SENSITIVITY_PRESETS[sensitivity].description} Switching re-reads your takes; hand-edited parts are kept.`} onChange={event => {
+              if (isNoteSensitivity(event.target.value)) { setSensitivity(event.target.value); regenerate(event.target.value, quantize); }
+            }}>
+            {NOTE_SENSITIVITY_LEVELS.map(level => (
+              <option key={level} value={level}>{NOTE_SENSITIVITY_PRESETS[level].label}</option>
+            ))}
           </select>
         </label>
         <button className="export" aria-label="Export MIDI" onClick={() => exportMidi(tracks, bpm)} disabled={busy || tracks.every((t) => !t.notes.length)}>

@@ -83,10 +83,10 @@ Valid notes satisfy: integer MIDI 0..127; finite startBeat >= 0; finite duration
 **Multi-track contracts** (`src/lib/tracks.ts`, see `TECHNICAL_SPEC.md` 3.1-3.3): `Instrument`, `Track { instrument, presetId, notes, muted, solo, sample }`, `INSTRUMENTS` (Melody, Bass, Keys, Drums, Strings), `HumFrame`, and the generation seam:
 
 ```ts
-generateTrack(inst: Instrument, frames: HumFrame[], bpm: number, quantize: QuantizeDivision, harmony: Harmony): Promise<Note[]>
+generateTrack(inst: Instrument, frames: HumFrame[], bpm: number, quantize: QuantizeDivision, harmony: Harmony, sensitivity?: NoteSensitivity): Promise<Note[]>
 ```
 
-The song has one shared `Harmony` (`src/lib/music/harmony.ts`, `TECHNICAL_SPEC.md` 3.4): a Melody take sets the key and chords, a Keys take re-picks the chords, and other pitched tracks are fitted to them so separately hummed parts never clash. App state is `Track[]` plus `Harmony`; never flatten tracks when playing, exporting, or saving. `Project` v1 is single-track; the multi-track save format must be a **new schema version**, not an edit to v1.
+The song has one shared `Harmony` (`src/lib/music/harmony.ts`, `TECHNICAL_SPEC.md` 3.4): a Melody take sets the key and chords (snapped to that key only on Low sensitivity; Medium/High keep hummed semitones), a Keys take re-picks the chords, and other pitched tracks are fitted to them so separately hummed parts never clash. App state is `Track[]` plus `Harmony`; never flatten tracks when playing, exporting, or saving. `Project` v1 is single-track; the multi-track save format must be a **new schema version**, not an edit to v1.
 
 ## 4. Module boundaries
 
@@ -109,6 +109,7 @@ src/lib/audio/sampled-voice.ts   # per-attack stop handles and MIDI drum mapping
 src/lib/audio/click-track.ts     # metronome/count-in                                            (Person 2)
 src/lib/midi.ts                  # @tonejs/midi export                                           (Person 4)
 src/lib/audio/segment-notes.ts   # implemented: gated HumFrame -> SegmentedNote[] + rest boundary (Person 1)
+src/lib/audio/note-sensitivity.ts # Low/Medium/High tuning profiles and validated selection      (Person 1, shared)
 src/lib/persistence/             # target: multi-track JSON validation/save/import/export       (Person 4)
 src/tests/                       # playback, harmony, segmentation, generation regression suites
 ```
@@ -127,7 +128,7 @@ Extract smaller modules when it helps parallel work, but **keep separation of co
 - **Rhythm:** calculate seconds relative to **recording start**, then convert to beats at `Project.bpm` and quantize. Do not count permission prompt or count-in as recorded time.
 - **Claims:** This MVP uses DSP and deterministic generation heuristics. Do not claim a trained AI model or a backend is implemented when it is not.
 
-Initial detector tuning values: 4096-sample frames, approximately 20 ms hop, min clarity 0.85, min RMS 0.01, fundamental 80..1000 Hz. Implemented segmentation defaults: 120 ms pitch stability, 150 ms silence hold, 100 ms min note, five-frame median, 0.7-semitone pitch hold region, 1.8x level re-attack, and 250 ms octave-slip hold. These are configurable estimates, not universal truths; repeated attacks separated only by a near-silent gap of 150 ms or less still merge. Tune against real takes in `src/tests/takes/` (see `takes.test.ts`).
+Initial detector tuning values: 4096-sample frames, approximately 20 ms hop, min clarity 0.85, min RMS 0.01, fundamental 80..1000 Hz. Sensitivity profiles live in `src/lib/audio/note-sensitivity.ts` (Low 1.5 st/200 ms/7 frames; High 0.5 st/60 ms/3 frames/60 ms min note); Medium is the default: 120 ms pitch stability, 150 ms silence hold, 100 ms min note, five-frame median, 0.7-semitone pitch hold region, 1.8x level re-attack, and 250 ms octave-slip hold. These are configurable estimates, not universal truths; repeated attacks separated only by a near-silent gap of 150 ms or less still merge. Tune against real takes in `src/tests/takes/` (see `takes.test.ts`).
 
 ## 6. UI and data policy
 
