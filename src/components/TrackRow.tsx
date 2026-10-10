@@ -31,7 +31,7 @@ interface Props {
   onToggle: (key: "muted" | "solo") => void;
 }
 
-export const lastBeat = (notes: Note[]) => Math.max(1, ...notes.map((n) => n.startBeat + n.durationBeats));
+const lastBeat = (notes: Note[]) => Math.max(1, ...notes.map((n) => n.startBeat + n.durationBeats));
 
 function NoteBars({ notes, inst, reveal }: { notes: Note[]; inst: Instrument; reveal?: boolean }) {
   const h = noteH(inst);
@@ -142,12 +142,12 @@ export default function TrackRow(p: Props) {
               <StopIcon /> Stop
             </button>
           ) : (
-            <button className="rec" onClick={() => p.onRecord(false)} disabled={working || phase === "requesting"}>
+            <button className="rec" onClick={() => p.onRecord(false)} disabled={phase === "requesting"}>
               <RecordIcon /> {hasNotes && !track.sample ? "Re-record" : "Record"}
             </button>
           )}
           {!recording && !working && (
-            <button className="ghost-btn" onClick={() => p.onRecord(true)} disabled={working || phase === "requesting"}>
+            <button className="ghost-btn" onClick={() => p.onRecord(true)} disabled={phase === "requesting"}>
               Demo hum
             </button>
           )}

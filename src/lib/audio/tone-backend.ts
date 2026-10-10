@@ -2,9 +2,7 @@ import * as Tone from "tone";
 import type { PlaybackBackend, PlaybackVoice } from "./playback-engine";
 
 /** Resume the shared AudioContext only after a user gesture. */
-export async function unlockAudio(): Promise<void> {
-  await Tone.start();
-}
+export const unlockAudio = () => Tone.start();
 
 function synth(type: "triangle" | "sawtooth" | "square" | "sine", release: number, volume: number): PlaybackVoice {
   const instrument = new Tone.PolySynth(Tone.Synth, {
