@@ -1,0 +1,421 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-10T16:21:24+00:00",
+  "title": "Design System: HumStudio",
+  "extensions": {
+    "colorMeta": {
+      "ground": {
+        "role": "neutral",
+        "displayName": "Studio Black",
+        "canonical": "oklch(15.9% 0 90)",
+        "tonalRamp": [
+          "oklch(15% 0.000 90)",
+          "oklch(26% 0.000 90)",
+          "oklch(37% 0.000 90)",
+          "oklch(48% 0.000 90)",
+          "oklch(60% 0.000 90)",
+          "oklch(72% 0.000 90)",
+          "oklch(84% 0.000 90)",
+          "oklch(95% 0.000 90)"
+        ]
+      },
+      "panel": {
+        "role": "neutral",
+        "displayName": "Console Black",
+        "canonical": "oklch(20.0% 0 90)",
+        "tonalRamp": [
+          "oklch(15% 0.000 90)",
+          "oklch(26% 0.000 90)",
+          "oklch(37% 0.000 90)",
+          "oklch(48% 0.000 90)",
+          "oklch(60% 0.000 90)",
+          "oklch(72% 0.000 90)",
+          "oklch(84% 0.000 90)",
+          "oklch(95% 0.000 90)"
+        ]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "canonical": "oklch(26.9% 0 90)",
+        "tonalRamp": [
+          "oklch(15% 0.000 90)",
+          "oklch(26% 0.000 90)",
+          "oklch(37% 0.000 90)",
+          "oklch(48% 0.000 90)",
+          "oklch(60% 0.000 90)",
+          "oklch(72% 0.000 90)",
+          "oklch(84% 0.000 90)",
+          "oklch(95% 0.000 90)"
+        ]
+      },
+      "line-strong": {
+        "role": "neutral",
+        "displayName": "Strong Hairline",
+        "canonical": "oklch(34.8% 0 90)",
+        "tonalRamp": [
+          "oklch(15% 0.000 90)",
+          "oklch(26% 0.000 90)",
+          "oklch(37% 0.000 90)",
+          "oklch(48% 0.000 90)",
+          "oklch(60% 0.000 90)",
+          "oklch(72% 0.000 90)",
+          "oklch(84% 0.000 90)",
+          "oklch(95% 0.000 90)"
+        ]
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "Off-White",
+        "canonical": "oklch(95.8% 0.007 97.4)",
+        "tonalRamp": [
+          "oklch(15% 0.007 97.4)",
+          "oklch(26% 0.007 97.4)",
+          "oklch(37% 0.007 97.4)",
+          "oklch(48% 0.007 97.4)",
+          "oklch(60% 0.007 97.4)",
+          "oklch(72% 0.007 97.4)",
+          "oklch(84% 0.007 97.4)",
+          "oklch(95% 0.007 97.4)"
+        ]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Liner Gray",
+        "canonical": "oklch(68.4% 0.009 106.6)",
+        "tonalRamp": [
+          "oklch(15% 0.009 106.6)",
+          "oklch(26% 0.009 106.6)",
+          "oklch(37% 0.009 106.6)",
+          "oklch(48% 0.009 106.6)",
+          "oklch(60% 0.009 106.6)",
+          "oklch(72% 0.009 106.6)",
+          "oklch(84% 0.009 106.6)",
+          "oklch(95% 0.009 106.6)"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Sleeve Ink",
+        "canonical": "oklch(15.9% 0 90)",
+        "tonalRamp": [
+          "oklch(15% 0.000 90)",
+          "oklch(26% 0.000 90)",
+          "oklch(37% 0.000 90)",
+          "oklch(48% 0.000 90)",
+          "oklch(60% 0.000 90)",
+          "oklch(72% 0.000 90)",
+          "oklch(84% 0.000 90)",
+          "oklch(95% 0.000 90)"
+        ]
+      },
+      "rec": {
+        "role": "secondary",
+        "displayName": "Tally Red",
+        "canonical": "oklch(66.8% 0.219 28.6)",
+        "tonalRamp": [
+          "oklch(15% 0.075 28.6)",
+          "oklch(26% 0.115 28.6)",
+          "oklch(37% 0.155 28.6)",
+          "oklch(48% 0.195 28.6)",
+          "oklch(60% 0.219 28.6)",
+          "oklch(72% 0.195 28.6)",
+          "oklch(84% 0.151 28.6)",
+          "oklch(95% 0.111 28.6)"
+        ]
+      },
+      "flood-melody": {
+        "role": "primary",
+        "displayName": "Melody Orange",
+        "canonical": "oklch(68.4% 0.185 44.9)",
+        "tonalRamp": [
+          "oklch(15% 0.066 44.9)",
+          "oklch(26% 0.100 44.9)",
+          "oklch(37% 0.134 44.9)",
+          "oklch(48% 0.168 44.9)",
+          "oklch(60% 0.185 44.9)",
+          "oklch(72% 0.168 44.9)",
+          "oklch(84% 0.131 44.9)",
+          "oklch(95% 0.097 44.9)"
+        ]
+      },
+      "flood-bass": {
+        "role": "primary",
+        "displayName": "Pressing Blue",
+        "canonical": "oklch(60.5% 0.171 259.5)",
+        "tonalRamp": [
+          "oklch(15% 0.063 259.5)",
+          "oklch(26% 0.094 259.5)",
+          "oklch(37% 0.125 259.5)",
+          "oklch(48% 0.157 259.5)",
+          "oklch(60% 0.171 259.5)",
+          "oklch(72% 0.157 259.5)",
+          "oklch(84% 0.123 259.5)",
+          "oklch(95% 0.091 259.5)"
+        ]
+      },
+      "flood-keys": {
+        "role": "primary",
+        "displayName": "Sleeve Yellow",
+        "canonical": "oklch(82.7% 0.165 95.1)",
+        "tonalRamp": [
+          "oklch(15% 0.061 95.1)",
+          "oklch(26% 0.092 95.1)",
+          "oklch(37% 0.122 95.1)",
+          "oklch(48% 0.152 95.1)",
+          "oklch(60% 0.165 95.1)",
+          "oklch(72% 0.152 95.1)",
+          "oklch(84% 0.119 95.1)",
+          "oklch(95% 0.089 95.1)"
+        ]
+      },
+      "flood-drums": {
+        "role": "primary",
+        "displayName": "Label Red",
+        "canonical": "oklch(60.6% 0.199 30.2)",
+        "tonalRamp": [
+          "oklch(15% 0.070 30.2)",
+          "oklch(26% 0.106 30.2)",
+          "oklch(37% 0.143 30.2)",
+          "oklch(48% 0.179 30.2)",
+          "oklch(60% 0.199 30.2)",
+          "oklch(72% 0.179 30.2)",
+          "oklch(84% 0.139 30.2)",
+          "oklch(95% 0.103 30.2)"
+        ]
+      },
+      "flood-strings": {
+        "role": "primary",
+        "displayName": "Session Teal",
+        "canonical": "oklch(64.8% 0.105 188.4)",
+        "tonalRamp": [
+          "oklch(15% 0.046 188.4)",
+          "oklch(26% 0.066 188.4)",
+          "oklch(37% 0.085 188.4)",
+          "oklch(48% 0.104 188.4)",
+          "oklch(60% 0.105 188.4)",
+          "oklch(72% 0.104 188.4)",
+          "oklch(84% 0.083 188.4)",
+          "oklch(95% 0.064 188.4)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Zoomed track name in the spine; 62% width caps sized to the head container."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "In-lane prompts and the generating title on floods."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Spine names, wordmark, empty-lane 'Click to hum'."
+      },
+      "title-label": {
+        "displayName": "Title Label",
+        "purpose": "Clip labels and ruler corner; Record button at 20px."
+      },
+      "control": {
+        "displayName": "Control",
+        "purpose": "Transport values, fields and Export; tabular numerals."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Instrument hint (22ch) and stage lines; normal width."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Muted tracked caps labels for transport fields."
+      }
+    },
+    "shadows": [
+      {
+        "name": "sleeve-lift",
+        "value": "0 18px 40px rgb(0 0 0 / 0.45)",
+        "purpose": "The zoomed row only; the single elevation in the system."
+      },
+      {
+        "name": "playhead-halo",
+        "value": "0 0 0 1px rgb(0 0 0 / 0.4)",
+        "purpose": "Keeps the off-white playhead legible over light floods."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease-set",
+        "value": "cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "Shared ease for the flood zoom and note set-in."
+      },
+      {
+        "name": "flood-zoom",
+        "value": "grid-template-rows 520ms cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "Opening a track: zoomed row takes remaining height, others collapse to 36px."
+      },
+      {
+        "name": "row-dim",
+        "value": "opacity 320ms ease",
+        "purpose": "Collapsed rows fade to 55%."
+      },
+      {
+        "name": "note-set-in",
+        "value": "clip-path inset(0 100% 0 0) -> inset(0), 380ms ease-set, delay (startBeat / takeEnd) * 1.6s",
+        "purpose": "Notes set in left to right across the take's extent."
+      },
+      {
+        "name": "reveal-sweep",
+        "value": "left 0 -> take end, 1.6s linear, then fade 300ms",
+        "purpose": "2px ink sweep accompanying the reveal."
+      },
+      {
+        "name": "generating-scan",
+        "value": "left 0 -> 100%, 1.6s linear infinite",
+        "purpose": "3px ink scan bar while generating."
+      },
+      {
+        "name": "spectrogram-fade",
+        "value": "opacity 700ms ease (live 1, generating 0.35, after 0.16)",
+        "purpose": "Halftone recedes behind the generated notes."
+      },
+      {
+        "name": "live-mark",
+        "value": "opacity pulse 1s steps(2, jump-none) infinite",
+        "purpose": "Hard two-step blink of the recording status mark."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "all animation and transition removed; scan and sweep hidden",
+        "purpose": "prefers-reduced-motion: reduce."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "compact",
+        "value": "720px",
+        "purpose": "max-width: spine column 104px; hides field labels, Export label, position, M/S, hint."
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Transport Buttons",
+      "kind": "button",
+      "refersTo": "button-transport",
+      "description": "36px square rewind and play; play is inverted off-white.",
+      "html": "<div class=\"ds-tgroup\"><button class=\"ds-tbtn\" aria-label=\"Back to start\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.25\" stroke-linecap=\"square\" aria-hidden=\"true\"><path d=\"M5 5v14\"/><path d=\"M19 5.5v13L9 12z\" fill=\"currentColor\" stroke=\"none\"/></svg></button><button class=\"ds-tbtn ds-play\" aria-label=\"Play\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M7 4.5v15l12-7.5z\" fill=\"currentColor\"/></svg></button><output class=\"ds-pos\">1.1.1</output></div>",
+      "css": ":host{--ground:#0d0d0d;--panel:#161616;--line:#262626;--text:#f2f1ec;--muted:#9a9a94;--ink:#0d0d0d;--rec:#ff4a3d;--ease:cubic-bezier(0.16,1,0.3,1);} .ds-tgroup{display:flex;align-items:center;gap:6px;background:var(--panel);padding:10px;} .ds-tbtn{width:36px;height:36px;display:grid;place-items:center;background:#222;color:var(--text);border:0;border-radius:0;cursor:pointer;} .ds-tbtn:hover{background:#2e2e2e;} .ds-tbtn.ds-play{background:var(--text);color:var(--ink);} .ds-tbtn:focus-visible{outline:2px solid var(--text);outline-offset:2px;} .ds-pos{font-family:var(--font-archivo),Archivo,system-ui,sans-serif;font-variant-numeric:tabular-nums;margin-left:6px;min-width:72px;padding:7px 10px;border:1px solid var(--line);background:var(--ground);color:var(--text);font-size:15px;font-weight:600;text-align:center;}"
+    },
+    {
+      "name": "Record Button",
+      "kind": "button",
+      "refersTo": "button-record",
+      "description": "Primary action in a flooded spine; ink block, condensed caps, tally-red dot. Inverts while recording.",
+      "html": "<div class=\"ds-flood\"><button class=\"ds-rec\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"6.5\" fill=\"currentColor\"/></svg> Record</button><button class=\"ds-rec ds-on\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"6\" y=\"6\" width=\"12\" height=\"12\" fill=\"currentColor\"/></svg> Stop</button></div>",
+      "css": ":host{--ground:#0d0d0d;--panel:#161616;--line:#262626;--text:#f2f1ec;--muted:#9a9a94;--ink:#0d0d0d;--rec:#ff4a3d;--ease:cubic-bezier(0.16,1,0.3,1);} .ds-flood{--flood:#f26b1d;background:var(--flood);padding:16px;display:flex;flex-direction:column;gap:8px;width:200px;} .ds-rec{font-family:var(--font-archivo),Archivo,system-ui,sans-serif;font-variant-numeric:tabular-nums;height:46px;padding:0 16px;display:inline-flex;align-items:center;justify-content:center;gap:8px;background:var(--ink);color:var(--text);border:0;border-radius:0;font-size:20px;font-weight:800;letter-spacing:0.03em;font-stretch:62%;text-transform:uppercase;cursor:pointer;} .ds-rec svg{color:var(--rec);} .ds-rec.ds-on{background:var(--text);color:var(--ink);} .ds-rec.ds-on svg{color:var(--ink);} .ds-rec:focus-visible{outline:2px solid var(--ink);outline-offset:2px;}"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Secondary action on a flood (Demo hum); ink outline, fills ink on hover.",
+      "html": "<div class=\"ds-flood\"><button class=\"ds-ghost\">Demo hum</button></div>",
+      "css": ":host{--ground:#0d0d0d;--panel:#161616;--line:#262626;--text:#f2f1ec;--muted:#9a9a94;--ink:#0d0d0d;--rec:#ff4a3d;--ease:cubic-bezier(0.16,1,0.3,1);} .ds-flood{--flood:#f26b1d;background:var(--flood);padding:16px;width:200px;display:flex;flex-direction:column;} .ds-ghost{font-family:var(--font-archivo),Archivo,system-ui,sans-serif;font-variant-numeric:tabular-nums;height:34px;padding:0 14px;background:transparent;border:1.5px solid var(--ink);border-radius:0;color:var(--ink);font-size:12px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;cursor:pointer;} .ds-ghost:hover{background:var(--ink);color:var(--flood);} .ds-ghost:focus-visible{outline:2px solid var(--ink);outline-offset:2px;}"
+    },
+    {
+      "name": "Export Button",
+      "kind": "button",
+      "refersTo": "button-export",
+      "description": "Outlined transport action pushed to the right of the strip.",
+      "html": "<div class=\"ds-strip\"><button class=\"ds-export\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.25\" stroke-linecap=\"square\" stroke-linejoin=\"miter\" aria-hidden=\"true\"><path d=\"M12 3v12M6.5 10l5.5 5.5 5.5-5.5M4 20h16\"/></svg> Export MIDI</button></div>",
+      "css": ":host{--ground:#0d0d0d;--panel:#161616;--line:#262626;--text:#f2f1ec;--muted:#9a9a94;--ink:#0d0d0d;--rec:#ff4a3d;--ease:cubic-bezier(0.16,1,0.3,1);} .ds-strip{background:var(--panel);padding:10px;} .ds-export{font-family:var(--font-archivo),Archivo,system-ui,sans-serif;font-variant-numeric:tabular-nums;height:36px;padding:0 14px;display:inline-flex;align-items:center;gap:8px;background:transparent;border:1px solid #3a3a3a;border-radius:0;color:var(--text);font-size:14px;font-weight:600;cursor:pointer;} .ds-export:hover{border-color:var(--text);} .ds-export:focus-visible{outline:2px solid var(--text);outline-offset:2px;}"
+    },
+    {
+      "name": "Transport Field",
+      "kind": "input",
+      "refersTo": "input-field",
+      "description": "Labelled BPM / Snap well: muted tracked caps label, square dark well.",
+      "html": "<div class=\"ds-strip\"><label class=\"ds-field\"><span>BPM</span><input value=\"100\" inputmode=\"numeric\"></label></div>",
+      "css": ":host{--ground:#0d0d0d;--panel:#161616;--line:#262626;--text:#f2f1ec;--muted:#9a9a94;--ink:#0d0d0d;--rec:#ff4a3d;--ease:cubic-bezier(0.16,1,0.3,1);} .ds-strip{background:var(--panel);padding:10px;} .ds-field{font-family:var(--font-archivo),Archivo,system-ui,sans-serif;font-variant-numeric:tabular-nums;display:flex;align-items:center;gap:8px;} .ds-field span{font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);} .ds-field input{font-family:var(--font-archivo),Archivo,system-ui,sans-serif;font-variant-numeric:tabular-nums;width:64px;height:34px;padding:0 8px;background:var(--ground);border:1px solid var(--line);border-radius:0;color:var(--text);font-size:15px;font-weight:600;caret-color:#f26b1d;} .ds-field input:focus-visible{outline:2px solid var(--text);outline-offset:2px;}"
+    },
+    {
+      "name": "Wordmark",
+      "kind": "nav",
+      "refersTo": "",
+      "description": "Condensed black caps; HUM inverted as an off-white block.",
+      "html": "<div class=\"ds-strip\"><h1 class=\"ds-wordmark\"><span>Hum</span>Studio</h1></div>",
+      "css": ":host{--ground:#0d0d0d;--panel:#161616;--line:#262626;--text:#f2f1ec;--muted:#9a9a94;--ink:#0d0d0d;--rec:#ff4a3d;--ease:cubic-bezier(0.16,1,0.3,1);} .ds-strip{background:var(--panel);padding:15px 16px;} .ds-wordmark{font-family:var(--font-archivo),Archivo,system-ui,sans-serif;font-variant-numeric:tabular-nums;margin:0;font-size:26px;font-weight:900;letter-spacing:0.01em;line-height:1;font-stretch:62%;text-transform:uppercase;color:var(--text);} .ds-wordmark span{background:var(--text);color:var(--ink);padding:0 5px 0 6px;margin-right:3px;}"
+    },
+    {
+      "name": "Track Row (Sleeve Spine + Clip)",
+      "kind": "custom",
+      "refersTo": "track-head",
+      "description": "Flood spine with ink name and M/S marks; generated clip is solid flood with ink notes, sample clip is outlined.",
+      "html": "<div class=\"ds-row\" style=\"--flood:#f26b1d\"><div class=\"ds-head\"><button class=\"ds-name\">Melody</button><span class=\"ds-ms\"><button aria-pressed=\"false\">M</button><button aria-pressed=\"true\">S</button></span></div><div class=\"ds-lane\"><div class=\"ds-clip\" style=\"left:0;width:60%\"><span class=\"ds-cl\">Melody</span><i style=\"left:6%;top:50%;width:14%\"></i><i style=\"left:22%;top:40%;width:10%\"></i><i style=\"left:34%;top:60%;width:20%\"></i></div></div></div><div class=\"ds-row\" style=\"--flood:#e8c41c\"><div class=\"ds-head\"><button class=\"ds-name\">Keys</button><span class=\"ds-ms\"><button aria-pressed=\"false\">M</button><button aria-pressed=\"false\">S</button></span></div><div class=\"ds-lane\"><div class=\"ds-clip ds-sample\" style=\"left:0;width:100%\"><span class=\"ds-cl\">Keys · Sample</span><i style=\"left:2%;top:45%;width:12%\"></i><i style=\"left:2%;top:65%;width:12%\"></i><i style=\"left:16%;top:55%;width:12%\"></i></div></div></div>",
+      "css": ":host{--ground:#0d0d0d;--panel:#161616;--line:#262626;--text:#f2f1ec;--muted:#9a9a94;--ink:#0d0d0d;--rec:#ff4a3d;--ease:cubic-bezier(0.16,1,0.3,1);} .ds-row{font-family:var(--font-archivo),Archivo,system-ui,sans-serif;font-variant-numeric:tabular-nums;display:grid;grid-template-columns:232px 1fr;height:96px;border-bottom:1px solid var(--line);} .ds-head{display:flex;align-items:center;gap:10px;padding:0 12px 0 16px;background:var(--flood);color:var(--ink);border-right:1px solid rgb(0 0 0/0.3);} .ds-name{font-family:var(--font-archivo),Archivo,system-ui,sans-serif;font-variant-numeric:tabular-nums;background:none;border:0;padding:0;color:var(--ink);font-size:24px;font-weight:900;letter-spacing:0.01em;line-height:1;font-stretch:62%;text-transform:uppercase;cursor:pointer;} .ds-name:hover{text-decoration:underline;text-decoration-thickness:3px;text-underline-offset:4px;} .ds-name:focus-visible,.ds-ms button:focus-visible{outline:2px solid var(--ink);outline-offset:2px;} .ds-ms{margin-left:auto;display:flex;gap:4px;} .ds-ms button{font-family:var(--font-archivo),Archivo,system-ui,sans-serif;font-variant-numeric:tabular-nums;width:24px;height:24px;background:transparent;border:1.5px solid var(--ink);border-radius:0;color:var(--ink);font-size:11px;font-weight:800;cursor:pointer;} .ds-ms button[aria-pressed=true]{background:var(--ink);color:var(--flood);} .ds-lane{position:relative;background-color:var(--ground);background-image:repeating-linear-gradient(90deg,#2a2a2a 0 1px,transparent 1px 12.5%),repeating-linear-gradient(90deg,#1a1a1a 0 1px,transparent 1px 3.125%);} .ds-clip{position:absolute;top:6px;bottom:6px;background:var(--flood);overflow:hidden;} .ds-cl{position:absolute;top:5px;left:8px;font-size:14px;font-weight:800;letter-spacing:0.02em;line-height:1;font-stretch:62%;text-transform:uppercase;color:var(--ink);} .ds-clip i{position:absolute;height:6px;background:var(--ink);box-shadow:inset -1px 0 0 var(--flood);} .ds-clip.ds-sample{background:transparent;box-shadow:inset 0 0 0 1.5px var(--flood);} .ds-sample .ds-cl{color:var(--flood);} .ds-sample i{background:var(--flood);box-shadow:inset -1px 0 0 var(--ground);}"
+    },
+    {
+      "name": "The Flood (zoomed lane)",
+      "kind": "custom",
+      "refersTo": "",
+      "description": "Zoomed lane flooded with the sleeve color; ink note bars set in left to right with a clip-path wipe.",
+      "html": "<div class=\"ds-flood-lane\" style=\"--flood:#f26b1d\"><span class=\"ds-pl\" style=\"top:10%\">C6</span><span class=\"ds-pl\" style=\"top:55%\">C5</span><i style=\"left:8%;top:40%;width:12%;--d:0s\"></i><i style=\"left:22%;top:30%;width:8%;--d:.3s\"></i><i style=\"left:32%;top:48%;width:16%;--d:.5s\"></i><i style=\"left:50%;top:36%;width:10%;--d:.8s\"></i><i style=\"left:62%;top:22%;width:20%;--d:1s\"></i></div>",
+      "css": ":host{--ground:#0d0d0d;--panel:#161616;--line:#262626;--text:#f2f1ec;--muted:#9a9a94;--ink:#0d0d0d;--rec:#ff4a3d;--ease:cubic-bezier(0.16,1,0.3,1);} .ds-flood-lane{font-family:var(--font-archivo),Archivo,system-ui,sans-serif;font-variant-numeric:tabular-nums;position:relative;height:200px;background-color:var(--flood);background-image:repeating-linear-gradient(90deg,rgb(0 0 0/0.3) 0 1px,transparent 1px 12.5%),repeating-linear-gradient(90deg,rgb(0 0 0/0.1) 0 1px,transparent 1px 3.125%);box-shadow:0 18px 40px rgb(0 0 0/0.45);} .ds-pl{position:absolute;left:0;right:0;padding-left:8px;border-bottom:1px solid rgb(0 0 0/0.16);font-size:11px;font-weight:700;color:var(--ink);} .ds-flood-lane i{position:absolute;height:10px;background:var(--ink);box-shadow:inset -2px 0 0 var(--flood);animation:ds-set 380ms var(--ease) var(--d) both;} @keyframes ds-set{from{clip-path:inset(0 100% 0 0);}to{clip-path:inset(0);}} @media (prefers-reduced-motion:reduce){.ds-flood-lane i{animation:none;}}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Blue Note Sleeve",
+    "overview": "Every track is a Reid Miles record sleeve: one flat flood color, heavy condensed caps set tight, and the hum as the sleeve's photograph, printed as a 45° black halftone. The arrangement is a near-black studio surface where five flood-colored spines stack down the left like records on a shelf; opening one floods the whole lane with its color and turns the timeline into the sleeve itself.\n\nThe system is dense and operational (a DAW people can read at projector distance), but its voice comes from print, not from software chrome. Color is spent only on instrument identity; everything else is near-black ground, off-white type, and hairline rules. Depth is almost absent: the one lift in the system is the zoomed sleeve rising over the shelf. The world refuses the gray DAW with candy-colored rounded clip blocks.",
+    "keyCharacteristics": [
+      "One flood color per instrument, carried by the spine header, its clips, its empty-lane prompt, and the zoomed lane.",
+      "Archivo throughout: 62% width black caps for names and display, normal width for controls, tabular numerals everywhere.",
+      "Square corners, hairline rules, flat fields.",
+      "Black ink on flood fields: note bars, halftone dots, labels and controls all invert to ink inside a flood.",
+      "Motion is a set-in, not a bounce: the flood zoom and the left-to-right note reveal share one long ease-out."
+    ],
+    "rules": [
+      {
+        "name": "The One Flood Rule",
+        "body": "A row carries exactly one flood. Every colored mark in that row (spine, clip, outline, label, empty prompt, zoomed lane) is that flood or ink on it. Floods never mix within a track and never appear as gradients.",
+        "section": "colors"
+      },
+      {
+        "name": "The Ink On Flood Rule",
+        "body": "Anything set on a flood field is Sleeve Ink: type, note bars, halftone, M/S marks, focus outlines. Off-white never sits on a flood.",
+        "section": "colors"
+      },
+      {
+        "name": "The Two Widths Rule",
+        "body": "Condensed width is for names and things you read from across a room; normal width is for anything you operate or read as a sentence. Never set a sentence or a numeric control in the condensed cut.",
+        "section": "typography"
+      },
+      {
+        "name": "The Tabular Rule",
+        "body": "All numerals are tabular, set once on the body, so position, BPM and bar numbers never jitter during playback.",
+        "section": "typography"
+      },
+      {
+        "name": "The Single Lift Rule",
+        "body": "Only the opened sleeve rises. No card, button, clip or menu casts a shadow.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** give each instrument exactly one flood and route it through `--flood`; every mark in that row derives from it.",
+      "**Do** set everything on a flood in Sleeve Ink, including focus outlines.",
+      "**Do** use Archivo condensed 62% black caps for names, prompts and the Record button, and normal-width semibold for controls and sentences.",
+      "**Do** keep every corner square and every rule a hairline (1px on dark, 1.5px ink on floods).",
+      "**Do** distinguish sample clips (flood outline, \"· Sample\" label) from generated clips (solid flood).",
+      "**Do** draw audio as ink halftone on the 45° screen, on the same pitch axis as the notes.",
+      "**Do** use the single ease `cubic-bezier(0.16, 1, 0.3, 1)` for the flood zoom and note set-in, and drop all motion under reduced motion."
+    ],
+    "donts": [
+      "**Don't** round corners or add drop shadows; the zoom lift is the only elevation.",
+      "**Don't** place off-white type or controls on a flood field.",
+      "**Don't** introduce a sixth accent, gradients between floods, or a gray DAW chrome with candy-colored rounded clips.",
+      "**Don't** use Tally Red for anything but the record dot.",
+      "**Don't** set sentences, hints or numeric controls in the condensed cut.",
+      "**Don't** render the hum as a waveform line or a blurred heatmap; it is printed halftone."
+    ]
+  }
+}
