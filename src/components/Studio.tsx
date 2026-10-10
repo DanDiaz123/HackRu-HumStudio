@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { generateTrack } from "@/lib/generate";
+import { type GenTrace, generateNotes } from "@/lib/generate";
 import { type HumFrame, micErrorMessage, startDemoHum, startMic } from "@/lib/hum";
 import { exportMidi } from "@/lib/midi";
 import {
@@ -15,8 +15,7 @@ import {
   harmonyLabel,
   inferHarmony,
   keyName,
-  romanNumeral,
-  scaleDegree,
+  solfege,
   voiceChords,
   withKey,
 } from "@/lib/music/harmony";
@@ -34,7 +33,7 @@ import {
   midiName,
 } from "@/lib/tracks";
 import { DownloadIcon, PauseIcon, PlayIcon, RewindIcon, StopIcon } from "./icons";
-import TrackRow, { type Phase, REVEAL_SEC } from "./TrackRow";
+import TrackRow, { type Phase, REVEAL_SEC, type Reveal } from "./TrackRow";
 
 const COLLAPSED_H = 36;
 
@@ -59,10 +58,8 @@ export default function Studio() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState("");
   const [frames, setFrames] = useState<HumFrame[]>([]);
-  const [pending, setPending] = useState<Note[]>([]);
+  const [reveal, setReveal] = useState<Reveal | null>(null);
   const [demo, setDemo] = useState(false);
-  const [elapsed, setElapsed] = useState(0);
-  const [stage, setStage] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [startingAudio, setStartingAudio] = useState(false);
   const [playbackError, setPlaybackError] = useState("");
@@ -76,6 +73,8 @@ export default function Studio() {
   const headRef = useRef<HTMLDivElement>(null);
   const posRef = useRef<HTMLOutputElement>(null);
   const stopRef = useRef<(() => void) | null>(null);
+  // Re-record clears the part up front; a failed take puts it back (never lose a part to an empty take).
+  const clearedRef = useRef<{ id: string; notes: Note[] } | null>(null);
   const playbackRequest = useRef(0);
   const arrangementRef = useRef({ tracks, bpm });
   const stopTake = useRef<() => void>(() => {});
@@ -101,6 +100,9 @@ export default function Studio() {
   const setPos = (beat: number) => {
     if (headRef.current) headRef.current.style.left = `${beatX(beat)}%`;
     if (posRef.current) posRef.current.textContent = readout(beat);
+    // Light the chord under the playhead in the zoomed lane (Learn); DOM only, like the playhead.
+    const bar = Math.floor(beat / 4);
+    document.querySelectorAll(".lane-chords li").forEach((li, i) => li.classList.toggle("now", i === bar));
   };
 
   // Playhead + position readout run outside React.
@@ -261,6 +263,7 @@ export default function Studio() {
       // Beatbox hits are mostly unvoiced, so drums count loud frames instead of pitched ones.
       const heard = zoomed.instrument.kind === "drums" ? (f: HumFrame) => f.rms > 0.02 : (f: HumFrame) => f.hz !== null;
       if (taken.filter(heard).length < 10) {
+        restoreCleared();
         setPhase("error");
         setError("We didn't catch a hum. Get closer to the mic and try again.");
         return;
@@ -271,45 +274,73 @@ export default function Studio() {
         Object.assign(window, { __humTake: { instrument: zoomed.instrument.id, bpm, quantize, harmony, frames } });
       }
       setPhase("generating");
-      setStage(0);
-      const timer = setInterval(() => setStage((s) => Math.min(2, s + 1)), 800);
       try {
-        const notes = await generateTrack(zoomed.instrument, taken, bpm, quantize, harmony);
-        clearInterval(timer);
+        const inst = zoomed.instrument;
+        const trace = {} as GenTrace;
+        const notes = generateNotes(inst, taken, bpm, quantize, harmony, trace);
         if (!notes.length) throw new Error("empty");
-        setPending(notes);
+        // A Melody take sets the key and chords, a Keys take re-picks the chords; other pitched parts
+        // are re-fitted (moved, never deleted).
+        const h = inst.id === "melody" ? inferHarmony(notes) : inst.id === "keys" ? chordsFromVoicing(notes, harmony) : null;
+        const after = h ?? harmony;
+        // Every step shows what the pipeline actually produced; nothing here is a progress estimate.
+        const drums = inst.kind === "drums";
+        const noun = (k: number, w: string) => `${k} ${w}${k === 1 ? "" : "s"}`;
+        const steps = [
+          drums
+            ? { title: noun(trace.raw.length, "hit"), sub: "Heard in your beatbox" }
+            : { title: noun(trace.raw.length, "note"), sub: `Found in ${trace.voicedFrames} pitched frames of your hum` },
+          {
+            title: trace.grid ? "On the beat" : drums ? "As hummed" : "In key",
+            sub: trace.grid ? `Snapped to the ${quantize} grid` + (drums ? "" : `, fitted to ${keyName(after)}`) : drums ? "Timing kept as hummed" : `Fitted to ${keyName(after)}, timing kept`,
+          },
+          ...(drums ? [] : [{ title: keyName(after), sub: after.bars.map(chordName).join(" ") }]),
+        ];
+        const stepMs = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 1100;
+        const wait = (ms: number) => new Promise((done) => setTimeout(done, ms));
+        setReveal({ step: 0, raw: trace.raw, final: notes, harmony: after, steps });
         setPhase("revealing");
-        const ms = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : (REVEAL_SEC + 0.5) * 1000;
-        setTimeout(() => {
-          const id = zoomed.instrument.id;
-          // A Melody take sets the key and chords, a Keys take re-picks the chords; other pitched parts
-          // are re-fitted (moved, never deleted).
-          const h = id === "melody" ? inferHarmony(notes) : id === "keys" ? chordsFromVoicing(notes, harmony) : null;
-          if (h) setHarmony(h);
-          setTracks((ts) =>
-            ts.map((t) => {
-              if (t.instrument.id === id) return { ...t, notes, sample: false };
-              return h ? refit(t, h) : t;
-            }),
-          );
-          setPhase("done");
-        }, ms);
+        for (let i = 1; i <= steps.length; i++) {
+          await wait(i === 1 && stepMs ? (REVEAL_SEC + 0.3) * 1000 : stepMs); // step 0 lasts as long as the print-in sweep
+          setReveal((r) => r && { ...r, step: i });
+        }
+        if (h) setHarmony(h);
+        clearedRef.current = null;
+        setTracks((ts) =>
+          ts.map((t) => {
+            if (t.instrument.id === inst.id) return { ...t, notes, sample: false };
+            return h ? refit(t, h) : t;
+          }),
+        );
+        setReveal(null);
+        setPhase("done");
       } catch {
-        clearInterval(timer);
-        setPhase("error"); // existing notes are untouched
+        restoreCleared();
+        setReveal(null);
+        setPhase("error"); // the cleared part comes back
         setError("No notes came out of that take. Try a longer, steadier hum.");
       }
     },
     [zoomed, bpm, quantize, harmony],
   );
 
+  function restoreCleared() {
+    const c = clearedRef.current;
+    clearedRef.current = null;
+    if (c) setTracks((ts) => ts.map((t) => (t.instrument.id === c.id && !t.notes.length ? { ...t, notes: c.notes } : t)));
+  }
+
   async function record(useDemo: boolean) {
     if (!zoomed || busy) return;
     pauseIfPlaying();
+    clearedRef.current = null;
+    if (!zoomed.sample && zoomed.notes.length) {
+      clearedRef.current = { id: zoomed.instrument.id, notes: zoomed.notes };
+      setTracks((ts) => ts.map((t) => (t.instrument.id === zoomed.instrument.id ? { ...t, notes: [] } : t)));
+    }
     const taken: HumFrame[] = [];
     setFrames(taken);
     setDemo(useDemo);
-    setElapsed(0);
     setError("");
     const limitSec = Math.min(MAX_RECORD_SEC, (TOTAL_BEATS * 60) / bpm);
     let done = false;
@@ -320,7 +351,6 @@ export default function Studio() {
       if (done || originSec === null || raw.tSec < originSec) return;
       const f = originSec ? { ...raw, tSec: raw.tSec - originSec } : raw;
       taken.push(f);
-      if (Math.floor(f.tSec * 10) !== Math.floor((taken.at(-2)?.tSec ?? -1) * 10)) setElapsed(f.tSec);
       if (f.tSec >= limitSec) {
         done = true;
         void finish(taken);
@@ -356,6 +386,7 @@ export default function Studio() {
     } catch (e) {
       stopRef.current?.();
       stopRef.current = null;
+      restoreCleared();
       setPhase("error");
       setError(e instanceof Error && e.message === "count-in cancelled" ? "Recording was cancelled." : micErrorMessage(e));
     }
@@ -375,11 +406,16 @@ export default function Studio() {
     setTracks((ts) => ts.map((t) => refit(t, h)));
   }
 
+  /** A hand edit replaces the part's notes; an edited Sample is the user's part from then on. */
+  function editNotes(id: string, notes: Note[]) {
+    setTracks((ts) => ts.map((t) => (t.instrument.id === id ? { ...t, notes, sample: false } : t)));
+  }
+
   function toggle(id: string, key: "muted" | "solo") {
     setTracks((ts) => ts.map((t) => (t.instrument.id === id ? { ...t, [key]: !t[key] } : t)));
   }
 
-  const noteLabel = (m: number) => `${midiName(m).replace(/-?\d+$/, "")} ${scaleDegree(m, harmony) ?? "·"}`;
+  const noteLabel = (m: number) => `${midiName(m).replace(/-?\d+$/, "")} ${solfege(m, harmony) ?? ""}`;
 
   const rowH = (id: string) => {
     if (!zoomedId) return Math.max(56, avail / tracks.length);
@@ -473,19 +509,6 @@ export default function Studio() {
         </div>
       </div>
 
-      {learn && (
-        <section className="chord-row" aria-label="Song theory">
-          <div className="ruler-corner chord-corner">{keyName(harmony)}</div>
-          <ol className="chord-strip">
-            {harmony.bars.map((c, bar) => (
-              <li key={bar} className="chord-cell" style={{ left: `${beatX(bar * 4)}%` }}>
-                <b>{chordName(c)}</b> <span>{romanNumeral(c, harmony)}</span>
-              </li>
-            ))}
-          </ol>
-        </section>
-      )}
-
       <div className="rows" ref={rowsRef} style={{ gridTemplateRows: tracks.map((t) => `${rowH(t.instrument.id)}px`).join(" ") }}>
         {tracks.map((t) => (
           <TrackRow
@@ -497,11 +520,13 @@ export default function Studio() {
             phase={phase}
             error={error}
             frames={frames}
-            pending={pending}
+            reveal={reveal}
             noteLabel={learn ? noteLabel : undefined}
+            learn={learn}
+            harmony={harmony}
+            quantize={quantize}
+            onEditNotes={(notes) => editNotes(t.instrument.id, notes)}
             demo={demo}
-            elapsed={elapsed}
-            stage={stage}
             bpm={bpm}
             countIn={t.instrument.id === zoomedId ? countInBeat : null}
             presetStatus={presetStatuses[t.instrument.id]}

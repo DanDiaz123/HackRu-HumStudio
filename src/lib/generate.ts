@@ -1,9 +1,9 @@
 import type { HumFrame } from "./hum";
 import { MAX_SEGMENTATION_FRAMES, SEGMENTATION_DEFAULTS, segmentPitchFrames } from "./audio/segment-notes.ts";
-import { type Harmony, chordAt, detectKey, fitToHarmony, nearest, pickChords, snapToScale } from "./music/harmony.ts";
+import { type Harmony, type Key, chordAt, detectKey, fitToHarmony, nearest, pickChords, snapToScale } from "./music/harmony.ts";
 import { DRUM_ROWS, type Instrument, type Note, type QuantizeDivision, QUANT_BEATS, TOTAL_BEATS, noteId } from "./tracks.ts";
 
-/** Generates canonical notes with the existing loading delay; raw audio stays local. */
+/** Generates canonical notes; raw audio stays local. */
 export async function generateTrack(
   inst: Instrument,
   frames: HumFrame[],
@@ -11,9 +11,7 @@ export async function generateTrack(
   quantize: QuantizeDivision,
   harmony: Harmony,
 ): Promise<Note[]> {
-  const notes = generateNotes(inst, frames, bpm, quantize, harmony);
-  await new Promise((r) => setTimeout(r, 2400));
-  return notes;
+  return generateNotes(inst, frames, bpm, quantize, harmony);
 }
 
 /**
@@ -24,6 +22,7 @@ export async function generateTrack(
  * Drums classify beatbox hits instead. Off preserves unsnapped timing.
  * Invalid tempo/grid or oversized input throws; unusable melodic frames return []
  * so the recording UI can preserve existing notes.
+ * Pass `trace` to read back the intermediate stages (for the reveal animation).
  */
 export function generateNotes(
   inst: Instrument,
@@ -31,6 +30,7 @@ export function generateNotes(
   bpm: number,
   quantize: QuantizeDivision,
   harmony: Harmony,
+  trace?: GenTrace,
 ): Note[] {
   if (!Number.isFinite(bpm) || bpm < 60 || bpm > 180) throw new RangeError("BPM must be between 60 and 180.");
   if (!Object.hasOwn(QUANT_BEATS, quantize)) throw new RangeError("Unsupported quantization.");
@@ -42,9 +42,10 @@ export function generateNotes(
     return (tSec: number) => Math.max(0, ((tSec + shiftSec) * bpm) / 60);
   };
   const snap = (b: number) => grid ? Math.round(b / grid) * grid : b;
-  if (inst.kind === "drums") return drums(frames, beatsFrom, snap);
+  if (trace) Object.assign(trace, { voicedFrames: frames.filter((f) => f.hz !== null).length, raw: [], key: { tonic: harmony.tonic, mode: harmony.mode }, grid });
+  if (inst.kind === "drums") return drums(frames, beatsFrom, snap, trace);
 
-  const line = (fit: (notes: Note[]) => Note[]) => hummedLine(inst, frames, beatsFrom, snap, grid, bpm, fit);
+  const line = (fit: (notes: Note[]) => Note[]) => hummedLine(inst, frames, beatsFrom, snap, grid, bpm, fit, trace);
   switch (inst.id) {
     case "bass":
       return bassRole(line((n) => fitToHarmony(n, inst, harmony)), inst, harmony);
@@ -55,8 +56,24 @@ export function generateNotes(
       return stringsRole(line((n) => fitToHarmony(n, inst, harmony)), inst, harmony);
     default:
       // Melody sets the key (Studio infers chords from it), so it snaps to its own detected scale.
-      return melodyRole(line((n) => fitToHarmony(n, inst, { ...harmony, ...detectKey(n) })), inst);
+      return melodyRole(line((n) => {
+        const key = detectKey(n);
+        if (trace) trace.key = key;
+        return fitToHarmony(n, inst, { ...harmony, ...key });
+      }), inst);
   }
+}
+
+/**
+ * What generation did, stage by stage, for the reveal to show. `raw` is the hummed line in beats
+ * before pitch fitting, merging and snapping (drums: classified hits before snapping). Final note ids
+ * come from raw ids, except notes a role adds: bar-split pieces and extra Keys/Strings voices.
+ */
+export interface GenTrace {
+  voicedFrames: number;
+  raw: Note[];
+  key?: Key; // Melody: the key detected from the take; other tracks: the song's key
+  grid: number; // beats; 0 = Off
 }
 
 /** Largest constant timing error corrected, each way: unmeasured mic latency and singing ahead of/behind the click. */
@@ -110,6 +127,7 @@ function hummedLine(
   grid: number,
   bpm: number,
   fit: (notes: Note[]) => Note[],
+  trace?: GenTrace,
 ): Note[] {
   const segments = segmentPitchFrames(frames);
   const beatOf = beatsFrom(segments.map((r) => r.startSec));
@@ -122,6 +140,7 @@ function hummedLine(
       note: { id: noteId(), midi: clampToRange(r.midi + shift, inst), startBeat, durationBeats: endBeat - startBeat, velocity: 0.8 },
     };
   }).filter(({ note }) => note.startBeat < TOTAL_BEATS && note.durationBeats > 0);
+  if (trace) trace.raw = staged.map(({ note }) => ({ ...note }));
   // Correction can make different raw pitches identical; merging must follow it.
   const fitted = fit(staged.map(({ note }) => note));
   const merged: { note: Note; phraseId: number }[] = [];
@@ -303,6 +322,7 @@ function drums(
   frames: readonly HumFrame[],
   beatsFrom: (onsetsSec: number[]) => (t: number) => number,
   snap: (b: number) => number,
+  trace?: GenTrace,
 ): Note[] {
   // ponytail: duration (snares ring longer) is skipped; the 85 ms analysis window blurs hits shorter than that.
   const hits: { tSec: number; peak: number; kick: boolean; hiss: boolean | null }[] = [];
@@ -332,11 +352,14 @@ function drums(
   const out: Note[] = [];
   const taken = new Set<string>();
   for (const h of hits) {
-    const b = snap(beatOf(h.tSec));
+    const raw = beatOf(h.tSec);
+    const b = snap(raw);
     const midi = h.kick ? KICK : (h.hiss ?? h.peak < 0.6 * loudest) ? HAT : SNARE;
+    const note = { id: noteId(), midi, startBeat: b, durationBeats: midi === HAT ? 0.25 : 0.5, velocity: 0.5 + 0.45 * (h.peak / loudest) };
+    if (raw < TOTAL_BEATS) trace?.raw.push({ ...note, startBeat: raw });
     if (b >= TOTAL_BEATS || taken.has(`${b}:${midi}`)) continue;
     taken.add(`${b}:${midi}`);
-    out.push({ id: noteId(), midi, startBeat: b, durationBeats: midi === HAT ? 0.25 : 0.5, velocity: 0.5 + 0.45 * (h.peak / loudest) });
+    out.push(note);
   }
   if (!out.some((n) => n.midi === HAT)) {
     const end = Math.min(TOTAL_BEATS, Math.ceil(beatOf(frames.at(-1)?.tSec ?? 0) / 4) * 4);

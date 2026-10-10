@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { generateNotes, generateTrack } from "../lib/generate.ts";
+import { type GenTrace, generateNotes, generateTrack } from "../lib/generate.ts";
 import { DEFAULT_HARMONY } from "../lib/music/harmony.ts";
 import { INSTRUMENTS, type Note, type QuantizeDivision } from "../lib/tracks.ts";
 import { pitchFrames } from "./fixtures/transcription.ts";
@@ -129,4 +129,22 @@ test("the existing async recording seam uses the same stable generation path", a
 test("a silent drum take returns no notes, not fill-in hats", () => {
   const frames = pitchFrames([{ midi: null, durationSec: 2 }]);
   assert.deepEqual(generateNotes(instrument("drums"), frames, 120, "1/8", DEFAULT_HARMONY), []);
+});
+
+test("the trace records the unsnapped hummed line, and melody ids come from it", () => {
+  const frames = pitchFrames([
+    { midi: 60, durationSec: 0.55 }, { midi: 64, durationSec: 0.55 }, { midi: 67, durationSec: 0.55 }, { midi: 72, durationSec: 0.55 },
+  ]);
+  const trace = {} as GenTrace;
+  const notes = generateNotes(instrument("melody"), frames, 120, "1/4", DEFAULT_HARMONY, trace);
+  assert.ok(trace.voicedFrames > 0);
+  assert.equal(trace.grid, 1);
+  assert.deepEqual(trace.key, { tonic: 0, mode: "major" });
+  assert.ok(trace.raw.length >= notes.length && notes.length >= 1);
+  const rawIds = new Set(trace.raw.map((n) => n.id));
+  for (const n of notes) assert.ok(rawIds.has(n.id), n.id);
+  // Bass splits at barlines and Keys/Strings add voices, so only some of their ids come from raw.
+  const drumTrace = {} as GenTrace;
+  generateNotes(instrument("drums"), frames, 120, "1/4", DEFAULT_HARMONY, drumTrace);
+  assert.ok(Array.isArray(drumTrace.raw));
 });

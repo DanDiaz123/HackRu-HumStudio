@@ -32,15 +32,16 @@ Pick an instrument track
 - [x] **Arrangement view:** five instrument tracks over 8 bars of 4/4, with a transport bar (play/pause/stop, rewind, position, metronome, playback count-in, BPM, snap, Export MIDI).
 - [x] **Zoom:** clicking a track floods it with its color and collapses the others; Escape or "All tracks" returns.
 - [x] **Record:** microphone capture (up to 15 s or the end of the timeline) with Pitchy pitch estimation and a live spectrogram.
-- [x] **Generate:** stable pitch segmentation, harmony fitting, and Off/1/4/1/8/1/16 timing for melodic tracks, with a "Setting the session" loading state.
-- [x] **Reveal:** notes wipe in left to right over a ghost of the hum; skipped under reduced motion.
+- [x] **Generate:** stable pitch segmentation, harmony fitting, and Off/1/4/1/8/1/16 timing for melodic tracks.
+- [x] **Reveal:** shows the pipeline's real stages: the hummed notes print in, slide onto the grid and into the key, then the key and chords stamp in. Skipped under reduced motion.
+- [x] **Learn:** chord names and roman numerals on the zoomed lane's bar grid (the current chord lights during playback), key and part role in the track panel, do-re-mi on notes, and a live pitch readout (note, degree, cents) while recording.
 - [x] **Play:** Tone.js playback of all tracks with mute/solo and BPM 60–180.
 - [x] **Track sounds:** independent smplr preset dropdowns beneath expanded track titles, with lazy loading, retry, and the original synth fallback.
 - [x] **Playback count-in / metronome:** optional four-beat count-in and beat clicks; listening verification remains open.
 - [x] **Export:** multi-track `.mid` (drums on MIDI channel 10).
 - [x] **Recover:** mic denial, insecure origin, missing device, and silent takes show a message plus a **Demo hum** fallback; failed takes never erase existing notes.
 - [ ] **Real-device tuning:** validate the DSP generation with human humming on the demo microphone (Person 1).
-- [ ] **Edit:** drag notes in pitch/time and resize them in the zoomed track (Person 3).
+- [x] **Edit:** in the zoomed track, drag to move, drag the right edge to resize, click empty space to add, double-click or Delete to remove, arrows to nudge (Shift+arrows resize). Edits snap to the Snap grid.
 - [ ] **Save/reopen:** local autosave and project file import/export for all tracks (Person 4).
 - [ ] **Recording count-in**, undo/redo, instrument polish (if time remains).
 
@@ -145,7 +146,7 @@ Planned, not yet created: note editing (`PianoRoll.tsx` or inside `TrackRow.tsx`
 1. **0–10 s:** The problem: getting a tune out of your head and into a DAW is slow if you can't play an instrument.
 2. **10–20 s:** Show the arrangement (sample Keys and Drums) and press Play.
 3. **20–45 s:** Click **Melody**, press **Record**, hum 4–8 clear notes, and point at the spectrogram printing live.
-4. **45–60 s:** Stop. Show "Setting the session", then the notes setting in over the hum.
+4. **45–60 s:** Stop. Walk through the reveal: notes found, snapped into the key, chords. Fix one note by dragging it.
 5. **60–75 s:** Back to all tracks; play the full arrangement; mute/solo a track.
 6. **75–90 s:** Export MIDI and describe where this goes next.
 

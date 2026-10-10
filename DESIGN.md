@@ -261,7 +261,7 @@ The sleeve spine: a full-height flood block in the spine column holding the inst
 ### The Flood (signature)
 Opening a track floods its lane with the instrument color over the 520ms grid-row transition (`cubic-bezier(0.16, 1, 0.3, 1)`). Inside the flood: octave pitch labels in ink at the left with black-16% row rules, black note bars on the pitch axis, and the hum.
 - **Halftone spectrogram:** a canvas, not a raster: Sleeve Ink dots on a 7px screen rotated 45°, sized by magnitude and mapped onto the lane's own pitch axis so generated notes land on their dots. Melodic lanes weight the print around the detected fundamental, so harmonics don't print an octave above where no note will land; Drums print the full band.Live while recording with a 2px ink cursor; dims to 35% while generating and ghosts to 16% after.
-- **Generating:** a 3px ink scan bar loops across the lane (1.6s linear) under the Headline "Setting the session" and a three-step stage line.
+- **Generating:** a Headline and stage line set low-left in the lane, one per real pipeline step (notes found, snapped and fitted, key and chords), each stamped in. Raw hummed notes print in at 60% ink behind the 2px sweep, then transition (700ms, same ease) to their fitted, snapped places; chord labels stamp onto the bar grid.
 - **Reveal:** a 2px ink sweep travels to the take's last beat over 1.6s while each note sets in with a left-to-right clip-path wipe (380ms, same ease), delayed in proportion to its start beat across the take's extent, like type being set.
 - **Reduced motion:** all animations and transitions are removed, and the scan and sweep bars are hidden; notes appear in place.
 
