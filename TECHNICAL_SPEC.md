@@ -1,99 +1,86 @@
 # HumStudio - Technical Specification
 
-**Status:** Proposed implementation contract (not evidence that code exists)  
-**Version:** 1.0 | **Date:** 2026-10-09  
-**Target:** HackRU MVP - Next.js App Router + React + TypeScript + Tone.js + Pitchy + `@tonejs/midi`
+**Status:** Implementation contract. Sections are marked **Implemented** (code exists in `src/`) or **Target** (agreed interface, not built yet). Implemented does not mean tested on a real microphone.
+**Version:** 1.1 (multi-track revision) | **Date:** 2026-10-10
+**Target:** HackRU MVP - Next.js 16 App Router + React 19 + TypeScript + Tone.js 15 + Pitchy + `@tonejs/midi`
 
-This file tells implementers **what to build, which interfaces to share, what edge cases to handle, and how to prove it works**. For product rationale and scope, read [`SOFTWARE_DESIGN_DOCUMENT.md`](SOFTWARE_DESIGN_DOCUMENT.md). Coding agents must also read [`AGENTS.md`](AGENTS.md).
+This file tells implementers **what to build, which interfaces to share, what edge cases to handle, and how to prove it works**. For product rationale and scope, read [`SOFTWARE_DESIGN_DOCUMENT.md`](SOFTWARE_DESIGN_DOCUMENT.md) and [`PRODUCT.md`](PRODUCT.md). Coding agents must also read [`AGENTS.md`](AGENTS.md). Ownership of each module is in [`WORKLOAD_SPLIT.md`](WORKLOAD_SPLIT.md).
+
+> **1.1 change:** the app is a **multi-track instrument editor** (five fixed tracks), not a single-track piano roll. Generation sits behind `generateTrack(...)` and is currently a mock. The `Note` contract is unchanged.
 
 ## 0. Implementation priorities
 
-- **P0:** One synth track; 4/4; editable 8-bar piano roll; BPM/play/pause/stop/rewind; microphone acquisition; monophonic humming-to-notes; Off/1/4/1/8/1/16 quantization; local autosave; JSON file import/export; MIDI export; clear errors.
-- **P1:** Four-beat count-in and metronome; extra instruments; manual note creation/deletion; undo/redo; instrument polish; presets. A count-in should be implemented early if live recording is hard to align to a tempo.
-- **P2:** Multi-track editing, Supabase, neural models, imported audio, effects, collaboration.
+- **P0:** Five instrument tracks over 8 bars of 4/4 **(implemented)**; click-to-zoom **(implemented)**; BPM/play/stop/rewind, mute/solo **(implemented)**; microphone acquisition, live spectrogram, loading state, animated reveal **(implemented)**; multi-track MIDI export **(implemented)**; clear errors and Demo hum fallback **(implemented)**; monophonic hum-to-notes for the selected instrument with Off/1/4/1/8/1/16 quantization *(mock; target in sections 6-7)*; note editing in the zoomed track *(target)*; local autosave and JSON import/export of all tracks *(target)*.
+- **P1:** Four-beat count-in and metronome; manual note creation/deletion; undo/redo; instrument sound polish; confirm before overwriting a generated part. Implement the count-in early if live recording is hard to align to tempo.
+- **P2:** Generation backend or ML model, Supabase, imported audio, effects, user-created tracks, collaboration.
 
-**Non-negotiable integration milestone:** `hardcoded Note[] -> visible piano roll -> audible Tone.js playback` before attempting voice transcription.
+**Integration milestone (met):** sample `Note[]` (Keys, Drums) -> visible track clips -> audible Tone.js playback. Next milestone: real hum -> `generateTrack` -> notes on the selected track.
 
 ## 1. Stack and environment
 
 | Layer | Library/API | Notes |
 |---|---|---|
-| App | Next.js (App Router) | React + TypeScript; use the `src/` directory. |
-| Styling | Tailwind CSS (scaffold default) | Avoid another large UI system unless already present. |
-| Audio playback | `tone` | User-gesture audio start, transport, `PolySynth`. |
+| App | Next.js 16 (App Router) | React 19 + TypeScript; `src/` directory. Read `node_modules/next/dist/docs/` before using unfamiliar APIs. |
+| Styling | Tailwind CSS v4 import + plain CSS | Studio styles and tokens live in `src/app/globals.css`; see `DESIGN.md`. |
+| Font | Archivo via `next/font/google` | `axes: ["wdth"]` for the condensed display width. |
+| Audio playback | `tone` v15 | User-gesture audio start, transport, `PolySynth`/`MembraneSynth`/`NoiseSynth`. |
 | Microphone | `getUserMedia`, Web Audio | HTTPS/localhost, mic permission, client-only. |
 | Pitch | `pitchy` | `PitchDetector.forFloat32Array(4096)`. |
 | MIDI | `@tonejs/midi` | Encode a Standard MIDI File in browser. |
-| State | React `useReducer` + Context | Single canonical `Project`; no requirement for Zustand/Redux. |
-| Persistence | `localStorage` + browser file download/upload | No auth/backend in MVP. |
-| Testing | `vitest` for pure modules (recommended) | Add tests after basic scaffold; manual browser checks remain required. |
+| State | React state in `Studio.tsx` (implemented); `useReducer` when editing/persistence land | Canonical `Track[]`; no Zustand/Redux. |
+| Persistence | `localStorage` + browser file download/upload | *Target.* No auth/backend in MVP. |
+| Testing | `vitest` for pure modules (recommended) | *Not installed yet.* Manual browser checks remain required. |
 
 Recommended: Node.js >= 20.9, npm, Chrome or Edge on desktop. Verify chosen package versions against the lockfile; do not rely on unverified snippets from a different Tone.js major version.
 
-### New project bootstrap
+### Running the project
 
-If there is **no app repository yet**, run this in a suitable parent folder:
+The app is already scaffolded. **Do not** run `create-next-app` in this repo.
 
 ```bash
-npx create-next-app@latest humstudio --typescript --eslint --tailwind --app --src-dir --use-npm
-cd humstudio
-npm install tone pitchy @tonejs/midi
-npm run dev
+npm install
+npm run dev        # http://localhost:3000
+npm run lint
+npx tsc --noEmit
+npm run build
 ```
 
-Then copy these four documents into the repo root. If `create-next-app` generated its own `AGENTS.md`, reconcile it with this project's `AGENTS.md`; do not silently discard project-specific guidance. If an application already exists, **do not** run the scaffold command in it.
-
-## 2. Planned repository layout
+## 2. Repository layout
 
 ```text
-humstudio/
-  README.md
-  SOFTWARE_DESIGN_DOCUMENT.md
-  TECHNICAL_SPEC.md
-  AGENTS.md
-  package.json                 # created by scaffold; NOT supplied here
-  src/
-    app/
-      layout.tsx
-      page.tsx
-      globals.css
-    components/
-      StudioClient.tsx
-      PianoRoll.tsx
-      TransportControls.tsx
-      RecordPanel.tsx
-      QuantizeSelector.tsx
-    hooks/
-      useRecorder.ts
-    state/
-      project-reducer.ts
-    lib/
-      music/
-        types.ts
-        timing.ts
-        quantize.ts
-        note-utils.ts
-      audio/
-        mic.ts
-        pitch-detector.ts
-        segment-notes.ts
-        tone-engine.ts
-      midi/
-        export-midi.ts
-      persistence/
-        local-project.ts
-    tests/
-      timing.test.ts
-      quantize.test.ts
-      segment-notes.test.ts
-      export-midi.test.ts
+src/
+  app/
+    layout.tsx               # implemented: Archivo font, metadata
+    page.tsx                 # implemented: renders <Studio />
+    globals.css              # implemented: tokens + studio styles
+  components/
+    Studio.tsx               # implemented: shell, Track[] state, record/generate/reveal flow
+    TrackRow.tsx             # implemented: arrangement row / zoomed lane
+    Spectrogram.tsx          # implemented: halftone canvas
+    icons.tsx                # implemented: SVG icons
+    PianoRoll.tsx            # target (optional): note editing for the zoomed track
+  lib/
+    tracks.ts                # implemented: Instrument, Track, INSTRUMENTS, geometry
+    hum.ts                   # implemented: mic + Pitchy + demo hum -> HumFrame
+    generate.ts              # implemented as MOCK: generateTrack()
+    playback.ts              # implemented: Tone.js service
+    midi.ts                  # implemented: multi-track export
+    music/
+      types.ts               # implemented: Note, Project, PitchFrame, NoteSegment, DetectorConfig
+      timing.ts              # implemented: frequencyToMidi, secondsToBeats, beatsToSeconds
+      quantize.ts            # implemented: getGridStep, snapBeat
+    audio/
+      segment-notes.ts       # target: segmentPitchFrames()
+    persistence/
+      local-project.ts       # target: multi-track save/load
+  tests/                     # target: vitest unit tests (section 13)
 ```
 
-This is a **target layout**, not an assertion that those files have been created. Prefer these names unless the team agrees to a consistent alternative.
+The earlier plan's `StudioClient`/`TransportControls`/`RecordPanel`/`useRecorder`/`tone-engine` split was folded into `Studio.tsx`, `hum.ts`, and `playback.ts`. Extract smaller modules when a file gets in the way of parallel work, and coordinate with its owner first.
 
 ## 3. Shared TypeScript contracts
 
-Create `src/lib/music/types.ts` first. Import its types everywhere; do not define incompatible local `Note` copies.
+`src/lib/music/types.ts` exists and is the source of truth; `src/lib/tracks.ts` re-exports `Note` and `QuantizeDivision` from it. Import these types everywhere; do not define incompatible local `Note` copies.
 
 ```ts
 export type QuantizeDivision = "off" | "1/4" | "1/8" | "1/16";
@@ -112,7 +99,7 @@ export interface Project {
   name: string;
   bpm: number;           // 60..180
   quantize: QuantizeDivision;
-  notes: Note[];         // Flat, one-track MVP
+  notes: Note[];         // Flat; v1 predates multi-track (see 3.1)
   createdAt: string;
   updatedAt: string;
 }
@@ -145,6 +132,80 @@ export interface DetectorConfig {
   minNoteMs: number;     // Initial: 100
 }
 ```
+
+### 3.1 Multi-track app contracts (implemented, `src/lib/tracks.ts`)
+
+```ts
+export interface Instrument {
+  id: string;                 // "melody" | "bass" | "keys" | "drums" | "strings"
+  name: string;
+  color: string;              // flood color, e.g. "#f26b1d"
+  lo: number;                 // lowest MIDI in the lane
+  hi: number;                 // highest MIDI in the lane
+  kind: "synth" | "drums";
+  hint: string;               // prompt copy in the zoomed header
+}
+
+export interface Track {
+  instrument: Instrument;
+  notes: Note[];
+  muted: boolean;
+  solo: boolean;
+  sample: boolean;            // true = preset part, shown labeled "Sample"
+}
+
+export const TOTAL_BEATS = 32;      // 8 bars of 4/4
+export const MAX_RECORD_SEC = 15;
+```
+
+| Instrument | MIDI range | Notes |
+|---|---|---|
+| Melody | 60-84 (C4-C6) | sawtooth `PolySynth` |
+| Bass | 28-52 (E1-E3) | square `PolySynth` |
+| Keys | 48-72 (C3-C5) | triangle `PolySynth`; starts with a sample Am-F-C-G part |
+| Drums | rows 49 crash, 46 open hat, 42 hat, 38 snare, 36 kick | `MembraneSynth` + `NoiseSynth`s; starts with a sample beat |
+| Strings | 55-79 (G3-G5) | sine `PolySynth` |
+
+Lane geometry is derived in percent: `beatX(beat) = beat / 32 * 100`, `noteY(midi, inst) = (hi - midi) / rows * 100`. Never store pixel coordinates.
+
+**Saved format (target).** `Project` v1 cannot hold tracks. The multi-track save format must be a new version, for example:
+
+```ts
+interface ProjectV2 {
+  schemaVersion: 2;
+  id: string; name: string; bpm: number; quantize: QuantizeDivision;
+  tracks: { instrumentId: string; notes: Note[]; muted: boolean; solo: boolean }[];
+  createdAt: string; updatedAt: string;
+}
+```
+
+Person 4 decides the final shape; add it to `types.ts` and notify the team rather than changing `Project` v1 in place. A v1 file should load as the Melody track.
+
+### 3.2 Capture frame (implemented, `src/lib/hum.ts`)
+
+```ts
+export interface HumFrame {
+  tSec: number;          // seconds since recording start
+  bins: Float32Array;    // 48 log-spaced magnitudes, 80..1000 Hz, 0..1 (spectrogram display)
+  hz: number | null;     // Pitchy fundamental, null when unvoiced/rejected
+  rms: number;
+}
+```
+
+`HumFrame` is a superset of the display needs plus pitch. It carries no `clarity` (it is gated inside `hum.ts`). When segmentation lands, either derive `PitchFrame[]` from it or add `clarity` to `HumFrame`; coordinate with Person 1.
+
+### 3.3 Generation seam (implemented as mock, `src/lib/generate.ts`)
+
+```ts
+export async function generateTrack(
+  inst: Instrument,
+  frames: HumFrame[],
+  bpm: number,
+  quantize: QuantizeDivision,
+): Promise<Note[]>;
+```
+
+The UI calls only this. The current mock waits ~2.4 s, groups voiced frames into same-semitone runs, octave-shifts the median into the instrument's range, snaps to the grid, and for Drums turns RMS onsets into kick/snare plus eighth-note hats. A real implementation (sections 6-7, or a backend) replaces the body and must: return valid notes (see invariants) inside the instrument's range, return `[]` or throw for unusable input (the UI shows an error and keeps existing notes), and keep the signature or coordinate a change.
 
 ### Invariant checks
 
@@ -222,17 +283,15 @@ export function segmentsToNotes(
 
 ## 5. Browser capture protocol
 
-### 5.1 Recorder states
+### 5.1 Recorder phases (implemented in `Studio.tsx` / `TrackRow.tsx`)
 
 ```ts
-type RecorderStatus =
-  | "idle" | "requesting-permission" | "ready" | "counting-in"
-  | "recording" | "processing" | "error";
+type Phase = "idle" | "requesting" | "recording" | "generating" | "revealing" | "done" | "error";
 ```
 
-Allowed path: `idle -> requesting-permission -> ready -> [counting-in] -> recording -> processing -> idle`. The count-in is optional; errors may occur from any active stage. Only one recording session may exist at a time.
+Path: `idle -> requesting -> recording -> generating -> revealing -> done`. The Demo hum skips `requesting`. Errors can occur at `requesting` (mic), after stop (fewer than 10 voiced frames), or in `generating` (no notes / throw); every error keeps existing notes and offers Try again and Demo hum. Recording auto-stops at `min(15 s, the end of the 8-bar timeline at the current BPM)`. While `requesting`/`recording`/`generating`/`revealing`, zoom changes, BPM, snap, play, and export are disabled. A count-in phase (`counting-in`) is a P1 target. Only one session exists at a time.
 
-### 5.2 Acquisition and analysis
+### 5.2 Acquisition and analysis (implemented in `startMic`, `src/lib/hum.ts`)
 
 ```ts
 const stream = await navigator.mediaDevices.getUserMedia({
@@ -267,7 +326,9 @@ Implementation steps:
 
 ## 6. Pitch detection contract
 
-### Required API
+**Implemented today:** `hum.ts` creates one `PitchDetector.forFloat32Array(4096)` per session and gates each frame on clarity >= 0.85, RMS >= 0.01, and 80-1000 Hz, emitting `HumFrame.hz`. **Target:** extract the pure function below so it can be unit-tested.
+
+### Target API
 
 ```ts
 export function detectPitchFrame(
@@ -294,6 +355,8 @@ return { tSec, hz: voiced ? hz : null, clarity, rms };
 Allocation/CPU notes: reuse buffers, avoid rendering every frame into React, and optionally compute RMS in a basic `for` loop. The frame stream should not become component state on each iteration; emit a throttled UI preview (approximately 5-10 updates/sec) if desired.
 
 ## 7. Note segmentation algorithm
+
+**Status: target.** The mock in `generate.ts` uses a much simpler run-grouping; replace it with this algorithm (Person 1).
 
 ### Required API
 
@@ -334,53 +397,56 @@ Do **not** label a DSP pitch detector as a trained neural model unless a model i
 
 ## 8. UI specifications
 
-### 8.1 Piano roll
+### 8.1 Track lanes (implemented) and note editing (target)
 
-- 4/4 time and 8 bars initially (beats 0..32); horizontally scroll if notes exceed the viewport.
-- Vertical rows: one per semitone, showing at least C3 (48) to C6 (84).
-- Coordinate mapping: `x = beat * pixelsPerBeat` and `y = (maxVisibleMidi - midi) * pixelsPerSemitone`.
-- Strong lines every 4 beats, normal lines each beat, light lines for 1/16 divisions if selected.
+- **Layout:** transport bar 56 px, ruler 28 px, then five rows sharing the remaining height (min 56 px). Each row is a 232 px header (104 px at <= 720 px) plus a lane. Zooming animates `grid-template-rows` so the selected row takes the space and the others collapse to 36 px.
+- 4/4 time, 8 bars (beats 0..32), fitted to the lane width.
+- Vertical rows: one per semitone of the instrument's range (`Instrument.lo..hi`), or five named drum rows. C rows are labeled in the zoomed lane; the ruler corner shows the range (e.g. "C4-C6").
+- Coordinate mapping in percent of the lane: `x = beat / 32` and `y = (inst.hi - midi) / rows`.
+- Strong lines every bar, light lines each beat.
+- The spectrogram canvas shares the lane's pitch axis (same octave shift as the generator), so revealed notes land on their dots.
+
+**Editing (target, Person 3):**
 - Note drag body: change start and MIDI pitch. Right-edge handle: change duration. Selection outline distinct from drag.
 - Horizontal drag snaps to active grid. "Off" can round at 0.05 beat solely to avoid floating-point noise (do not present it as musical quantization).
 - Clamp pitch to MIDI 0..127 and start to beat >= 0; minimum duration is selected grid step (or 0.1 beat when Off).
 - Pointer capture prevents losing drag when pointer leaves rectangle. Support `pointercancel` and `Escape` to abandon a drag without committing partial changes.
 - P0 fallback when drag-resize is difficult: a selected-note duration input plus drag for pitch/time.
 
-### 8.2 Transport and recording panel
+### 8.2 Transport and recording controls
 
-- Controls: Play, Pause, Stop, Rewind, BPM number input, Record, Stop Recording, Quantize selector, Save Project, Open Project, Export MIDI.
-- Show recording state, visible level/pitch preview when available, and precise error messages.
-- A first-time Play/Record click must call/await `Tone.start()` before synthesized audio.
-- Default BPM = 120 and quantization = 1/16.
-- When a recording finishes, either **replace the previous transcription** with confirmation or **append at the playhead**; choose one explicit rule and display it. Recommended hackathon behavior: replace the single-track notes after confirming if an existing melody would be overwritten; if editor is empty, insert directly.
+- **Transport bar (implemented):** wordmark, Rewind, Play/Stop toggle (stop pauses at the current position), position readout `bar.beat.sixteenth`, BPM number input (60-180), Snap select (Off, 1/4, 1/8, 1/16), Export MIDI. *Target:* Save Project, Open Project.
+- **Zoomed header (implemented):** All tracks (back), instrument name, hint, Record / Stop / Re-record, Demo hum, and a status line with a filled-or-hollow mark plus text (e.g. "Demo hum 0:05.2", "Generating", "8 notes").
+- A first Play click awaits `Tone.start()` before audio. Recording uses its own `AudioContext` and does not need Tone.
+- **Defaults (implemented):** BPM = 100, quantization = 1/8. (The 1.0 spec said 120 and 1/16; the UI shipped with 100 and 1/8 for slower, cleaner hums. Change both here and in `Studio.tsx` if the team prefers otherwise.)
+- **Replace rule (implemented):** a successful take **replaces that track's notes** after the reveal; a failed or empty take changes nothing. The button reads "Re-record" when the track already holds a generated part. *P1:* confirm before overwriting a non-sample part.
 
 ### 8.3 Keyboard/accessibility
 
 - Buttons and inputs have explicit labels and visible focus indicators.
 - Provide status changes as text (not color only).
-- Basic keyboard: `Space` toggles play/pause only when focus is not inside a text input; `Escape` cancels drag/recording modal. Avoid global shortcuts until stable.
+- Implemented: `Escape` returns from a zoomed track to all tracks (ignored while recording/generating). Mute/solo use `aria-pressed` and filled vs hollow marks. Generation status uses `aria-live`. Reduced motion disables the zoom and reveal animations.
+- Target: `Space` toggles play/stop only when focus is not inside a text input; `Escape` also cancels a note drag.
 
 ## 9. Tone.js playback service
 
-### Public interface
+### Public interface (implemented, `src/lib/playback.ts`)
 
 ```ts
-export interface PlaybackEngine {
-  initializeFromUserGesture(): Promise<void>;
-  setBpm(bpm: number): void;
-  scheduleNotes(notes: readonly Note[]): void;
-  play(): void;
-  pause(): void;
-  stop(): void;
-  rewind(): void;
-  dispose(): void;
-}
+export async function ensureAudio(): Promise<void>;      // await Tone.start(), create voices once; call in a click handler
+export function schedule(tracks: Track[], bpm: number): void; // clear old events, set BPM + 8-bar loop, schedule unmuted/soloed tracks
+export function play(): void;                            // transport.start()
+export function stop(): void;                            // transport.pause(): keeps position
+export function rewind(): void;                          // transport.ticks = 0
+export function positionBeats(): number;                 // transport.ticks / PPQ
 ```
+
+`Studio.tsx` re-calls `schedule()` whenever `tracks` or `bpm` change (after audio is ready) and reads `positionBeats()` in a `requestAnimationFrame` loop for the playhead. *Target:* a `dispose()` for unmount and releasing sounding voices on stop.
 
 Contract and lifecycle:
 
 - Use `Tone.start()` in the user-gesture initialization path and await its promise.
-- Use a shared `Tone.getTransport()` and simple `Tone.PolySynth`.
+- Use a shared `Tone.getTransport()`, one voice per instrument (see 3.1).
 - Convert `startBeat` to transport ticks (`Math.round(startBeat * transport.PPQ)`) and use supported tick/musical-time scheduling; this avoids hard-coding an absolute seconds timeline that becomes wrong when BPM changes.
 - Use the transport callback's scheduled `time` parameter for `triggerAttackRelease`, not `Date.now()`/`setTimeout()`.
 - Convert `durationBeats` to a musical duration at current BPM; re-check the selected Tone.js major version's API when implementing.
@@ -390,6 +456,8 @@ Contract and lifecycle:
 - The editor is the canonical state. Tone.js scheduling is a **derived side effect**, never the only copy of the arrangement.
 
 ## 10. Project persistence
+
+**Status: target (Person 4).** Must save **every track** (instrument id, notes, mute/solo) plus BPM and quantize, using the versioned format from 3.1. The v1 contract below remains the baseline and must stay loadable.
 
 ### Storage contract
 
@@ -432,14 +500,15 @@ This is a sample **data fixture**, not a generated user recording.
 
 ## 11. MIDI export
 
-### Public interface
+### Public interface (implemented, `src/lib/midi.ts`)
 
 ```ts
-export function createMidiBytes(project: Project): Uint8Array;
-export function downloadMidi(project: Project): void;
+export function exportMidi(tracks: Track[], bpm: number): void; // downloads humstudio.mid
 ```
 
-### Reference mapping
+One MIDI track per non-empty instrument track, named after the instrument; Drums use channel index 9 (General MIDI channel 10); tempo set from BPM; beats converted with `seconds = beats * 60 / bpm`. *Target:* split out a pure `createMidiBytes(tracks, bpm): Uint8Array` so T-10 can run without a DOM.
+
+### Reference mapping (v1, single track)
 
 ```ts
 import { Midi } from "@tonejs/midi";
@@ -464,22 +533,22 @@ Validate first; sort note order; make a `.mid` Blob from the bytes (be mindful o
 
 ## 12. State mutations and concurrency
 
-Suggested reducer actions:
+**Today:** `Studio.tsx` keeps `Track[]`, `bpm`, `quantize` in `useState` and replaces arrays immutably (`setTracks(ts => ts.map(...))`). **Target** reducer once editing and persistence land, scoped by track:
 
 ```ts
 type ProjectAction =
   | { type: "SET_BPM"; bpm: number }
   | { type: "SET_QUANTIZE"; division: QuantizeDivision }
-  | { type: "ADD_NOTES"; notes: Note[] }
-  | { type: "REPLACE_NOTES"; notes: Note[] }
-  | { type: "UPDATE_NOTE"; id: string; patch: Partial<Pick<Note, "midi" | "startBeat" | "durationBeats" | "velocity">> }
-  | { type: "DELETE_NOTE"; id: string }
-  | { type: "LOAD_PROJECT"; project: Project };
+  | { type: "REPLACE_TRACK_NOTES"; trackId: string; notes: Note[] }
+  | { type: "UPDATE_NOTE"; trackId: string; id: string; patch: Partial<Pick<Note, "midi" | "startBeat" | "durationBeats" | "velocity">> }
+  | { type: "DELETE_NOTE"; trackId: string; id: string }
+  | { type: "TOGGLE_MUTE" | "TOGGLE_SOLO"; trackId: string }
+  | { type: "LOAD_PROJECT"; project: ProjectV2 };
 ```
 
 - All actions validate/clamp values and preserve structural sharing when sensible.
 - Import, recording, and editing must funnel through this store. Never mutate `project.notes` in place.
-- Recorder frames live in a mutable session ref until the user stops, avoiding thousands of reducer dispatches.
+- Recorder frames live in a plain array owned by the take (not React state) until the user stops; the spectrogram reads it in its own animation loop. Only the elapsed time updates React, at ~10 Hz.
 - Don't wipe existing notes on `PermissionDeniedError` or an empty transcription.
 - Side effects (Tone schedule, local autosave) observe **committed** store changes; avoid duplicate scheduling during dragging by throttling or scheduling on pointerup.
 
@@ -499,22 +568,28 @@ type ProjectAction =
 | T-08 | Valid project -> stringify -> parse | Same BPM and notes |
 | T-09 | Invalid imported note: negative duration | Reject without overwriting UI state |
 | T-10 | MIDI C4 at beat 2, duration 1, 120 BPM | Note start=1.0 s, duration=0.5 s |
-| T-11 | Consecutive `scheduleNotes` calls | No duplicated playback events |
+| T-11 | Consecutive `schedule()` calls | No duplicated playback events |
 | T-12 | Start/stop mic twice | No orphaned media tracks or loops |
+| T-13 | `generateTrack` with synthetic C4-E4-G4 frames for Bass | Notes inside 28..52, same contour |
+| T-14 | `generateTrack` with all-unvoiced frames | `[]` (UI keeps existing notes) |
+| T-15 | `exportMidi` bytes for Keys + Drums | Two MIDI tracks; drums on channel index 9 |
 
 ### Manual browser acceptance
 
-- [ ] `npm run dev` displays UI without hydration errors.
-- [ ] Hard-coded C4-E4-G4 sequence appears correctly and plays in time at 120 BPM.
-- [ ] Play/Pause preserves position; edit while stopped and replay produces no layered duplicate notes.
+- [x] `npm run dev` displays the studio without hydration errors.
+- [x] Sample Keys and Drums parts render at the right beats and pitches (verified in screenshots).
+- [ ] Sample parts play in time (listen on the demo laptop; not verified by ear yet).
+- [x] Clicking a track zooms it; Escape returns; demo-hum take shows spectrogram, loading state, and reveal (screenshots in `.impeccable/review/`).
+- [ ] Play/Stop preserves position; edit while stopped and replay produces no layered duplicate notes.
+- [ ] Mute/solo combinations sound correct with two or more tracks.
 - [ ] Microphone request works on localhost and approved HTTPS deployment.
 - [ ] Deny permission: error message appears, app stays usable.
 - [ ] Hum a clear melody; it becomes at least several correct-looking notes and can be replayed.
 - [ ] Edit note pitch/time/duration; synth reflects changes.
-- [ ] Save JSON, refresh, reopen JSON; note positions and BPM survive.
-- [ ] MIDI export opens in a MIDI application with correct pitches and tempo.
+- [ ] Save JSON, refresh, reopen JSON; every track, BPM, and mute/solo survive.
+- [ ] MIDI export opens in a MIDI application with one track per instrument, correct pitches and tempo.
 - [ ] Stop/cancel/unmount releases mic; browser recording indicator clears.
-- [ ] Run `npm run lint`, `npx tsc --noEmit`, and `npm run build` successfully (if those scripts exist after scaffold).
+- [x] `npm run lint`, `npx tsc --noEmit`, and `npm run build` pass (as of the studio UI commit; re-run after every change).
 
 ### Benchmarks, explicitly aspirational
 
@@ -524,27 +599,29 @@ For a clean 5-10 second single-voice melody, target >= 80% correct stable-note p
 
 | Failure | User message / system action |
 |---|---|
-| Permission denied | "Microphone access was denied. Allow it in browser settings or try the sample melody." |
-| No audio device | "No microphone is available." |
-| Insecure origin | "Recording requires HTTPS or localhost." |
-| Silence/no voiced pitch | "No clear melody detected. Try humming closer to the microphone." Do not replace existing notes. |
-| Recording too long | Auto-stop at 15 seconds; process accumulated frames. |
+| Permission denied | "Microphone access was blocked. Allow it in the address bar, or use the demo hum." **(implemented)** |
+| No audio device | "No microphone was found on this device." **(implemented)** |
+| Mic busy | "Another app is using the microphone." **(implemented)** |
+| Insecure origin | "The microphone needs a secure page. Open this over https or localhost." **(implemented)** |
+| Silence/no voiced pitch | "We didn't catch a hum. Get closer to the mic and try again." Existing notes kept. **(implemented)** |
+| Generator returns nothing | "No notes came out of that take. Try a longer, steadier hum." Existing notes kept. **(implemented)** |
+| Recording too long | Auto-stop at 15 s or the end of the timeline; process accumulated frames. **(implemented)** |
 | Bad JSON | "This is not a valid HumStudio v1 project." Preserve previous project. |
 | Audio context suspended | Prompt user to click Play/Enable Audio and retry `Tone.start()`. |
 | Storage blocked | Warn that autosave is unavailable and offer Download Project. |
 
-Always keep a prepared **sample melody fixture** and a rehearsed sequence available for judging. Demo backup must be presented honestly as a sample, not as live transcription.
+The app ships labeled **Sample** parts (Keys, Drums) and a labeled **Demo hum**. Present them honestly as samples, never as live transcription.
 
 ## 15. Integration checklist and delivery order
 
-1. Merge types, timing helpers, and a fixture note array.
-2. Implement `PianoRoll` showing fixture notes; verify beat/pitch coordinate mapping.
-3. Implement Tone playback service; test BPM changes and event cleanup.
-4. Wire reducer state to editing and playback.
-5. Implement mic recording session, timestamps, and first Pitchy Hz readout.
-6. Test segmentation with fixture frames independently of the microphone.
-7. Connect stopped recording -> segment -> quantize -> `Note[]` -> editor.
-8. Add JSON autosave + file round trip and MIDI export.
+1. ~~Merge types, timing helpers, and fixture notes.~~ Done.
+2. ~~Show fixture notes on tracks; verify beat/pitch mapping.~~ Done (multi-track lanes).
+3. ~~Tone playback service with BPM and event cleanup.~~ Done; verify by ear.
+4. ~~Mic session, timestamps, Pitchy readout, spectrogram.~~ Done; verify with a real mic.
+5. Test segmentation with fixture frames independently of the microphone (Person 1).
+6. Replace the mock body of `generateTrack` with segment -> quantize -> fit-to-instrument (Person 1).
+7. Note editing in the zoomed track, wired to state and playback (Person 3).
+8. Multi-track JSON autosave + file round trip (Person 4).
 9. Exercise denied permissions, silence, repeated recordings, and bad import.
 10. Rehearse the exact 90-second demo and freeze nonessential features.
 

@@ -19,7 +19,7 @@ This split reflects the **existing repository**, not a blank project. At the tim
 - `DESIGN.md` defines the existing visual identity. **Improve and use it; do not start branding from scratch.**
 - Presence of source code **does not mean each feature has been tested** on a real microphone or deployed browser.
 
-**Product-scope clarification:** The newer `PRODUCT.md` explicitly calls for a **multitrack, instrument-specific editor** and a live spectrogram/reveal sequence. That differs from the older single-track MVP described in `SOFTWARE_DESIGN_DOCUMENT.md` and `TECHNICAL_SPEC.md`. Follow the multitrack direction for the demo; Person 4 coordinates any necessary updates to the older docs. The team must decide early whether the output is primarily **faithful hum-to-MIDI transcription** or **a generated instrument arrangement inspired by a hum**. Do not advertise machine learning or a backend that has not been implemented.
+**Product-scope clarification:** The newer `PRODUCT.md` explicitly calls for a **multitrack, instrument-specific editor** and a live spectrogram/reveal sequence. The older single-track MVP in `SOFTWARE_DESIGN_DOCUMENT.md` and `TECHNICAL_SPEC.md` has been revised (v1.1) to this multitrack direction, with built vs. planned parts marked; Person 4 keeps them current.The team must decide early whether the output is primarily **faithful hum-to-MIDI transcription** or **a generated instrument arrangement inspired by a hum**. Do not advertise machine learning or a backend that has not been implemented.
 
 ## 2. Assignment summary
 
@@ -116,7 +116,8 @@ This split reflects the **existing repository**, not a blank project. At the tim
 - [ ] Verify/finish multi-track MIDI export with `@tonejs/midi` and check the resulting file in a compatible music editor.
 - [ ] Make recording failures, stale asynchronous callbacks, and reloads safe; never replace good notes on an empty/failed take.
 - [ ] Own build/lint/type-check integration and deploy a real HTTPS demo (microphone works on HTTPS/localhost).
-- [ ] Reconcile the old single-track documentation with the newer `PRODUCT.md` and the actual `Track[]` data model; agree on a versioned multitrack save format.
+- [x] Reconcile the old single-track documentation with the newer `PRODUCT.md` and the actual `Track[]` data model (README, SDD, TECHNICAL_SPEC, AGENTS updated 2026-10-10).
+- [ ] Agree on a versioned multitrack save format (draft `ProjectV2` in `TECHNICAL_SPEC.md` §3.1).
 
 ### Branding and visual presentation — same owner, after core loop
 

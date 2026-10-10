@@ -12,33 +12,33 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 This file is for **AI coding agents and human contributors** working in the HumStudio repository. Read it **before** writing or changing implementation code.
 
-**Project status:** These documents may be present before an app has been scaffolded. Do not assume a component, package script, or feature exists until you inspect the repository.  
-**Project aim:** Browser-based, **monophonic hum -> editable MIDI notes -> piano-roll playback/export** for HackRU.  
-**Working product name:** HumStudio.  
-**Documentation precedence:** `TECHNICAL_SPEC.md` (shared interfaces, algorithms, acceptance) > `SOFTWARE_DESIGN_DOCUMENT.md` (product scope, rationale) > `README.md` (public onboarding). If documents conflict, correct the documentation as part of the change and tell the team.
+**Project status:** The Next.js app is scaffolded and the multi-track studio UI is built (`src/components/Studio.tsx`, `TrackRow.tsx`, `Spectrogram.tsx`). Note generation is a **mock** in `src/lib/generate.ts`; note editing, persistence, and tests are not built. Still inspect the repository before assuming a feature works: code existing is not proof it was tested with a real microphone.
+**Project aim:** Browser-based **multi-track hum-to-music sketchpad** for HackRU: pick an instrument track, hum, see a live spectrogram, get notes for that instrument, play the arrangement, export MIDI.
+**Working product name:** HumStudio.
+**Documentation precedence:** `PRODUCT.md` (product scope) > `TECHNICAL_SPEC.md` (shared interfaces, algorithms, acceptance) > `SOFTWARE_DESIGN_DOCUMENT.md` (rationale) > `README.md` (onboarding). Visual decisions follow `DESIGN.md`; file ownership follows `WORKLOAD_SPLIT.md`. If documents conflict, correct the documentation as part of the change and tell the team.
 
 ## 1. Agent mission
 
-**Ship a stable live-demo loop before anything ambitious.** A judge should be able to hum a clean melody, see notes, fix one, hear it, and export a project/MIDI file.
+**Ship a stable live-demo loop before anything ambitious.** A judge should be able to open a track, hum a clean melody, see notes appear, fix one, hear the arrangement, and export MIDI.
 
-1. First: `Note[] -> PianoRoll -> Tone.js playback`, with hard-coded fixture notes.
-2. Next: mic permission and capture -> Pitchy frames -> deterministic segmentation/quantization.
-3. Then: recording result in editor, editable notes, JSON save/load, MIDI export.
-4. Last: metronome, count-in, manual note authoring, polish. Add cloud, auth, and ML models only on explicit instruction after P0 works.
+1. ~~Sample `Note[]` -> track lanes -> Tone.js playback.~~ Done.
+2. ~~Mic permission and capture -> Pitchy frames -> spectrogram -> loading -> reveal.~~ Done with a mock generator; needs real-mic testing.
+3. Now: real `generateTrack(...)` (deterministic segmentation/quantization fitted to the instrument), editable notes in the zoomed track, multi-track JSON save/load.
+4. Last: metronome, count-in, manual note authoring, polish. Add cloud, auth, a generation backend, and ML models only on explicit team decision after the loop works.
 
-**Do not** build a full DAW, backend, Supabase login, multi-track editor, neural model, audio uploader, effects chain, or unrelated animation to "help" the MVP.
+**Do not** build a mixer, audio tracks, user-created tracks, Supabase login, neural model, audio uploader, effects chain, or new animation to "help" the MVP. The five instrument tracks, zoom, spectrogram, and reveal are the agreed scope (`PRODUCT.md`); polish them rather than adding more.
 
 ## 2. Inspect before changing
 
 Before editing:
 
-1. Read `README.md`, `SOFTWARE_DESIGN_DOCUMENT.md`, and `TECHNICAL_SPEC.md` relevant to your task.
-2. List relevant existing files and inspect `package.json`/lockfile. Do not guess file paths or framework/library versions.
+1. Read `README.md`, `PRODUCT.md`, and the parts of `TECHNICAL_SPEC.md` and `SOFTWARE_DESIGN_DOCUMENT.md` relevant to your task; read `DESIGN.md` before any UI change.
+2. List relevant existing files and inspect `package.json`/lockfile. Do not guess file paths or framework/library versions (Next 16, React 19, Tone 15).
 3. Identify the smallest affected modules and expected inputs/outputs.
-4. If the repository contains only docs, scaffold the Next.js app in a **safe empty directory** or only after team approval to initialize the repo. Do not overwrite existing files.
-5. If another developer or agent owns an active file, coordinate interfaces instead of replacing their changes.
+4. The app is already scaffolded. **Never** run `create-next-app` or overwrite the scaffold.
+5. Check `WORKLOAD_SPLIT.md` for the owner of each file. If another developer or agent owns it, coordinate interfaces instead of replacing their changes.
 
-Preferred terminal sequence when app exists:
+Preferred terminal sequence:
 
 ```bash
 npm install
@@ -53,7 +53,7 @@ Only claim a command passed if it actually ran and passed. If no `package.json` 
 
 ## 3. Immutable shared contracts
 
-The canonical types are defined in `TECHNICAL_SPEC.md` section 3 and should live in `src/lib/music/types.ts`:
+The canonical types are defined in `TECHNICAL_SPEC.md` section 3 and live in `src/lib/music/types.ts` (re-exported by `src/lib/tracks.ts`):
 
 ```ts
 export type QuantizeDivision = "off" | "1/4" | "1/8" | "1/16";
@@ -78,27 +78,36 @@ export interface Project {
 
 **Never rename fields** (`midi`, `startBeat`, `durationBeats`) in a single module without updating all importers, serializers, tests, and the spec. Do not introduce `startTime`/`duration` in seconds into project state. **Quarter-note beats are the canonical musical time unit.**
 
-Valid notes satisfy: integer MIDI 0..127; finite startBeat >= 0; finite durationBeats > 0; finite velocity 0..1. Default project BPM is 120 and quantization is `"1/16"`; tempo input is constrained to 60..180. Single-track, fixed 4/4 MVP.
+Valid notes satisfy: integer MIDI 0..127; finite startBeat >= 0; finite durationBeats > 0; finite velocity 0..1. Tempo input is constrained to 60..180; the UI defaults to **BPM 100 and quantization `"1/8"`**. Fixed 4/4, 8 bars.
 
-## 4. Planned module boundaries
+**Multi-track contracts** (`src/lib/tracks.ts`, see `TECHNICAL_SPEC.md` 3.1-3.3): `Instrument`, `Track { instrument, notes, muted, solo, sample }`, `INSTRUMENTS` (Melody, Bass, Keys, Drums, Strings), `HumFrame`, and the generation seam:
 
-```text
-src/components/                  # UI and note gestures only
-src/hooks/useRecorder.ts         # recorder state and lifecycle
-src/state/project-reducer.ts     # canonical serializable project state
-src/lib/music/types.ts           # shared note/project interfaces
-src/lib/music/timing.ts          # pitch/beat helpers
-src/lib/music/quantize.ts        # quantization and conversion to Note[]
-src/lib/audio/mic.ts             # browser mic / audio-frame lifecycle
-src/lib/audio/pitch-detector.ts  # Pitchy adapter; raw PitchFrame[]
-src/lib/audio/segment-notes.ts   # PitchFrame[] -> NoteSegment[]
-src/lib/audio/tone-engine.ts     # transport/synth scheduling
-src/lib/midi/export-midi.ts      # @tonejs/midi only
-src/lib/persistence/local-project.ts # JSON validation/save/import/export
-src/tests/                       # pure unit tests and fixtures
+```ts
+generateTrack(inst: Instrument, frames: HumFrame[], bpm: number, quantize: QuantizeDivision): Promise<Note[]>
 ```
 
-The exact folder names may change as a team decision, but **keep separation of concerns**. React components should not embed pitch math, MIDI encoding, or raw AudioContext teardown. Pure music functions must be testable without a browser.
+App state is `Track[]`; never flatten tracks when playing, exporting, or saving. `Project` v1 is single-track; the multi-track save format must be a **new schema version**, not an edit to v1.
+
+## 4. Module boundaries
+
+```text
+src/components/Studio.tsx        # shell, canonical Track[] state, record/generate/reveal flow   (Person 4)
+src/components/TrackRow.tsx      # one track: arrangement row / zoomed lane / note UI           (Person 3)
+src/components/Spectrogram.tsx   # halftone display of HumFrame[]                               (Person 1 + 3)
+src/lib/tracks.ts                # Instrument, Track, INSTRUMENTS, lane geometry                 (shared)
+src/lib/music/types.ts           # Note, Project, PitchFrame, NoteSegment, DetectorConfig       (shared)
+src/lib/music/timing.ts          # pitch/beat helpers
+src/lib/music/quantize.ts        # grid snapping
+src/lib/hum.ts                   # mic lifecycle, Pitchy gating, demo hum -> HumFrame            (Person 1)
+src/lib/generate.ts              # generateTrack(): MOCK, replace the body                       (Person 1)
+src/lib/playback.ts              # Tone transport/voices/scheduling                              (Person 2)
+src/lib/midi.ts                  # @tonejs/midi export                                           (Person 4)
+src/lib/audio/segment-notes.ts   # target: PitchFrame[] -> NoteSegment[]                         (Person 1)
+src/lib/persistence/             # target: multi-track JSON validation/save/import/export       (Person 4)
+src/tests/                       # target: pure unit tests and fixtures
+```
+
+Extract smaller modules when it helps parallel work, but **keep separation of concerns**. React components should not embed pitch math, MIDI encoding, or raw AudioContext teardown. Pure music functions must be testable without a browser.
 
 ## 5. Audio-specific guardrails
 
@@ -108,22 +117,23 @@ The exact folder names may change as a team decision, but **keep separation of c
 - **Cleanup is mandatory:** stop `MediaStreamTrack`s, cancel animation/frame loops, disconnect audio nodes, and release analysis resources after Stop, errors, or unmount.
 - **No ghost schedulers:** clear Tone transport event IDs before rescheduling and dispose synthesizers on teardown. Never accumulate events on each React render.
 - **No shared mutation:** do not put AudioNode, MediaStream, or mutable pitch buffers into the serializable `Project`.
-- **Pitch:** use Pitchy fundamental estimate + clarity/RMS filtering. A loudest-FFT-bin algorithm is not an acceptable production replacement.
+- **Pitch:** use Pitchy fundamental estimate + clarity/RMS filtering (`hum.ts` does). A loudest-FFT-bin algorithm is not an acceptable production replacement. The 48-bin FFT data in `HumFrame.bins` is for the spectrogram display only.
 - **Rhythm:** calculate seconds relative to **recording start**, then convert to beats at `Project.bpm` and quantize. Do not count permission prompt or count-in as recorded time.
-- **Claims:** This MVP uses DSP. Do not claim a trained AI model is implemented when it is not.
+- **Claims:** This MVP uses DSP, and `generateTrack` is currently a mock heuristic. Do not claim a trained AI model or a backend is implemented when it is not.
 
 Initial detector tuning values: 4096-sample frames, approximately 20 ms hop, min clarity 0.85, min RMS 0.01, fundamental 80..1000 Hz, ~60 ms pitch stability, ~80 ms silence hold, ~100 ms min note. These are configurable estimates, not universal truths.
 
 ## 6. UI and data policy
 
-- Single canonical reducer/store; note arrays are replaced immutably. Keep temporary drag state local and commit on `pointerup`.
+- One canonical owner of `Track[]` (`Studio.tsx` today; a reducer when editing/persistence land); note arrays are replaced immutably. Keep temporary drag state local and commit on `pointerup`.
 - UI coordinates are derived from beats and MIDI pitch; no persistent pixel coordinates.
 - Use `crypto.randomUUID()`/tested ID generator for note IDs. No array-index keys for draggable notes.
-- A failed/empty recording must **not erase existing notes**. Confirm before replacing a nonempty transcription.
+- A failed/empty recording must **not erase existing notes** (implemented). A successful take replaces only the selected track's notes; adding a confirmation before overwriting a non-sample part is a P1 task.
 - Provide an explicit browser-error UI for mic permission denial, empty detection, and insecure origins.
 - Preserve JSON import data only after full validation; reject oversized/unknown-schema input without modifying state.
 - Raw microphone samples stay local and are **not uploaded or persisted**. Only note/project JSON is saved. No telemetry or cloud dependency in MVP.
-- Keep labels and focus states accessible; no autoplay or deceptive interaction.
+- Keep labels and focus states accessible; no autoplay or deceptive interaction. Sample parts stay labeled "Sample" and the synthetic input stays labeled "Demo hum".
+- UI changes follow `DESIGN.md` (tokens in `src/app/globals.css`, Archivo, square corners, flood colors per instrument). Don't restyle globally without the design owner.
 
 ## 7. Dependencies and scope control
 
@@ -150,7 +160,7 @@ Avoid dependency sprawl, API tokens, hosted inference, sample CDN requirements, 
 - After changing code, run available relevant checks (`npm run lint`, `npx tsc --noEmit`, `npm run build`, `npm run test --if-present`) and report actual outcomes.
 - Avoid modifying generated artifacts, dependencies, or unrelated files.
 
-### Minimum fixture tests
+### Minimum fixture tests (none exist yet; add with Vitest)
 
 ```text
 440 Hz -> MIDI 69; 220 Hz -> 57; 261.626 Hz -> 60
@@ -161,20 +171,21 @@ Stable silence separates two different notes
 JSON export/import preserves notes + BPM
 MIDI export at 120 BPM maps beat 2 to 1.0 second
 Repeated Tone scheduling does not create duplicated playback
+generateTrack returns notes inside the instrument's range, and [] for silence
 ```
 
 ## 9. Team coordination / parallel work
 
-Keep workstream boundaries clear:
+Workstreams, owners, and checkpoints are defined in [`WORKLOAD_SPLIT.md`](WORKLOAD_SPLIT.md):
 
 | Workstream | Owns | Depends on |
 |---|---|---|
-| Editor | `PianoRoll`, editing gestures, coordinate math | Shared `Note` type |
-| Playback | Tone service, play/pause/stop/rewind, synth | Shared `Note` type |
-| Transcription | mic/Pitchy, segmenter, quantizer | `PitchFrame`, `NoteSegment`, `Note` |
-| Integration | reducer, autosave, file import/export, MIDI, errors | Above modules |
+| Voice-to-notes (Person 1) | `hum.ts`, `generate.ts`, segmentation/quantization helpers | `HumFrame`, `Note`, `Instrument` |
+| Playback (Person 2) | `playback.ts`, transport behavior, mute/solo | `Track[]`, `Note` |
+| Track editor (Person 3) | `TrackRow.tsx`, note editing gestures, lane geometry | `Track`, `Note` |
+| Integration (Person 4) | `Studio.tsx`, `globals.css`, `midi.ts`, persistence, deploy, docs | All of the above |
 
-For a change that affects shared types or APIs, update `TECHNICAL_SPEC.md` and notify teammates before integration. Favor small pull requests/commits that can be tested independently; avoid rewriting another stream's files just to clean up style.
+For a change that affects shared types or APIs (`music/types.ts`, `tracks.ts`, `generateTrack`), update `TECHNICAL_SPEC.md` and notify teammates before integration. Favor small pull requests/commits that can be tested independently; avoid rewriting another stream's files just to clean up style.
 
 ## 10. Definition of done per agent task
 
@@ -195,6 +206,7 @@ A task is complete only when its implementation:
 - Never persist raw recorded voice or send it to a server without explicit team decision and user consent.
 - Never delete existing notes following an empty recording.
 - Never "finish" by adding auth/cloud/features unrelated to the core loop.
+- Never present the mock generator's output, a Sample part, or the Demo hum as live AI/transcription output.
 
 ## 11. PR / handoff template
 
@@ -204,7 +216,7 @@ Summary:
 Files changed:
   List exact paths.
 Interfaces affected:
-  Note/Project/PitchFrame contracts or none.
+  Note/Project/PitchFrame/Track/HumFrame/generateTrack contracts or none.
 Verification:
   Commands and real browser checks actually completed.
 Risks/limitations:

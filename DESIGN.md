@@ -206,7 +206,7 @@ Lane grids are drawn with two repeating gradients: bar lines at #2a2a2a and beat
 
 A fixed full-viewport studio (100dvh, no page scroll) in three bands: the 56px transport strip, the 28px bar ruler, and the rows region that fills the rest. Ruler and every row share one two-column grid: a fixed spine column (232px) and a fluid lane spanning 8 bars of 4/4. All lane geometry is derived in percent from beats and pitch; nothing is positioned in stored pixels.
 
-In the arrangement, the five rows divide the available height equally with a 56px floor, so the shelf fills a projector. Zooming a row is a grid-template-rows change: the opened row takes all remaining height (240px floor) while the others collapse to 36px slivers at 55% opacity (85% on hover), with their labels and empty prompts removed.
+In the arrangement, the five rows divide the available height equally with a 56px floor, so the shelf fills a projector. Zooming a row is a grid-template-rows change: the opened row takes all remaining height (240px floor) while the others collapse to 36px slivers, with their labels and empty prompts removed. Collapsed spines keep their full flood so the ink names stay readable; only their lanes dim to 45% (80% on hover).
 
 Spacing rhythm is small and functional: 16px left gutter for spine text, the wordmark and the ruler corner; 6px insets for clips and between transport controls; 20px between transport groups. The playhead track overlays the lane column only, offset by the spine width.
 
@@ -257,7 +257,7 @@ The sleeve spine: a full-height flood block in the spine column holding the inst
 
 ### The Flood (signature)
 Opening a track floods its lane with the instrument color over the 520ms grid-row transition (`cubic-bezier(0.16, 1, 0.3, 1)`). Inside the flood: octave pitch labels in ink at the left with black-16% row rules, black note bars on the pitch axis, and the hum.
-- **Halftone spectrogram:** a canvas, not a raster: Sleeve Ink dots on a 7px screen rotated 45°, sized by magnitude and mapped onto the lane's own pitch axis so generated notes land on their dots. Live while recording with a 2px ink cursor; dims to 35% while generating and ghosts to 16% after.
+- **Halftone spectrogram:** a canvas, not a raster: Sleeve Ink dots on a 7px screen rotated 45°, sized by magnitude and mapped onto the lane's own pitch axis so generated notes land on their dots. Melodic lanes weight the print around the detected fundamental, so harmonics don't print an octave above where no note will land; Drums print the full band.Live while recording with a 2px ink cursor; dims to 35% while generating and ghosts to 16% after.
 - **Generating:** a 3px ink scan bar loops across the lane (1.6s linear) under the Headline "Setting the session" and a three-step stage line.
 - **Reveal:** a 2px ink sweep travels to the take's last beat over 1.6s while each note sets in with a left-to-right clip-path wipe (380ms, same ease), delayed in proportion to its start beat across the take's extent, like type being set.
 - **Reduced motion:** all animations and transitions are removed, and the scan and sweep bars are hidden; notes appear in place.
