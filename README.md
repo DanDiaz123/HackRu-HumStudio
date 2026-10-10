@@ -35,6 +35,7 @@ Pick an instrument track
 - [x] **Generate:** stable pitch segmentation, harmony fitting, and Off/1/4/1/8/1/16 timing for melodic tracks.
 - [x] **Reveal:** shows the pipeline's real stages: the hummed notes print in, slide onto the grid and into the key, then the key and chords stamp in. Skipped under reduced motion.
 - [x] **Learn:** chord names and roman numerals on the zoomed lane's bar grid (the current chord lights during playback), key and part role in the track panel, do-re-mi on notes, and a live pitch readout (note, degree, cents) while recording.
+- [x] **Note sensitivity:** Low, Medium, and High in the top menu; Medium uses the original thresholds. Switching it (or Snap) re-reads every kept take instantly; hand-edited parts are kept.
 - [x] **Play:** Tone.js playback of all tracks with mute/solo and BPM 60–180.
 - [x] **Track sounds:** independent smplr preset dropdowns beneath expanded track titles, with lazy loading, retry, and the original synth fallback.
 - [x] **Playback count-in / metronome:** optional four-beat count-in and beat clicks; listening verification remains open.
@@ -67,7 +68,19 @@ The demo targets **clear, one-note-at-a-time humming** in a reasonably quiet roo
 
 **Important:** Nothing in this repo is a trained AI model. Pitch detection is DSP (Pitchy), and note generation uses deterministic heuristics. Describe it accurately when presenting.
 
-Held notes tolerate short pitch wobbles and unvoiced gaps: defaults are 120 ms of stable pitch before a change, 150 ms of silence hold, and a five-frame median with a 0.7-semitone hold region. Harmony correction happens before merging; confirmed rests still separate notes. Off preserves unsnapped beat timing. Repeated syllables on one pitch split on a level dip, and short octave slips are folded back. These values are tunable in `SEGMENTATION_DEFAULTS`; repeated notes separated only by near-silence of 150 ms or less can merge.
+Held notes tolerate short pitch wobbles and unvoiced gaps: defaults are 120 ms of stable pitch before a change, 150 ms of silence hold, and a five-frame median with a 0.7-semitone hold region. Harmony correction happens before merging; confirmed rests still separate notes. Off preserves unsnapped beat timing. Repeated syllables on one pitch split on a level dip, and short octave slips are folded back. These values are the Medium profile; repeated notes separated only by near-silence of 150 ms or less can merge.
+
+### Fine-tuning note sensitivity
+
+Edit the three `config` objects in [`src/lib/audio/note-sensitivity.ts`](src/lib/audio/note-sensitivity.ts), the single source of segmentation tuning values (`SEGMENTATION_DEFAULTS` is Medium):
+
+| Level | Pitch hold (semitones) | Stable change (ms) | Median window (voiced frames) | Minimum note (ms) |
+|---|---|---|---|---|
+| Low | 1.5 | 200 | 7 | 100 |
+| Medium (default) | 0.7 | 120 | 5 | 100 |
+| High | 0.5 | 60 | 3 | 60 |
+
+Smaller `pitchToleranceSemitones` makes smaller changes count; smaller `stableMs`/`medianWindow` reacts faster. Keep `minNoteMs` no larger than `stableMs`. Valid tolerance is 0.5..3 semitones. Silence hold, re-attack ratio and octave hold are shared by all profiles. Studio keeps each part's latest take (analysis frames only, in memory) so **Sensitivity** and **Snap** re-generate recorded parts without another take; a hand edit drops that part's take so edits are never overwritten.
 
 ## Getting started
 
