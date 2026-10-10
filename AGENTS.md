@@ -23,8 +23,8 @@ This file is for **AI coding agents and human contributors** working in the HumS
 
 1. ~~Sample `Note[]` -> track lanes -> Tone.js playback.~~ Done.
 2. ~~Mic permission and capture -> Pitchy frames -> spectrogram -> loading -> reveal.~~ Done with deterministic DSP generation; needs real-mic testing.
-3. Now: real-device generation tuning, editable notes in the zoomed track, multi-track JSON save/load.
-4. Last: manual note authoring, polish. Metronome, playback count-in, and recording count-in + click are implemented; listening verification remains open. Add cloud, auth, a generation backend, and ML models only on explicit team decision after the loop works.
+3. Now: real-device generation tuning, real-browser audio/listening verification, and demo rehearsal. The zoomed editor, manual authoring, multi-track JSON save/load, undo/redo, Clear/Repeat, and keyboard shortcuts are implemented.
+4. Last: deployment and presentation polish. Metronome, playback count-in, and recording count-in + click are implemented; listening verification remains open. Add cloud, auth, a generation backend, and ML models only on explicit team decision after the loop works.
 
 **Do not** build a mixer, audio tracks, user-created tracks, Supabase login, neural model, audio uploader, effects chain, or new animation to "help" the MVP. The five instrument tracks, zoom, spectrogram, and reveal are the agreed scope (`PRODUCT.md`); polish them rather than adding more.
 
@@ -53,7 +53,9 @@ Only claim a command passed if it actually ran and passed. If no `package.json` 
 
 ## 3. Immutable shared contracts
 
-The canonical types are defined in `TECHNICAL_SPEC.md` section 3 ; `Note` and `QuantizeDivision` live in `src/lib/music/types.ts` (re-exported by `src/lib/tracks.ts`). `Project` is specified but not in code yet; add it with persistence:
+The canonical types are defined in `TECHNICAL_SPEC.md` section 3; `Note` and `QuantizeDivision` live in `src/lib/music/types.ts` (re-exported by `src/lib/tracks.ts`). The legacy `Project` v1 shape remains a compatibility contract; current multi-track persistence is `ProjectV2` in `src/lib/persistence/project.ts`.
+
+The legacy v1 shape is retained for import compatibility:
 
 ```ts
 export type QuantizeDivision = "off" | "1/4" | "1/8" | "1/16";
@@ -136,7 +138,7 @@ Initial detector tuning values: 4096-sample frames, approximately 20 ms hop, min
 - One canonical owner of `Track[]` (`Studio.tsx` today; a reducer when editing/persistence land); note arrays are replaced immutably. Keep temporary drag state local and commit on `pointerup`.
 - UI coordinates are derived from beats and MIDI pitch; no persistent pixel coordinates.
 - Use `crypto.randomUUID()`/tested ID generator for note IDs. No array-index keys for draggable notes.
-- A failed/empty recording must **not erase existing notes** (implemented). A successful take replaces only the selected track's notes; adding a confirmation before overwriting a non-sample part is a P1 task.
+- A failed/empty recording must **not erase existing notes** (implemented). A successful take replaces only the selected track's notes and asks for confirmation before overwriting a non-sample part.
 - Provide an explicit browser-error UI for mic permission denial, empty detection, and insecure origins.
 - Preserve JSON import data only after full validation; reject oversized/unknown-schema input without modifying state.
 - Raw microphone samples stay local and are **not uploaded or persisted**. Only note/project JSON is saved. No telemetry or cloud dependency in MVP.
@@ -169,7 +171,7 @@ Avoid dependency sprawl, API tokens, hosted inference, and complex UI frameworks
 - After changing code, run available relevant checks (`npm run lint`, `npx tsc --noEmit`, `npm run build`, `npm run test --if-present`) and report actual outcomes.
 - Avoid modifying generated artifacts, dependencies, or unrelated files.
 
-### Minimum fixture tests (playback, harmony, segmentation, and generation suites exist; persistence/MIDI fixtures remain targets)
+### Minimum fixture tests (implemented in the current regression suite)
 
 ```text
 440 Hz -> MIDI 69; 220 Hz -> 57; 261.626 Hz -> 60
@@ -182,6 +184,8 @@ MIDI export at 120 BPM maps beat 2 to 1.0 second
 Repeated Tone scheduling does not create duplicated playback
 generateTrack returns notes inside the instrument's range, and [] for silence
 detectKey: C-E-G-C melody -> C major; inferHarmony: C|F|G|C melody -> C F G C chords
+ProjectV2 rejects unknown fields, invalid notes, duplicate IDs, and oversized input
+MIDI encoding separates melodic channels and uses channel 10 for drums
 ```
 
 ## 9. Team coordination / parallel work

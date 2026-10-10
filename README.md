@@ -4,7 +4,7 @@
 
 HumStudio is a browser-based music sketchpad for **HackRU Fall 2026**. It looks like a familiar multi-track editor: one track per instrument (Melody, Bass, Keys, Drums, Strings). Click a track to zoom into it, hum into your microphone while a live spectrogram prints your voice across the lane, and watch the track fill with generated notes. Then play the arrangement or export it as MIDI.
 
-> **Current repository status:** The Next.js studio includes arrangement view, track zoom, live hum spectrogram, note editing, animated reveal, five-instrument playback, and MIDI export. Sensitivity profiles are cached for immediate switching. Undo/redo, collision-aware editing, Clear/Repeat, shortcuts, and project autosave/Save/Open are built. Generation uses deterministic DSP and instrument roles; no trained model is implemented. Physical-microphone tuning and human listening remain open. See [`WORKLOAD_SPLIT.md`](WORKLOAD_SPLIT.md) for ownership.
+> **Current repository status (2026-10-10):** The Next.js studio includes arrangement view, track zoom, live hum spectrogram, animated reveal, five-instrument playback, collision-aware note editing, and MIDI export. Low/Medium/High sensitivity profiles are generated and cached per take for immediate switching; Snap rebuilds from capture tempo and updates notes immediately. Undo/redo, Clear/Repeat, keyboard shortcuts, strict ProjectV2 save/open, autosave, and v1 migration are built. The merged branch passes 168 tests, lint, TypeScript, production build, and automated Edge checks. Generation uses deterministic DSP and instrument roles; no trained model is implemented. Physical-microphone tuning, listening, deployment, and demo rehearsal remain open. See [`WORKLOAD_SPLIT.md`](WORKLOAD_SPLIT.md) for ownership.
 
 ## What are we building?
 
@@ -120,7 +120,7 @@ npm run build
 npm test
 ```
 
-`npm test` runs playback, preset loading/lifetimes, harmony, segmentation, capture, and generation regression suites using TypeScript and Node's built-in test runner, without adding a testing dependency. Fixtures cover held-note wobbles, short dropouts across frame rates and tempos, genuine rests, harmony merging, Off timing, sample switching, stale loads, fallback/retry, velocity conversion, and independent note stops. Real browser listening and microphone tests are still necessary. The production build downloads the existing Archivo font from Google Fonts when it is not cached. Lint ignores the legacy generated `.test-build/` directory.
+`npm test` runs the 168 playback, preset, harmony, segmentation, capture, generation, persistence, editing, and MIDI regression tests using TypeScript and Node's built-in test runner, without adding a testing dependency. Fixtures cover held-note wobbles, short dropouts across frame rates and tempos, genuine rests, all sensitivity profiles, harmony merging, Off timing, sample switching, stale loads, fallback/retry, strict project validation and v1 migration, collision-aware edits, velocity conversion, and independent note stops. Automated Edge checks cover sensitivity/Snap switching, Save/Open/autosave, undo/redo, invalid-file preservation, responsive controls, and synthetic microphone capture. Real browser listening and physical microphone tests are still necessary. The production build downloads the existing Archivo font from Google Fonts when it is not cached. Lint ignores the legacy generated `.test-build/` directory.
 
 ## File structure
 

@@ -11,7 +11,7 @@
 >
 > **Scope principle:** Build a convincing hum-to-music sketchpad with a familiar multi-track layout, not a professional digital audio workstation (DAW).
 
-> [`PRODUCT.md`](PRODUCT.md) made **multi-track core**: one track per instrument, click a track to zoom, record a hum with a live spectrogram, a loading state, then an animated note reveal. That UI now exists. Output is a **generated part for the selected instrument**, not necessarily a 1:1 transcription: local DSP segmentation in `src/lib/audio/segment-notes.ts` feeds instrument/harmony fitting and quantization in `src/lib/generate.ts`. Anything not built yet is marked *planned*.
+> [`PRODUCT.md`](PRODUCT.md) made **multi-track core**: one track per instrument, click a track to zoom, record a hum with a live spectrogram, a loading state, then an animated note reveal. That UI now exists. Output is a **generated part for the selected instrument**, not necessarily a 1:1 transcription: local DSP segmentation in `src/lib/audio/segment-notes.ts` feeds instrument/harmony fitting and quantization in `src/lib/generate.ts`. Current implementation status is recorded below; remaining open work is real-device tuning, listening, deployment, and presentation.
 
 ## 1. Executive summary
 
@@ -63,7 +63,7 @@ Music software expects users to translate ideas into piano-roll clicks, keyboard
 | Tier | Deliverables | Rationale |
 |---|---|---|
 | **P0 - demo-critical** | Five-instrument arrangement view **(built)**; click-to-zoom track **(built)**; mic permission and capture with live spectrogram **(built)**; loading state and animated note reveal **(built)**; Tone.js playback of all tracks with mute/solo, BPM, play/pause/stop/rewind **(built)**; multi-track MIDI export **(built)**; demo-hum fallback and error states **(built)**; deterministic melodic generation (pitch, segmentation, quantization) **(built; real-device tuning pending)**; drag notes to change pitch/time and basic length edit **(built)**; local autosave and JSON project export/import for all tracks **(built)** | Completes the end-to-end promise and makes the output reusable. |
-| **P1 - polish** | Four-beat playback count-in and metronome **(built; listening pending)**; recording count-in with click **(built; listening pending)**; manual add/delete; undo/redo; instrument sound polish; confirm before overwriting a generated part | Increases demo clarity and resilience. |
+| **P1 - polish** | Four-beat playback count-in and metronome **(built; listening pending)**; recording count-in with click **(built; listening pending)**; manual add/delete, collision-aware editing, undo/redo, Clear/Repeat, keyboard shortcuts, and confirm-before-overwrite **(built)**; instrument sound polish and demo rehearsal remain | Increases demo clarity and resilience. |
 | **P2 - stretch** | Generation backend or ML arrangement model; Supabase login/cloud saves; uploaded audio; MIDI import; chord estimation; user-created tracks; collaboration | Valuable later, but not required to demonstrate the core product. |
 
 **Scope cut rule:** If the transcription, editing, and playback loop is unstable, cut P1/P2 before attempting new features. When time is tight, allow note duration editing through a numeric control rather than sophisticated edge dragging.
@@ -131,7 +131,7 @@ flowchart TD
 | `src/lib/generate.ts` | `generateTrack(instrument, frames, bpm, quantize, harmony) → Promise<Note[]>`; pure `generateNotes` for fixtures. | Built (DSP heuristics; real-device tuning pending) |
 | `src/lib/playback.ts` | Browser-only facade for scheduling, play/pause/stop/rewind/position, metronome, count-in, and teardown; delegates to `src/lib/audio/`. | Built (playback regression tests; listening pending) |
 | `src/lib/midi.ts` | `Track[]` → multi-track `.mid` download. | Built |
-| `src/lib/music/types.ts` | Shared `Note`/`QuantizeDivision` contract. `Project`/`PitchFrame` and shared timing/grid helpers remain targets; implemented segment types live in `audio/segment-notes.ts`. | Built (`Note` only) |
+| `src/lib/music/types.ts` | Shared `Note`/`QuantizeDivision` contract. The legacy `Project` shape remains a compatibility contract; current saved projects use `ProjectV2` in `src/lib/persistence/project.ts`. | Built |
 | `src/lib/audio/segment-notes.ts` | Stabilize gated `HumFrame` pitch into second-based segments with rest boundaries. | Built (synthetic regression fixtures; real-device tuning pending) |
 | `src/lib/persistence/project.ts` | Validate/store/reopen multi-track project JSON, with v1 migration. | Built |
 
@@ -273,7 +273,7 @@ A 1/16-note grid is `0.25` quarter-note beats; 1/8 is `0.5`, 1/4 is `1.0`. Snap 
 - Keep click-to-select distinct from drag behavior. `pointerdown` -> `pointermove` -> `pointerup`; handle pointer cancellation.
 - Prioritize note editing over a mixing console or extra visual effects.
 
-### Proposed state ownership
+### Current state ownership and future refactor
 
 Today `Studio.tsx` owns tracks and settings in React state, replaces arrays immutably, and synchronizes an arrangement ref for asynchronous operations. Undo/redo snapshots also preserve metadata, key decisions, capture tempo, cached sensitivity variants, and original Snap sources. Open validates before applying and clears capture caches. A future reducer may consolidate these track-scoped mutations. Audio objects/streams/timers stay in refs or service modules, **not** in serializable state.
 
@@ -313,7 +313,7 @@ Today `Studio.tsx` owns tracks and settings in React state, replaces arrays immu
 
 ### Automated checks
 
-- Implemented: TypeScript regressions using Node's built-in test runner cover playback, preset loading/voices, harmony, segmentation, generation, cached settings, microphone resource cleanup, and MIDI encoding. Fixtures include wobbles/dropouts, real rests, all three profiles, preserved Melody pitches, capture-tempo Snap, invalid input, stale callbacks, fallback/retry, sample lifetimes, independent MIDI channels, and download cleanup. Preset browser evidence and remaining human checks are in [`SMPLR_INTEGRATION.md`](SMPLR_INTEGRATION.md).
+- Implemented: TypeScript regressions using Node's built-in test runner cover playback, preset loading/voices, harmony, segmentation, generation, cached settings, microphone resource cleanup, MIDI encoding, project persistence, and editing. Fixtures include wobbles/dropouts, real rests, all three profiles, preserved Melody pitches, capture-tempo Snap, invalid input, stale callbacks, fallback/retry, sample lifetimes, independent MIDI channels, download cleanup, strict project schemas, and collision-aware edits. Preset browser evidence and remaining human checks are in [`SMPLR_INTEGRATION.md`](SMPLR_INTEGRATION.md).
 - Implemented: project JSON round-trip and v1 migration tests retain BPM, notes, settings, and track flags; malformed, oversized, and unexpected fields reject before changing the studio.
 - Implemented: time-stamped synthetic `HumFrame[]` fixtures with known pitches, vibrato, short noise, and dropouts.
 
@@ -338,8 +338,8 @@ A team member can run the app locally, open a track, hum a short single-voice me
 | 2. Studio + playback | Tracks, zoom, transport, BPM, synths, MIDI export, record/spectrogram/reveal flow **(done)** | Shared note contract |
 | 3. Capture + analysis | Mic input, Pitchy frames, clear statuses | Browser setup |
 | 4. Segmentation + quantization | `HumFrame[] -> Note[]` working with fixtures **(done; real-microphone tuning pending)** | HumFrame contract |
-| 5. Integration | Real `generateTrack` output lands on the selected track; notes editable; arrangement plays | Phases 2-4 |
-| 6. Finish | JSON persistence, MIDI export, tests, deploy, demo rehearsal | Stable main workflow |
+| 5. Integration | Real `generateTrack` output lands on the selected track; notes editable; arrangement plays **(done)** | Phases 2-4 |
+| 6. Finish | JSON persistence, MIDI export, tests **(done)**; real-device tuning, listening, deploy, demo rehearsal **(open)** | Stable main workflow |
 
 Ownership is assigned in [`WORKLOAD_SPLIT.md`](WORKLOAD_SPLIT.md): **voice-to-notes**, **playback/transport**, **track editor**, and **integration/branding/persistence**. Work in parallel behind the interfaces in `TECHNICAL_SPEC.md`.
 

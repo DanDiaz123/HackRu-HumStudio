@@ -1,7 +1,7 @@
 # HumStudio - Technical Specification
 
 **Status:** Implementation contract. Sections are marked **Implemented** (code exists in `src/`) or **Target** (agreed interface, not built yet). Implemented does not mean tested on a real microphone.
-**Version:** 1.1 (multi-track revision) | **Date:** 2026-10-10
+**Version:** 1.2 (implemented persistence/editor revision) | **Date:** 2026-10-10
 **Target:** HackRU MVP - Next.js 16 App Router + React 19 + TypeScript + Tone.js 15 + Pitchy + `@tonejs/midi`
 
 This file tells implementers **what to build, which interfaces to share, what edge cases to handle, and how to prove it works**. For product rationale and scope, read [`SOFTWARE_DESIGN_DOCUMENT.md`](SOFTWARE_DESIGN_DOCUMENT.md) and [`PRODUCT.md`](PRODUCT.md). Coding agents must also read [`AGENTS.md`](AGENTS.md). Ownership of each module is in [`WORKLOAD_SPLIT.md`](WORKLOAD_SPLIT.md).
@@ -11,10 +11,10 @@ This file tells implementers **what to build, which interfaces to share, what ed
 ## 0. Implementation priorities
 
 - **P0:** Five instrument tracks over 8 bars of 4/4 **(implemented)**; click-to-zoom **(implemented)**; BPM/play/pause/stop/rewind, mute/solo **(implemented)**; microphone acquisition, live spectrogram, loading state, animated reveal **(implemented)**; multi-track MIDI export **(implemented)**; clear errors and Demo hum fallback **(implemented)**; monophonic hum-to-notes for the selected instrument with Off/1/4/1/8/1/16 quantization **(implemented; real-microphone tuning pending)**; note editing in the zoomed track **(implemented)**; local autosave and JSON import/export of all tracks **(implemented)**; undo/redo and keyboard shortcuts **(implemented)**.
-- **P1:** Four-beat playback count-in and metronome **(implemented; listening pending)**; recording count-in with click **(implemented; listening pending)**; manual note creation/deletion; undo/redo; instrument sound polish; confirm before overwriting a generated part.
+- **P1:** Four-beat playback count-in and metronome **(implemented; listening pending)**; recording count-in with click **(implemented; listening pending)**; instrument sound polish; deployment and demo rehearsal.
 - **P2:** Generation backend or ML model, Supabase, imported audio, effects, user-created tracks, collaboration.
 
-**Integration milestone (implemented; listening pending):** sample `Note[]` (Keys, Drums) -> visible track clips -> Tone.js playback, with scheduling covered by regression fixtures. Next milestone: real hum -> `generateTrack` -> notes on the selected track.
+**Integration milestone (implemented; listening pending):** sample and generated `Note[]` -> visible track clips -> Tone.js playback, with scheduling covered by regression fixtures. Real hum -> `generateTrack` -> selected-track notes is implemented; real-device tuning and listening remain open.
 
 ## 1. Stack and environment
 
@@ -28,7 +28,7 @@ This file tells implementers **what to build, which interfaces to share, what ed
 | Microphone | `getUserMedia`, Web Audio | HTTPS/localhost, mic permission, client-only. |
 | Pitch | `pitchy` | `PitchDetector.forFloat32Array(4096)`. |
 | MIDI | `@tonejs/midi` | Encode a Standard MIDI File in browser. |
-| State | React state in `Studio.tsx` (implemented); `useReducer` when editing/persistence land | Canonical `Track[]`; no Zustand/Redux. |
+| State | React state plus synchronized refs in `Studio.tsx` (implemented); reducer remains optional future refactor | Canonical `Track[]`; no Zustand/Redux. |
 | Persistence | `localStorage` + browser file download/upload | Implemented (`src/lib/persistence/project.ts`). No auth/backend in MVP. |
 | Testing | TypeScript + Node's built-in test runner | Playback, harmony, segmentation, and generation fixtures implemented. Manual browser checks remain required. |
 
@@ -68,7 +68,7 @@ src/
     playback.ts              # implemented: browser-only playback facade
     midi.ts                  # implemented: multi-track export
     music/
-      types.ts               # implemented: Note, QuantizeDivision (Project, PitchFrame, NoteSegment, DetectorConfig: target)
+      types.ts               # implemented: Note, QuantizeDivision (legacy Project remains a compatibility contract)
       timing.ts              # target: shared helpers (generate.ts has Hz/beat conversion)
       quantize.ts            # target: shared helpers (generate.ts uses tracks.ts QUANT_BEATS)
     audio/
@@ -369,7 +369,7 @@ Implementation steps:
 
 ## 6. Pitch detection contract
 
-**Implemented today:** `hum.ts` creates one `PitchDetector.forFloat32Array(4096)` per session and gates each frame on clarity >= 0.85, RMS >= 0.01, and 80-1000 Hz, emitting `HumFrame.hz`. **Target:** extract the pure function below so it can be unit-tested.
+**Implemented today:** `hum.ts` creates one `PitchDetector.forFloat32Array(4096)` per session and gates each frame on clarity >= 0.85, RMS >= 0.01, and 80-1000 Hz, emitting `HumFrame.hz`. The pure segmentation and generation paths are covered by deterministic fixtures; real-device threshold tuning remains open.
 
 ### Target API
 
@@ -499,7 +499,7 @@ Do **not** label a DSP pitch detector as a trained neural model unless a model i
 - Buttons and inputs have explicit labels and visible focus indicators.
 - Provide status changes as text (not color only).
 - Implemented: `Escape` returns from a zoomed track to all tracks (ignored while recording/generating). Mute/solo use `aria-pressed` and filled vs hollow marks. Generation status uses `aria-live`. Reduced motion disables the zoom and reveal animations.
-- Target: `Space` toggles play/pause only when focus is not inside a text input; `Escape` also cancels a note drag.
+- **Implemented:** `Space` toggles play/pause, `Escape` returns to all tracks, `R` records/stops, `1–5` opens tracks, `M/S` mute/solo, `K` toggles metronome, `L` toggles Learn, `Ctrl+Z`/`Ctrl+Shift+Z` undo/redo, `Ctrl+S` saves, and `?` opens shortcuts when focus is outside an input.
 
 ## 9. Tone.js playback service
 
@@ -701,7 +701,7 @@ type ProjectAction =
 - [ ] Hum a clear melody; it becomes at least several correct-looking notes and can be replayed.
 - [x] Synthetic WAV through Edge's simulated microphone -> Pitchy -> generation -> note reveal: a held pitch with 100 ms semitone wobbles and 120 ms silent gaps produces one note; stable changes produce three notes at two pitches. Both takes stop their media tracks with no browser errors. This verifies the browser integration, not human-microphone accuracy or listening quality.
 - [x] Sensitivity browser regression (pre-merge branch build): nine generated-WAV recording cases (0.6, 1, and 2 semitone changes at all three levels). Low changes only on the 2-semitone fixture; Medium also changes on 1; High also changes on 0.6. Default/keyboard selection, navigation, busy-state disabling, unchanged existing notes, microphone teardown, and 1280/390/320 px menu layouts pass with no browser errors (2026-10-10). Not re-run after the merge into main's role pipeline; physical-microphone tuning remains open.
-- [ ] Edit note pitch/time/duration; synth reflects changes.
+- [x] Edit note pitch/time/duration; synth reflects changes. Collision-aware move/resize/add rules keep same-pitch notes from overlapping.
 - [x] Save JSON, refresh, reopen JSON; project notes, key, BPM, and settings survive. Invalid files preserve the current arrangement; pure round-trip tests also cover track flags.
 - [ ] MIDI export opens in a MIDI application with one track per instrument, correct pitches and tempo.
 - [ ] Stop/cancel/unmount releases mic; browser recording indicator clears.
