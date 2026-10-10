@@ -69,17 +69,7 @@ export default function Studio() {
   useEffect(() => {
     arrangementRef.current = { tracks, bpm };
     const engine = playback.getEngine();
-    if (!engine) return;
-    try {
-      engine.schedule(tracks, bpm);
-    } catch {
-      engine.stop();
-      const frame = requestAnimationFrame(() => {
-        setPlaying(false);
-        setPlaybackError("These notes could not be played. Check their pitch, timing, and tempo.");
-      });
-      return () => cancelAnimationFrame(frame);
-    }
+    engine?.schedule(tracks, bpm);
   }, [tracks, bpm]);
 
   const setPos = (beat: number) => {
@@ -111,14 +101,17 @@ export default function Studio() {
     playback.dispose();
   }, []);
 
-  async function togglePlay() {
+  function pauseIfPlaying() {
     const live = playback.getEngine();
-    if (live?.state() === "started") {
-      live.pause();
-      setPos(live.positionBeats());
-      setPlaying(false);
-      return;
-    }
+    if (live?.state() !== "started") return false;
+    live.pause();
+    setPos(live.positionBeats());
+    setPlaying(false);
+    return true;
+  }
+
+  async function togglePlay() {
+    if (pauseIfPlaying()) return;
     if (startingAudio) return;
     const request = ++playbackRequest.current;
     setStartingAudio(true);
@@ -223,12 +216,7 @@ export default function Studio() {
 
   async function record(useDemo: boolean) {
     if (!zoomed || busy) return;
-    const live = playback.getEngine();
-    if (live?.state() === "started") {
-      live.pause();
-      setPos(live.positionBeats());
-      setPlaying(false);
-    }
+    pauseIfPlaying();
     const taken: HumFrame[] = [];
     setFrames(taken);
     setDemo(useDemo);

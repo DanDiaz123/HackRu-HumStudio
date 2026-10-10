@@ -457,7 +457,7 @@ export function countIn(bpm: number, onBeat?: (remaining: number) => void): Prom
 export function dispose(): void;
 ```
 
-`playback.ts` exposes `ensureAudio()` (resolves to the engine), `getEngine()` (null until a Play click) and `dispose()`. `Studio.tsx` re-calls `engine.schedule()` whenever `tracks` or `bpm` change (once an engine exists), reads `positionBeats()` in a `requestAnimationFrame` loop, and uses `state()` to keep the controls aligned with the transport. It calls `dispose()` on unmount and shows an error if audio startup or scheduling fails.
+`playback.ts` exposes `ensureAudio()` (resolves to the engine), `getEngine()` (null until a Play click) and `dispose()`. `Studio.tsx` re-calls `engine.schedule()` whenever `tracks` or `bpm` change (once an engine exists), reads `positionBeats()` in a `requestAnimationFrame` loop, and uses `state()` to keep the controls aligned with the transport. It calls `dispose()` on unmount and shows an error if audio startup fails.
 
 Contract and lifecycle:
 
