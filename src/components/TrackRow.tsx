@@ -108,10 +108,10 @@ function PitchLabels({ track }: { track: Track }) {
           .filter((m) => m % 12 === 0)
           .map((m) => ({ midi: m, text: midiName(m) }));
   return (
-    <div className="pitch-labels" aria-hidden>
+    <div className="pitch-labels" aria-hidden style={{ "--rows": pitchRows(inst) } as CSSProperties}>
       {labels.map((l) => (
         <span key={l.midi} style={{ top: `${noteY(l.midi, inst)}%`, height: `${noteH(inst)}%` }}>
-          {l.text}
+          <b>{l.text}</b>
         </span>
       ))}
     </div>
@@ -302,7 +302,7 @@ function LaneChords({ harmony, stamp }: { harmony: Harmony; stamp?: boolean }) {
     <ol className={`lane-chords${stamp ? " stamp" : ""}`} aria-label={`Chords in ${keyName(harmony)}`}>
       {harmony.bars.map((c, bar) => (
         <li key={bar} style={{ left: `${beatX(bar * 4)}%`, "--d": `${bar * 60}ms` } as CSSProperties}>
-          <b>{chordName(c)}</b> {romanNumeral(c, harmony)}
+          <b>{chordName(c)}</b> <span>{romanNumeral(c, harmony)}</span>
         </li>
       ))}
     </ol>
@@ -442,7 +442,7 @@ export default function TrackRow(p: Props) {
           </p>
         </div>
       </div>
-      <div className="lane flood">
+      <div className={`lane flood${labels ? " labeled" : ""}`}>
         <PitchLabels track={track} />
         {showSpec && (
           <div className={`spec-wrap${recording ? "" : phase === "generating" || r?.step === 0 ? " dim" : " ghost"}`}>
