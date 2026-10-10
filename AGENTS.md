@@ -12,7 +12,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 This file is for **AI coding agents and human contributors** working in the HumStudio repository. Read it **before** writing or changing implementation code.
 
-**Project status:** The Next.js app is scaffolded and the multi-track studio UI is built (`src/components/Studio.tsx`, `TrackRow.tsx`, `Spectrogram.tsx`). Playback has a regression suite, metronome, and four-beat playback count-in. Note generation is a **mock** in `src/lib/generate.ts`; note editing and persistence are not built. Real-microphone and audible playback verification remain open. Still inspect the repository before assuming a feature works.
+**Project status:** The Next.js app is scaffolded and the multi-track studio UI is built (`src/components/Studio.tsx`, `TrackRow.tsx`, `Spectrogram.tsx`). Playback has a regression suite, metronome, and four-beat playback count-in. Melodic generation uses tested deterministic segmentation in `src/lib/audio/segment-notes.ts`, followed by instrument/harmony fitting, merging, and quantization in `src/lib/generate.ts`; Drums retain RMS heuristics. Note editing and persistence are not built. Real-microphone and audible playback verification remain open. Still inspect the repository before assuming a feature works.
 **Project aim:** Browser-based **multi-track hum-to-music sketchpad** for HackRU: pick an instrument track, hum, see a live spectrogram, get notes for that instrument, play the arrangement, export MIDI.
 **Working product name:** HumStudio.
 **Documentation precedence:** `PRODUCT.md` (product scope) > `TECHNICAL_SPEC.md` (shared interfaces, algorithms, acceptance) > `SOFTWARE_DESIGN_DOCUMENT.md` (rationale) > `README.md` (onboarding). Visual decisions follow `DESIGN.md`; file ownership follows `WORKLOAD_SPLIT.md`. If documents conflict, correct the documentation as part of the change and tell the team.
@@ -22,8 +22,8 @@ This file is for **AI coding agents and human contributors** working in the HumS
 **Ship a stable live-demo loop before anything ambitious.** A judge should be able to open a track, hum a clean melody, see notes appear, fix one, hear the arrangement, and export MIDI.
 
 1. ~~Sample `Note[]` -> track lanes -> Tone.js playback.~~ Done.
-2. ~~Mic permission and capture -> Pitchy frames -> spectrogram -> loading -> reveal.~~ Done with a mock generator; needs real-mic testing.
-3. Now: real `generateTrack(...)` (deterministic segmentation/quantization fitted to the instrument), editable notes in the zoomed track, multi-track JSON save/load.
+2. ~~Mic permission and capture -> Pitchy frames -> spectrogram -> loading -> reveal.~~ Done with deterministic DSP generation; needs real-mic testing.
+3. Now: real-device generation tuning, editable notes in the zoomed track, multi-track JSON save/load.
 4. Last: manual note authoring, polish. Metronome, playback count-in, and recording count-in + click are implemented; listening verification remains open. Add cloud, auth, a generation backend, and ML models only on explicit team decision after the loop works.
 
 **Do not** build a mixer, audio tracks, user-created tracks, Supabase login, neural model, audio uploader, effects chain, or new animation to "help" the MVP. The five instrument tracks, zoom, spectrogram, and reveal are the agreed scope (`PRODUCT.md`); polish them rather than adding more.
@@ -95,18 +95,18 @@ src/components/Studio.tsx        # shell, canonical Track[] state, record/genera
 src/components/TrackRow.tsx      # one track: arrangement row / zoomed lane / note UI           (Person 3)
 src/components/Spectrogram.tsx   # halftone display of HumFrame[]                               (Person 1 + 3)
 src/lib/tracks.ts                # Instrument, Track, INSTRUMENTS, lane geometry                 (shared)
-src/lib/music/types.ts           # Note, QuantizeDivision; add PitchFrame/NoteSegment/DetectorConfig with segmentation (shared)
+src/lib/music/types.ts           # Note, QuantizeDivision; future project/capture contracts       (shared)
 src/lib/music/harmony.ts         # shared key/chords: detectKey, inferHarmony, fitToHarmony   (Person 1, shared)
 src/lib/hum.ts                   # mic lifecycle, Pitchy gating, demo hum -> HumFrame            (Person 1)
-src/lib/generate.ts              # generateTrack(): MOCK, replace the body                       (Person 1)
+src/lib/generate.ts              # generateTrack() facade / generateNotes() pure DSP pipeline    (Person 1)
 src/lib/playback.ts              # browser-only playback facade                                 (Person 2)
 src/lib/audio/playback-engine.ts # testable transport/voices/scheduling                          (Person 2)
 src/lib/audio/tone-backend.ts    # Tone.js adapter                                               (Person 2)
 src/lib/audio/click-track.ts     # metronome/count-in                                            (Person 2)
 src/lib/midi.ts                  # @tonejs/midi export                                           (Person 4)
-src/lib/audio/segment-notes.ts   # target: PitchFrame[] -> NoteSegment[]                         (Person 1)
+src/lib/audio/segment-notes.ts   # implemented: gated HumFrame -> SegmentedNote[] + rest boundary (Person 1)
 src/lib/persistence/             # target: multi-track JSON validation/save/import/export       (Person 4)
-src/tests/                       # playback regression suite; other algorithm fixtures planned
+src/tests/                       # playback, harmony, segmentation, generation regression suites
 ```
 
 Extract smaller modules when it helps parallel work, but **keep separation of concerns**. React components should not embed pitch math, MIDI encoding, or raw AudioContext teardown. Pure music functions must be testable without a browser.
@@ -121,9 +121,9 @@ Extract smaller modules when it helps parallel work, but **keep separation of co
 - **No shared mutation:** do not put AudioNode, MediaStream, or mutable pitch buffers into the serializable `Project`.
 - **Pitch:** use Pitchy fundamental estimate + clarity/RMS filtering (`hum.ts` does). A loudest-FFT-bin algorithm is not an acceptable production replacement. The 48-bin FFT data in `HumFrame.bins` is for the spectrogram display only.
 - **Rhythm:** calculate seconds relative to **recording start**, then convert to beats at `Project.bpm` and quantize. Do not count permission prompt or count-in as recorded time.
-- **Claims:** This MVP uses DSP, and `generateTrack` is currently a mock heuristic. Do not claim a trained AI model or a backend is implemented when it is not.
+- **Claims:** This MVP uses DSP and deterministic generation heuristics. Do not claim a trained AI model or a backend is implemented when it is not.
 
-Initial detector tuning values: 4096-sample frames, approximately 20 ms hop, min clarity 0.85, min RMS 0.01, fundamental 80..1000 Hz, ~60 ms pitch stability, ~80 ms silence hold, ~100 ms min note. These are configurable estimates, not universal truths.
+Initial detector tuning values: 4096-sample frames, approximately 20 ms hop, min clarity 0.85, min RMS 0.01, fundamental 80..1000 Hz. Implemented segmentation defaults: 120 ms pitch stability, 150 ms silence hold, 100 ms min note, five-frame median, and 0.7-semitone pitch hold region. These are configurable estimates, not universal truths; short repeated attacks can merge.
 
 ## 6. UI and data policy
 
@@ -162,7 +162,7 @@ Avoid dependency sprawl, API tokens, hosted inference, sample CDN requirements, 
 - After changing code, run available relevant checks (`npm run lint`, `npx tsc --noEmit`, `npm run build`, `npm run test --if-present`) and report actual outcomes.
 - Avoid modifying generated artifacts, dependencies, or unrelated files.
 
-### Minimum fixture tests (playback suite exists; other algorithm fixtures remain targets)
+### Minimum fixture tests (playback, harmony, segmentation, and generation suites exist; persistence/MIDI fixtures remain targets)
 
 ```text
 440 Hz -> MIDI 69; 220 Hz -> 57; 261.626 Hz -> 60
@@ -209,7 +209,7 @@ A task is complete only when its implementation:
 - Never persist raw recorded voice or send it to a server without explicit team decision and user consent.
 - Never delete existing notes following an empty recording.
 - Never "finish" by adding auth/cloud/features unrelated to the core loop.
-- Never present the mock generator's output, a Sample part, or the Demo hum as live AI/transcription output.
+- Never present a Sample part or the Demo hum as live microphone output, or DSP generation as a trained AI model.
 
 ## 11. PR / handoff template
 

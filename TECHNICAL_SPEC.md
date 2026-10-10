@@ -6,11 +6,11 @@
 
 This file tells implementers **what to build, which interfaces to share, what edge cases to handle, and how to prove it works**. For product rationale and scope, read [`SOFTWARE_DESIGN_DOCUMENT.md`](SOFTWARE_DESIGN_DOCUMENT.md) and [`PRODUCT.md`](PRODUCT.md). Coding agents must also read [`AGENTS.md`](AGENTS.md). Ownership of each module is in [`WORKLOAD_SPLIT.md`](WORKLOAD_SPLIT.md).
 
-> **1.1 change:** the app is a **multi-track instrument editor** (five fixed tracks), not a single-track piano roll. Generation sits behind `generateTrack(...)` and is currently a mock. The `Note` contract is unchanged.
+> The app is a **multi-track instrument editor** (five fixed tracks). Generation sits behind `generateTrack(...)` and now uses deterministic melodic segmentation, harmony fitting, and quantization. The `Note` contract is unchanged; real-microphone tuning remains open.
 
 ## 0. Implementation priorities
 
-- **P0:** Five instrument tracks over 8 bars of 4/4 **(implemented)**; click-to-zoom **(implemented)**; BPM/play/pause/stop/rewind, mute/solo **(implemented)**; microphone acquisition, live spectrogram, loading state, animated reveal **(implemented)**; multi-track MIDI export **(implemented)**; clear errors and Demo hum fallback **(implemented)**; monophonic hum-to-notes for the selected instrument with Off/1/4/1/8/1/16 quantization *(mock; target in sections 6-7)*; note editing in the zoomed track *(target)*; local autosave and JSON import/export of all tracks *(target)*.
+- **P0:** Five instrument tracks over 8 bars of 4/4 **(implemented)**; click-to-zoom **(implemented)**; BPM/play/pause/stop/rewind, mute/solo **(implemented)**; microphone acquisition, live spectrogram, loading state, animated reveal **(implemented)**; multi-track MIDI export **(implemented)**; clear errors and Demo hum fallback **(implemented)**; monophonic hum-to-notes for the selected instrument with Off/1/4/1/8/1/16 quantization **(implemented; real-microphone tuning pending)**; note editing in the zoomed track *(target)*; local autosave and JSON import/export of all tracks *(target)*.
 - **P1:** Four-beat playback count-in and metronome **(implemented; listening pending)**; recording count-in with click **(implemented; listening pending)**; manual note creation/deletion; undo/redo; instrument sound polish; confirm before overwriting a generated part.
 - **P2:** Generation backend or ML model, Supabase, imported audio, effects, user-created tracks, collaboration.
 
@@ -29,7 +29,7 @@ This file tells implementers **what to build, which interfaces to share, what ed
 | MIDI | `@tonejs/midi` | Encode a Standard MIDI File in browser. |
 | State | React state in `Studio.tsx` (implemented); `useReducer` when editing/persistence land | Canonical `Track[]`; no Zustand/Redux. |
 | Persistence | `localStorage` + browser file download/upload | *Target.* No auth/backend in MVP. |
-| Testing | TypeScript + Node's built-in test runner | Playback regression suite implemented; other algorithm fixtures remain targets. Manual browser checks remain required. |
+| Testing | TypeScript + Node's built-in test runner | Playback, harmony, segmentation, and generation fixtures implemented. Manual browser checks remain required. |
 
 Recommended: Node.js >= 20.9, npm, Chrome or Edge on desktop. Verify chosen package versions against the lockfile; do not rely on unverified snippets from a different Tone.js major version.
 
@@ -63,21 +63,21 @@ src/
   lib/
     tracks.ts                # implemented: Instrument, Track, INSTRUMENTS, geometry
     hum.ts                   # implemented: mic + Pitchy + demo hum -> HumFrame
-    generate.ts              # implemented as MOCK: generateTrack()
+    generate.ts              # implemented: generateTrack() / pure generateNotes()
     playback.ts              # implemented: browser-only playback facade
     midi.ts                  # implemented: multi-track export
     music/
       types.ts               # implemented: Note, QuantizeDivision (Project, PitchFrame, NoteSegment, DetectorConfig: target)
-      timing.ts              # target: frequencyToMidi, secondsToBeats, beatsToSeconds (mock uses generate.ts hzToMidi)
-      quantize.ts            # target: getGridStep, snapBeat (mock uses tracks.ts QUANT_BEATS)
+      timing.ts              # target: shared helpers (generate.ts has Hz/beat conversion)
+      quantize.ts            # target: shared helpers (generate.ts uses tracks.ts QUANT_BEATS)
     audio/
       playback-engine.ts     # implemented: testable scheduling and lifecycle
       tone-backend.ts        # implemented: Tone.js adapter and instrument voices
       click-track.ts         # implemented: metronome and playback count-in
-      segment-notes.ts       # target: segmentPitchFrames()
+      segment-notes.ts       # implemented: segmentPitchFrames(), tunable configuration
     persistence/
       local-project.ts       # target: multi-track save/load
-  tests/                     # implemented: playback regression suite; other fixtures planned
+  tests/                     # implemented: playback, harmony, segmentation, generation fixtures
 ```
 
 The earlier plan's `StudioClient`/`TransportControls`/`RecordPanel`/`useRecorder` split was folded into `Studio.tsx` and `hum.ts`. The playback facade delegates to testable modules in `src/lib/audio/`. Extract smaller modules when a file gets in the way of parallel work, and coordinate with its owner first.
@@ -130,9 +130,9 @@ export interface DetectorConfig {
   minHz: number;         // Initial: 80
   maxHz: number;         // Initial: 1000
   medianWindow: number;  // Initial: 5 valid samples
-  stableMs: number;      // Initial: 60
-  silenceHoldMs: number; // Initial: 80
-  mergeGapMs: number;    // Initial: 80
+  stableMs: number;      // Current segmentation default: 120
+  silenceHoldMs: number; // Current segmentation default: 150
+  mergeGapMs: number;    // Generation merge gap: 150, only within a phrase
   minNoteMs: number;     // Initial: 100
 }
 ```
@@ -196,9 +196,9 @@ export interface HumFrame {
 }
 ```
 
-`HumFrame` is a superset of the display needs plus pitch. It carries no `clarity` (it is gated inside `hum.ts`). When segmentation lands, either derive `PitchFrame[]` from it or add `clarity` to `HumFrame`; coordinate with Person 1.
+`HumFrame` is a superset of the display needs plus pitch. It carries no `clarity` (it is gated inside `hum.ts`). The segmenter consumes only `tSec`, `hz`, and `rms`, without changing the capture contract. `PitchFrame`, `NoteSegment`, and `DetectorConfig` above remain target types; the implemented segmentation types are in section 7.
 
-### 3.3 Generation seam (implemented as mock, `src/lib/generate.ts`)
+### 3.3 Generation seam (implemented, `src/lib/generate.ts`)
 
 ```ts
 export async function generateTrack(
@@ -210,7 +210,7 @@ export async function generateTrack(
 ): Promise<Note[]>;
 ```
 
-The UI calls only this. The current mock waits ~2.4 s, groups voiced frames into same-semitone runs, octave-shifts the median into the instrument's range, snaps to the grid, and for Drums turns RMS onsets into kick/snare plus eighth-note hats. A real implementation (sections 6-7, or a backend) replaces the body and must: return valid notes (see invariants) inside the instrument's range, return `[]` or throw for unusable input (the UI shows an error and keeps existing notes), and keep the signature or coordinate a change. Since 1.2 the mock also median-smooths pitch over 5 voiced frames, drops runs shorter than half a grid step (slides), and ends with `fitToHarmony` (3.4).
+The UI calls only this. It delegates to the pure `generateNotes(inst, frames, bpm, quantize, harmony): Note[]` and retains the existing ~2.4 s presentation delay. Melodic generation segments frames in seconds, octave-fits the instrument, corrects harmony, merges identical pitches within the same phrase, then converts/snaps beat boundaries. Off preserves raw beat timing. A confirmed rest changes the phrase ID so later correction or snapping cannot merge separate attacks. Drums retain RMS-onset kick/snare plus eighth-note-hat heuristics. Tempo outside 60..180, unknown grid values, and more than 10,000 frames throw; unusable melodic input returns `[]` (the UI keeps existing notes). The `generateTrack` and canonical note contracts are unchanged.
 
 ### 3.4 Shared harmony (implemented, `src/lib/music/harmony.ts`)
 
@@ -375,33 +375,47 @@ Allocation/CPU notes: reuse buffers, avoid rendering every frame into React, and
 
 ## 7. Note segmentation algorithm
 
-**Status: target.** The mock in `generate.ts` uses a much simpler run-grouping; replace it with this algorithm (Person 1).
+**Status: implemented** in `src/lib/audio/segment-notes.ts`, used by melodic `generateNotes`. Thresholds require real-device tuning (Person 1).
 
-### Required API
+### Implemented API
 
 ```ts
+export type SegmentationFrame = Pick<HumFrame, "tSec" | "hz" | "rms">;
+export interface SegmentedNote {
+  midi: number;
+  startSec: number;
+  endSec: number;
+  phraseId: number; // Internal rest boundary; never stored in canonical Note[]
+}
+export interface SegmentationConfig {
+  stableMs: number;
+  silenceHoldMs: number;
+  minNoteMs: number;
+  medianWindow: number;
+  pitchToleranceSemitones: number;
+}
 export function segmentPitchFrames(
-  frames: readonly PitchFrame[],
-  config: DetectorConfig,
-): NoteSegment[];
+  frames: readonly SegmentationFrame[],
+  options?: Partial<SegmentationConfig>,
+): SegmentedNote[];
 ```
 
 ### Baseline strategy
 
 1. Treat rejected or invalid pitch frames as unvoiced.
 2. Map valid `hz` to *continuous* MIDI (`69 + 12 log2(hz/440)`), then apply a rolling median over recent valid frames; avoid prematurely rounding each noisy observation.
-3. Round the smoothed value to an integer MIDI note.
-4. Start a **candidate** when a pitch appears; confirm only after it stays within the same note region for `stableMs` (initially 60 ms). On confirmation, use the candidate's first timestamp as onset.
+3. Retain the active/candidate pitch while the smoothed value stays within 0.7 semitones; otherwise round to a new integer MIDI pitch. This hysteresis suppresses boundary-crossing vibrato.
+4. Start a **candidate** when a pitch appears; confirm only after it stays within the same note region for `stableMs` (default 120 ms). On confirmation, use the candidate's first timestamp as onset.
 5. A candidate that changes before confirmation is replaced, not emitted.
 6. During an active note, treat a short change as pitch jitter. If a different MIDI pitch remains stable for `stableMs`, close the prior segment and start another at the new candidate's first timestamp.
-7. If unvoiced frames persist for `silenceHoldMs` (initially 80 ms), close the note at the **last voiced timestamp** rather than at the delayed timeout.
-8. Merge adjacent, same-pitch segments separated by a short gap <= `mergeGapMs` (initially 80 ms), except when future onset detection explicitly marks repeated notes.
-9. Drop segments below `minNoteMs` (initially 100 ms), reject negative/NaN timestamps, clamp end to the recording duration, and sort by start time.
+7. Keep the active note and median history across unvoiced gaps of at most `silenceHoldMs` (default 150 ms), measured from the first unvoiced frame. Longer silence or a missing-frame gap closes the note at the **last voiced timestamp**, clears history, and advances `phraseId`. All timing thresholds use seconds independently of BPM.
+8. After instrument/harmony fitting, generation merges adjacent identical pitches only within the same phrase and a gap <= 150 ms. Quantization follows merging and caps overlaps; a confirmed rest cannot be undone by either step.
+9. Drop segments below `minNoteMs` (default 100 ms), skip invalid/non-increasing timestamps, and limit input to 10,000 frames. Configuration timing must be finite and >0..1000 ms, medianWindow an integer 1..31, and pitchToleranceSemitones finite >=0.5 and <1. Generation clips notes at beat 32. Neither function mutates input frames.
 
 ### Known limitations
 
 - Fast trills, slides, vibrato across semitone boundaries, breathy tones and very low notes may require tuning.
-- Two identical notes without a gap may merge into one sustained note. Solving that robustly requires onset/envelope detection beyond P0.
+- Identical notes without a gap, or with gaps of 150 ms or less, may merge into one sustained note. Stable pitch changes shorter than 120 ms can be suppressed. Solving fast repeated attacks robustly requires onset/envelope detection beyond P0.
 - AnalyserNode plus animation-frame polling is approximate; moving to an AudioWorklet is a later performance improvement.
 - Noise gating may reject quiet singing; thresholds are configurable, not universal.
 
@@ -591,7 +605,7 @@ type ProjectAction =
 
 ### Unit tests (use synthetic fixtures)
 
-`npm test` runs 17 playback regression tests in `src/tests/playback.test.ts` and 6 harmony tests in `src/tests/harmony.test.ts` (T-16..T-19 plus id preservation and the Keys sample voicing). Playback covers repeated scheduling, five-track timing, tempo changes, mute/solo, overlapping notes, transport lifecycle, invalid inputs, teardown, and metronome/count-in timing and cancellation. The remaining algorithm, persistence, MIDI, and microphone fixtures below are targets.
+`npm test` runs 46 tests: 17 playback, 6 harmony, 12 segmentation, and 11 generation tests. Transcription fixtures cover 100 ms pitch wobbles, vibrato, 120 ms dropouts at 10/20/40 ms frame hops, the 150 ms silence boundary, genuine pitch changes/rests, harmony merging, all grids across 60/120/180 BPM, Off timing, instrument ranges, invalid input, immutability, and the async UI seam. Playback covers repeated scheduling, five-track timing, tempo changes, mute/solo, overlapping notes, transport lifecycle, invalid inputs, teardown, and metronome/count-in cancellation. Persistence, MIDI, and real-microphone checks below remain targets.
 
 | ID | Input | Expected result |
 |---|---|---|
@@ -626,11 +640,12 @@ type ProjectAction =
 - [ ] Microphone request works on localhost and approved HTTPS deployment.
 - [ ] Deny permission: error message appears, app stays usable.
 - [ ] Hum a clear melody; it becomes at least several correct-looking notes and can be replayed.
+- [x] Synthetic WAV through Edge's simulated microphone -> Pitchy -> generation -> note reveal: a held pitch with 100 ms semitone wobbles and 120 ms silent gaps produces one note; stable changes produce three notes at two pitches. Both takes stop their media tracks with no browser errors. This verifies the browser integration, not human-microphone accuracy or listening quality.
 - [ ] Edit note pitch/time/duration; synth reflects changes.
 - [ ] Save JSON, refresh, reopen JSON; every track, BPM, and mute/solo survive.
 - [ ] MIDI export opens in a MIDI application with one track per instrument, correct pitches and tempo.
 - [ ] Stop/cancel/unmount releases mic; browser recording indicator clears.
-- [x] `npm test` (19 tests), `npm run lint`, `npx tsc --noEmit`, and `npm run build` pass (re-run during the documentation merge on 2026-10-10).
+- [x] `npm test` (46 tests), lint (excluding stale `.test-build/**`), `npx tsc --noEmit`, and `npm run build` pass (2026-10-10).
 
 ### Benchmarks, explicitly aspirational
 
@@ -659,8 +674,8 @@ The app ships labeled **Sample** parts (Keys, Drums) and a labeled **Demo hum**.
 2. ~~Show fixture notes on tracks; verify beat/pitch mapping.~~ Done (multi-track lanes).
 3. ~~Tone playback service with BPM and event cleanup.~~ Done; verify by ear.
 4. ~~Mic session, timestamps, Pitchy readout, spectrogram.~~ Done; verify with a real mic.
-5. Test segmentation with fixture frames independently of the microphone (Person 1).
-6. Replace the mock body of `generateTrack` with segment -> quantize -> fit-to-instrument (Person 1).
+5. ~~Test segmentation with fixture frames independently of the microphone.~~ Done; real-device tuning remains (Person 1).
+6. ~~Replace run grouping in `generateTrack`.~~ Done: segment -> instrument/harmony fitting -> merge -> quantize.
 7. Note editing in the zoomed track, wired to state and playback (Person 3).
 8. Multi-track JSON autosave + file round trip (Person 4).
 9. Exercise denied permissions, silence, repeated recordings, and bad import.

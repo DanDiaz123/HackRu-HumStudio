@@ -4,7 +4,7 @@
 
 HumStudio is a browser-based music sketchpad for **HackRU Fall 2026**. It looks like a familiar multi-track editor: one track per instrument (Melody, Bass, Keys, Drums, Strings). Click a track to zoom into it, hum into your microphone while a live spectrogram prints your voice across the lane, and watch the track fill with generated notes. Then play the arrangement or export it as MIDI.
 
-> **Current repository status:** The Next.js app and **studio UI are built**: arrangement view, track zoom, live hum spectrogram, loading state, animated note reveal, five-instrument Tone.js playback, and multi-track MIDI export. Playback includes separate pause/stop, rewind, mute/solo, a metronome, a four-beat playback count-in, and regression tests. **Note generation is a mock** (`src/lib/generate.ts`); note editing and project save/load remain separate workstreams. Real-microphone and audible playback verification remain open. See the [Person 2 handoff](WORKLOAD_SPLIT.md#person-2-implementation-handoff) for verification and limitations, and [`WORKLOAD_SPLIT.md`](WORKLOAD_SPLIT.md) for ownership.
+> **Current repository status:** The Next.js app and **studio UI are built**: arrangement view, track zoom, live hum spectrogram, loading state, animated note reveal, five-instrument Tone.js playback, and multi-track MIDI export. Playback includes separate pause/stop, rewind, mute/solo, a metronome, a four-beat playback count-in, and regression tests. **Melodic generation uses deterministic DSP segmentation** (`src/lib/audio/segment-notes.ts`) with harmony fitting and quantization; Drums still use simple RMS-onset heuristics. Note editing and project save/load remain separate workstreams. Real-microphone and audible playback verification remain open. See the [Person 2 handoff](WORKLOAD_SPLIT.md#person-2-implementation-handoff) for verification and limitations, and [`WORKLOAD_SPLIT.md`](WORKLOAD_SPLIT.md) for ownership.
 
 ## What are we building?
 
@@ -15,7 +15,7 @@ Pick an instrument track
    Hum into the mic  ──>  live halftone spectrogram on the lane
           |
           v
- Generate notes for that instrument   (mocked today: src/lib/generate.ts)
+ Generate notes for that instrument   (local DSP: src/lib/generate.ts)
           |
           v
   Notes revealed on the track (Note[] in beats)
@@ -32,13 +32,13 @@ Pick an instrument track
 - [x] **Arrangement view:** five instrument tracks over 8 bars of 4/4, with a transport bar (play/pause/stop, rewind, position, metronome, playback count-in, BPM, snap, Export MIDI).
 - [x] **Zoom:** clicking a track floods it with its color and collapses the others; Escape or "All tracks" returns.
 - [x] **Record:** microphone capture (up to 15 s or the end of the timeline) with Pitchy pitch estimation and a live spectrogram.
-- [x] **Generate (mock):** a "Setting the session" loading state, then notes for the selected instrument.
+- [x] **Generate:** stable pitch segmentation, harmony fitting, and Off/1/4/1/8/1/16 timing for melodic tracks, with a "Setting the session" loading state.
 - [x] **Reveal:** notes wipe in left to right over a ghost of the hum; skipped under reduced motion.
 - [x] **Play:** Tone.js playback of all tracks with mute/solo and BPM 60–180.
 - [x] **Playback count-in / metronome:** optional four-beat count-in and beat clicks; listening verification remains open.
 - [x] **Export:** multi-track `.mid` (drums on MIDI channel 10).
 - [x] **Recover:** mic denial, insecure origin, missing device, and silent takes show a message plus a **Demo hum** fallback; failed takes never erase existing notes.
-- [ ] **Real generation:** replace the mock in `generateTrack(...)` with tested transcription/arrangement (Person 1).
+- [ ] **Real-device tuning:** validate the DSP generation with human humming on the demo microphone (Person 1).
 - [ ] **Edit:** drag notes in pitch/time and resize them in the zoomed track (Person 3).
 - [ ] **Save/reopen:** local autosave and project file import/export for all tracks (Person 4).
 - [ ] **Recording count-in**, undo/redo, instrument polish (if time remains).
@@ -55,14 +55,16 @@ The demo targets **clear, one-note-at-a-time humming** in a reasonably quiet roo
 | Browser microphone | `navigator.mediaDevices.getUserMedia`, Web Audio `AnalyserNode` |
 | Fundamental pitch estimation | [Pitchy](https://github.com/ianprime0509/pitchy) |
 | Spectrogram | `<canvas>` halftone drawn from 48 log-spaced bins (80–1000 Hz) |
-| Note generation | `generateTrack(...)` in `src/lib/generate.ts`: **mock DSP heuristics today** |
+| Note generation | `generateTrack(...)` in `src/lib/generate.ts`: local DSP segmentation, harmony fitting, then quantization |
 | Synth and transport | [Tone.js](https://tonejs.github.io/) v15 |
 | MIDI export | [`@tonejs/midi`](https://github.com/Tonejs/Midi) |
 | State | React state in `src/components/Studio.tsx` (`Track[]`) |
 | Persistence | Not built yet (planned: local storage + JSON file) |
 | Cloud / accounts | **None.** Audio never leaves the browser. |
 
-**Important:** Nothing in this repo is a trained AI model. Pitch detection is DSP (Pitchy) and the current generator is a placeholder. Describe it accurately when presenting.
+**Important:** Nothing in this repo is a trained AI model. Pitch detection is DSP (Pitchy), and note generation uses deterministic heuristics. Describe it accurately when presenting.
+
+Held notes tolerate short pitch wobbles and unvoiced gaps: defaults are 120 ms of stable pitch before a change, 150 ms of silence hold, and a five-frame median with a 0.7-semitone hold region. Harmony correction happens before merging; confirmed rests still separate notes. Off preserves unsnapped beat timing. These values are tunable in `SEGMENTATION_DEFAULTS`; very fast repeated notes or rests of 150 ms or less can merge.
 
 ## Getting started
 
@@ -95,7 +97,7 @@ npm run build
 npm test
 ```
 
-`npm test` runs the playback regression suite using TypeScript and Node's built-in test runner, without adding a testing dependency. Real browser listening and microphone tests are still necessary. The production build downloads the existing Archivo font from Google Fonts when it is not cached.
+`npm test` runs playback, harmony, segmentation, and generation regression suites using TypeScript and Node's built-in test runner, without adding a testing dependency. Fixtures cover held-note wobbles, short dropouts across frame rates and tempos, genuine rests, harmony merging, and Off timing. Real browser listening and microphone tests are still necessary. The production build downloads the existing Archivo font from Google Fonts when it is not cached. If an old `.test-build/` directory remains from an earlier test runner, exclude it with `npm run lint -- --ignore-pattern .test-build/**`.
 
 ## File structure
 
@@ -113,15 +115,15 @@ src/
   lib/
     tracks.ts            # Instrument, Track, INSTRUMENTS, sample parts, lane geometry
     hum.ts               # startMic (Pitchy) / startDemoHum -> HumFrame stream; mic error messages
-    generate.ts          # generateTrack(): THE MOCK the backend replaces
+    generate.ts          # generateTrack() async facade / generateNotes() pure DSP pipeline
     playback.ts          # browser-only playback facade: schedule, play/pause/stop, position, count-in
     midi.ts              # exportMidi(Track[], bpm) -> humstudio.mid
     music/               # shared contracts: types.ts (Note, QuantizeDivision)
-    audio/               # playback engine, Tone adapter, click track
-  tests/                 # playback regression suite and five-instrument fixture
+    audio/               # note segmenter, playback engine, Tone adapter, click track
+  tests/                 # playback, harmony, segmentation, generation + synthetic fixtures
 ```
 
-Planned, not yet created: note editing (`PianoRoll.tsx` or inside `TrackRow.tsx`), segmentation helpers under `src/lib/audio/`, and persistence under `src/lib/persistence/`. Exact contracts are in [`TECHNICAL_SPEC.md`](TECHNICAL_SPEC.md).
+Planned, not yet created: note editing (`PianoRoll.tsx` or inside `TrackRow.tsx`) and persistence under `src/lib/persistence/`. Exact contracts are in [`TECHNICAL_SPEC.md`](TECHNICAL_SPEC.md).
 
 ## Key design choices
 
@@ -151,7 +153,7 @@ If the room or mic fails, use **Demo hum** and say it is a demo hum.
 | "Microphone access was blocked" | Allow the mic in the address bar, reload, or use Demo hum. |
 | No sound | Press Play first (browsers need a click to start audio); check the output device; check mute/solo. |
 | "We didn't catch a hum" | Hum louder and closer, in a quieter room; fewer than 10 pitched frames counts as empty. |
-| Wrong octave / jumpy notes | Tune Pitchy clarity/RMS gates in `hum.ts`; the mock generator is naive. |
+| Wrong octave / jumpy notes | Check microphone input and tune Pitchy gates in `hum.ts` or the stability/hold thresholds in `audio/segment-notes.ts`. |
 | Notes play twice | `schedule()` must clear previous Transport event IDs (it does; check new callers). |
 
 ## Privacy and data

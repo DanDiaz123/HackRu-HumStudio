@@ -1,8 +1,9 @@
 import type { HumFrame } from "./hum";
-import { type Harmony, detectKey, fitToHarmony } from "./music/harmony";
-import { DRUM_ROWS, type Instrument, type Note, type QuantizeDivision, QUANT_BEATS, TOTAL_BEATS, noteId } from "./tracks";
+import { MAX_SEGMENTATION_FRAMES, SEGMENTATION_DEFAULTS, segmentPitchFrames } from "./audio/segment-notes.ts";
+import { type Harmony, detectKey, fitToHarmony } from "./music/harmony.ts";
+import { DRUM_ROWS, type Instrument, type Note, type QuantizeDivision, QUANT_BEATS, TOTAL_BEATS, noteId } from "./tracks.ts";
 
-// ponytail: mock; backend replaces this function. Same signature, return Note[] in beats.
+/** Generates canonical notes with the existing loading delay; raw audio stays local. */
 export async function generateTrack(
   inst: Instrument,
   frames: HumFrame[],
@@ -10,14 +11,31 @@ export async function generateTrack(
   quantize: QuantizeDivision,
   harmony: Harmony,
 ): Promise<Note[]> {
+  const notes = generateNotes(inst, frames, bpm, quantize, harmony);
   await new Promise((r) => setTimeout(r, 2400));
-  const grid = QUANT_BEATS[quantize] || 0.25;
+  return notes;
+}
+
+/**
+ * Pure generation path: segment seconds, fit pitch/harmony, merge fragments, then snap beats.
+ * Off preserves unsnapped timing. Invalid tempo/grid or oversized input throws;
+ * unusable melodic frames return [] so the recording UI can preserve existing notes.
+ */
+export function generateNotes(
+  inst: Instrument,
+  frames: readonly HumFrame[],
+  bpm: number,
+  quantize: QuantizeDivision,
+  harmony: Harmony,
+): Note[] {
+  if (!Number.isFinite(bpm) || bpm < 60 || bpm > 180) throw new RangeError("BPM must be between 60 and 180.");
+  if (!Object.hasOwn(QUANT_BEATS, quantize)) throw new RangeError("Unsupported quantization.");
+  if (!Array.isArray(frames) || frames.length > MAX_SEGMENTATION_FRAMES) throw new RangeError("Too many analysis frames.");
+  const grid = QUANT_BEATS[quantize];
   const beatOf = (tSec: number) => (tSec * bpm) / 60;
-  const snap = (b: number) => Math.round(b / grid) * grid;
+  const snap = (b: number) => grid ? Math.round(b / grid) * grid : b;
   if (inst.kind === "drums") return drums(frames, beatOf, snap);
-  const notes = melodic(inst, frames, beatOf, snap, grid);
-  // Melody sets the key (Studio infers chords from it); every other part fits the current harmony.
-  return fitToHarmony(notes, inst, inst.id === "melody" ? { ...harmony, ...detectKey(notes) } : harmony);
+  return melodic(inst, frames, beatOf, snap, grid, harmony);
 }
 
 export const hzToMidi = (hz: number) => 69 + 12 * Math.log2(hz / 440);
@@ -31,52 +49,56 @@ export function octaveShift(inst: Instrument, midis: number[]): number {
 
 function melodic(
   inst: Instrument,
-  frames: HumFrame[],
+  frames: readonly HumFrame[],
   beatOf: (t: number) => number,
   snap: (b: number) => number,
   grid: number,
+  harmony: Harmony,
 ): Note[] {
-  // Median-smooth continuous pitch over the last 5 voiced frames, then collapse into runs of one semitone.
-  const runs: { midi: number; start: number; end: number }[] = [];
-  let recent: number[] = [];
-  for (const f of frames) {
-    if (!f.hz) {
-      recent = [];
-      continue;
-    }
-    recent = [...recent.slice(-4), hzToMidi(f.hz)];
-    const midi = Math.round([...recent].sort((a, b) => a - b)[recent.length >> 1]);
-    const b = beatOf(f.tSec);
-    const last = runs[runs.length - 1];
-    if (last && last.midi === midi && b - last.end < 0.3) last.end = b;
-    else runs.push({ midi, start: b, end: b });
-  }
-  const kept = runs.filter((r) => r.end - r.start >= Math.max(0.15, grid / 2)); // shorter runs are slides
-  if (!kept.length) return [];
-
-  const shift = octaveShift(inst, kept.map((r) => r.midi));
-
-  const out: Note[] = [];
-  for (const r of kept) {
+  const segments = segmentPitchFrames(frames);
+  const shift = octaveShift(inst, segments.map((r) => r.midi));
+  const staged = segments.map((r) => {
     let midi = r.midi + shift;
     while (midi < inst.lo) midi += 12;
     while (midi > inst.hi) midi -= 12;
-    const startBeat = snap(r.start);
-    const durationBeats = Math.max(grid, snap(r.end) - startBeat);
-    if (startBeat >= TOTAL_BEATS) break;
-    const prev = out[out.length - 1];
-    if (prev && prev.midi === midi && prev.startBeat + prev.durationBeats >= startBeat) {
-      prev.durationBeats = startBeat + durationBeats - prev.startBeat;
-      continue;
+    const startBeat = beatOf(r.startSec);
+    const endBeat = Math.min(TOTAL_BEATS, beatOf(r.endSec));
+    return {
+      phraseId: r.phraseId,
+      note: { id: noteId(), midi, startBeat, durationBeats: endBeat - startBeat, velocity: 0.8 },
+    };
+  }).filter(({ note }) => note.startBeat < TOTAL_BEATS && note.durationBeats > 0);
+  const raw = staged.map(({ note }) => note);
+  // Correction can make different raw pitches identical; merging must follow it.
+  const fitted = fitToHarmony(raw, inst, inst.id === "melody" ? { ...harmony, ...detectKey(raw) } : harmony);
+  const merged: { note: Note; phraseId: number }[] = [];
+  const mergeGapBeats = beatOf(SEGMENTATION_DEFAULTS.silenceHoldMs / 1000);
+  for (let i = 0; i < fitted.length; i++) {
+    const note = fitted[i];
+    const phraseId = staged[i].phraseId;
+    const prev = merged[merged.length - 1];
+    if (prev && prev.phraseId === phraseId && prev.note.midi === note.midi &&
+      note.startBeat - (prev.note.startBeat + prev.note.durationBeats) <= mergeGapBeats + 1e-9) {
+      prev.note.durationBeats = Math.max(prev.note.startBeat + prev.note.durationBeats, note.startBeat + note.durationBeats) - prev.note.startBeat;
+    } else {
+      merged.push({ note: { ...note }, phraseId });
     }
+  }
+
+  const out: Note[] = [];
+  for (const { note } of merged) {
+    const startBeat = snap(note.startBeat);
+    const endBeat = Math.min(TOTAL_BEATS, Math.max(startBeat + grid, snap(note.startBeat + note.durationBeats)));
+    if (startBeat >= TOTAL_BEATS || endBeat <= startBeat) continue;
+    const prev = out[out.length - 1];
     if (prev && prev.startBeat + prev.durationBeats > startBeat) prev.durationBeats = startBeat - prev.startBeat;
     if (prev && prev.durationBeats <= 0) out.pop();
-    out.push({ id: noteId(), midi, startBeat, durationBeats: Math.min(durationBeats, TOTAL_BEATS - startBeat), velocity: 0.8 });
+    out.push({ ...note, startBeat, durationBeats: endBeat - startBeat });
   }
   return out;
 }
 
-function drums(frames: HumFrame[], beatOf: (t: number) => number, snap: (b: number) => number): Note[] {
+function drums(frames: readonly HumFrame[], beatOf: (t: number) => number, snap: (b: number) => number): Note[] {
   const out: Note[] = [];
   let prev = 0;
   let hits = 0;
