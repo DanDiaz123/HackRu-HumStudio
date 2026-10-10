@@ -45,3 +45,6 @@ next-env.d.ts
 
 # stale compiled tests from an old runner
 /.test-build/
+
+# design-tool review screenshots (generated)
+/.impeccable/review/

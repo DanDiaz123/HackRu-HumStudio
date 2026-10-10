@@ -2,10 +2,10 @@ import type { HumFrame } from "../hum";
 import { noteSensitivityConfig } from "./note-sensitivity.ts";
 
 /** Analysis data needed for segmentation; spectrogram bins are deliberately ignored. */
-export type SegmentationFrame = Pick<HumFrame, "tSec" | "hz" | "rms">;
+type SegmentationFrame = Pick<HumFrame, "tSec" | "hz" | "rms">;
 
 /** A detected note in seconds, before instrument fitting or beat quantization. */
-export interface SegmentedNote {
+interface SegmentedNote {
   midi: number;
   startSec: number;
   endSec: number;

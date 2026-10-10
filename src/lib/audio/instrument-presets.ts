@@ -1,5 +1,5 @@
-export type TrackCategory = "melody" | "bass" | "keys" | "strings" | "drums";
-export type DrumMidi = 36 | 38 | 42 | 46 | 49;
+type TrackCategory = "melody" | "bass" | "keys" | "strings" | "drums";
+type DrumMidi = 36 | 38 | 42 | 46 | 49;
 
 /** Fixed catalog options, never URLs or code supplied by a project file. */
 export type InstrumentPreset = {
