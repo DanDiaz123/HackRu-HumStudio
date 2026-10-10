@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { generateTrackVariants } from "../lib/generate.ts";
-import { applyNoteSettings, type NoteSettingsInput, type RecordedTake } from "../lib/music/arrangement-settings.ts";
+import { applyNoteSettings, captureArrangementSnapshot, projectArrangementSnapshot, type ArrangementSnapshot, type NoteSettingsInput, type RecordedTake } from "../lib/music/arrangement-settings.ts";
+import { MAX_PROJECT_NOTES, newProjectMeta, serializeProject } from "../lib/persistence/project.ts";
 import { DEFAULT_HARMONY, fitToHarmony, inferHarmony } from "../lib/music/harmony.ts";
 import { INSTRUMENTS, initialTracks, type Note } from "../lib/tracks.ts";
 import { pitchFrames } from "./fixtures/transcription.ts";
@@ -103,4 +104,60 @@ test("explicit key changes keep the override while Keys remains the chord driver
     snapSources: next.snapSources, sensitivity: "high", harmonyDriver: "keys", keyOverride: { tonic: 2, mode: "minor" } }));
   assert.equal(switched.harmony.tonic, 2);
   assert.equal(switched.harmony.mode, "minor");
+});
+
+test("history retains captured profiles, capture BPM and Snap sources after a hand edit opts out", () => {
+  const melody = take("melody", 90);
+  const settings = input({ takes: { melody }, snapSources: { keys: [note(60)] } });
+  const state: ArrangementSnapshot = { ...settings, bpm: 150, meta: newProjectMeta(), pickedKey: { tonic: 0, mode: "major" } };
+  const saved = captureArrangementSnapshot(state);
+  delete state.takes.melody;
+  state.snapSources.keys = [note(64, 1, 1)];
+  const restored = applyNoteSettings({ ...settings, takes: saved.takes, snapSources: saved.snapSources,
+    harmonyDriver: saved.harmonyDriver, keyOverride: saved.pickedKey, sensitivity: "high" });
+  assert.equal(saved.takes.melody.bpm, 90);
+  assert.equal(saved.bpm, 150);
+  assert.deepEqual(saved.snapSources.keys, [note(60)]);
+  assert.equal(restored.tracks.find(track => track.instrument.id === "melody")!.notes.length, 2);
+});
+
+test("project Open resets analysis caches while retaining metadata/settings and unrounded manual note sources", () => {
+  const tracks = initialTracks().map(track => track.instrument.id === "melody" ? { ...track, notes: [note(61)], sample: false } : track);
+  const project = { tracks, harmony: DEFAULT_HARMONY, bpm: 87, quantize: "1/16" as const, sensitivity: "high" as const,
+    meta: { id: "opened-id", name: "Opened tune", createdAt: "2026-10-10T12:00:00.000Z" } };
+  const loaded = projectArrangementSnapshot(project);
+  assert.deepEqual(loaded.takes, {});
+  assert.equal(loaded.pickedKey, null);
+  assert.equal(loaded.harmonyDriver, null);
+  assert.deepEqual(loaded.meta, project.meta);
+  assert.equal(loaded.bpm, 87);
+  assert.equal(loaded.quantize, "1/16");
+  assert.equal(loaded.sensitivity, "high");
+  const snapped = applyNoteSettings({ ...input(), ...loaded, keyOverride: loaded.pickedKey, quantize: "1/4", resnap: true });
+  const off = applyNoteSettings({ ...input(), ...snapped, sensitivity: "low", quantize: "off", resnap: true });
+  assert.deepEqual(off.tracks.find(track => track.instrument.id === "melody")!.notes, [note(61)]);
+  assert.equal(project.tracks.find(track => track.instrument.id === "melody")!.notes[0].startBeat, 0.28);
+});
+
+test("saving a history snapshot excludes analysis/cache fields from project JSON", () => {
+  const state: ArrangementSnapshot = { tracks: initialTracks(), harmony: DEFAULT_HARMONY, bpm: 120,
+    quantize: "off", sensitivity: "medium", meta: newProjectMeta(), takes: { melody: take("melody") },
+    snapSources: { keys: [note(60)] }, pickedKey: { tonic: 0, mode: "major" }, harmonyDriver: "melody" };
+  const saved = captureArrangementSnapshot(state);
+  state.meta.name = "Changed later";
+  assert.equal(saved.meta.name, "HumStudio project");
+  const json = JSON.parse(serializeProject(saved));
+  for (const runtimeField of ["takes", "snapSources", "pickedKey", "harmonyDriver", "frames", "variants"]) {
+    assert.equal(Object.hasOwn(json, runtimeField), false, runtimeField);
+  }
+  assert.equal(json.name, saved.meta.name);
+});
+
+test("generation beyond the project note limit is rejected without altering existing notes or caches", () => {
+  const keys = Array.from({ length: MAX_PROJECT_NOTES }, (_, index) => ({ ...note(60), id: `full-${index}` }));
+  const tracks = initialTracks().map(track => ({ ...track, notes: track.instrument.id === "keys" ? keys : [], sample: false }));
+  const state = input({ tracks, takes: { melody: take("melody") }, sensitivity: "high" });
+  const before = structuredClone(state);
+  assert.throws(() => applyNoteSettings(state), /at most 10,000 notes/);
+  assert.deepEqual(state, before);
 });

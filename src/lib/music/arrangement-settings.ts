@@ -2,6 +2,8 @@ import { generateTrackVariants, snapNotesToGrid, type NoteSensitivityVariants } 
 import type { HumFrame } from "../hum.ts";
 import type { NoteSensitivity } from "../audio/note-sensitivity.ts";
 import type { Note, QuantizeDivision, Track } from "../tracks.ts";
+import type { LoadedProject } from "../persistence/project.ts";
+import { MAX_PROJECT_NOTES } from "../persistence/project.ts";
 import { chordsFromVoicing, fitToHarmony, inferHarmony, voiceChords, withKey, type Harmony, type Key } from "./harmony.ts";
 
 /** Runtime analysis only. Capture tempo stays fixed because the saved note positions are musical beats. */
@@ -13,6 +15,25 @@ export interface RecordedTake {
 
 export type RecordedTakes = Record<string, RecordedTake>;
 export type SnapSources = Record<string, Note[]>;
+
+/** In-memory history includes analysis/settings sources; project JSON deliberately contains only LoadedProject. */
+export interface ArrangementSnapshot extends LoadedProject {
+  takes: RecordedTakes;
+  snapSources: SnapSources;
+  pickedKey: Key | null;
+  harmonyDriver: "melody" | "keys" | null;
+}
+
+/** Copy mutable runtime containers; notes, takes, and harmony are replaced immutably by their owners. */
+export function captureArrangementSnapshot(state: ArrangementSnapshot): ArrangementSnapshot {
+  return { ...state, meta: { ...state.meta }, takes: { ...state.takes }, snapSources: { ...state.snapSources } };
+}
+
+/** Files contain notes, never captures: an imported part's saved timing becomes its new Snap source. */
+export function projectArrangementSnapshot(project: LoadedProject): ArrangementSnapshot {
+  return captureArrangementSnapshot({ ...project, takes: {}, pickedKey: null, harmonyDriver: null,
+    snapSources: Object.fromEntries(project.tracks.map(track => [track.instrument.id, track.notes.map(note => ({ ...note }))])) });
+}
 
 export interface NoteSettingsInput {
   tracks: Track[];
@@ -99,5 +120,8 @@ export function applyNoteSettings(input: NoteSettingsInput): {
     if (snapSources[id] || input.resnap) snapSources[id] = fittedSource;
     return input.resnap ? { ...fitted, notes: snapNotesToGrid(track.instrument, fittedSource, quantize) } : fitted;
   });
+  if (tracks.reduce((count, track) => count + track.notes.length, 0) > MAX_PROJECT_NOTES) {
+    throw new RangeError(`This project can hold at most ${MAX_PROJECT_NOTES.toLocaleString()} notes. Remove notes before generating or repeating a part.`);
+  }
   return { tracks, harmony, takes, snapSources };
 }
