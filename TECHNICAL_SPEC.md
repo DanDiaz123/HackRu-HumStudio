@@ -230,7 +230,7 @@ The UI calls only this. It delegates to the pure `generateNotes(inst, frames, bp
 
  Tempo outside 60..180, unknown grid values, and more than 10,000 frames throw; unusable melodic input returns `[]` (the UI keeps existing notes). Unknown sensitivity values throw. Canonical note contracts are unchanged; `generateTrack` gained only the optional trailing `sensitivity` argument.
 
-`Studio.tsx` keeps each part's latest take (`HumFrame[]` in a ref, never audio, never persisted). Changing Sensitivity or Snap re-runs `generateNotes` for every cached take: Melody first (re-infers harmony), then Keys (re-picks chords), then the rest; parts without a take are refitted if harmony changed. A hand edit drops that part's take. An empty regeneration keeps the existing notes.
+`Studio.tsx` keeps each part's latest take (`HumFrame[]` in a ref, never audio, never persisted). Changing Sensitivity or Snap re-runs `generateNotes` for every cached take: Melody first (re-infers harmony), then Keys (re-picks chords), then the rest; parts without a take are refitted if harmony changed. Implicit refits (after a take or regeneration) never move Melody; only the explicit Key pick below does. A hand edit drops that part's take. An empty regeneration keeps the existing notes.
 
 ### 3.4 Shared harmony (implemented, `src/lib/music/harmony.ts`)
 

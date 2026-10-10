@@ -38,9 +38,13 @@ import TrackRow, { type Phase, REVEAL_SEC, type Reveal } from "./TrackRow";
 
 const COLLAPSED_H = 36;
 
-/** Move a part onto new harmony without deleting notes: the Keys sample is re-voiced, drums stay put. */
-const refit = (t: Track, h: Harmony): Track =>
-  t.instrument.kind === "drums" ? t : { ...t, notes: t.sample ? voiceChords(h) : fitToHarmony(t.notes, t.instrument, h) };
+/**
+ * Move a part onto new harmony without deleting notes: the Keys sample is re-voiced, drums stay put.
+ * Melody moves only on an explicit key pick; otherwise its hummed or hand-edited semitones are kept.
+ */
+const refit = (t: Track, h: Harmony, melodyToo = false): Track =>
+  t.instrument.kind === "drums" || (t.instrument.id === "melody" && !melodyToo) ? t
+  : { ...t, notes: t.sample ? voiceChords(h) : fitToHarmony(t.notes, t.instrument, h) };
 
 function readout(beat: number) {
   const bar = Math.floor(beat / 4) + 1;
@@ -289,14 +293,17 @@ export default function Studio() {
         const after = h ?? harmony;
         // Every step shows what the pipeline actually produced; nothing here is a progress estimate.
         const drums = inst.kind === "drums";
+        // Melody is pitch-corrected only on Low (generate.ts); say so rather than claim "in key".
+        const keptPitch = inst.id === "melody" && sensitivity !== "low";
+        const fitted = keptPitch ? "pitches kept as hummed" : `fitted to ${keyName(after)}`;
         const noun = (k: number, w: string) => `${k} ${w}${k === 1 ? "" : "s"}`;
         const steps = [
           drums
             ? { title: noun(trace.raw.length, "hit"), sub: "Heard in your beatbox" }
             : { title: noun(trace.raw.length, "note"), sub: `Found in ${trace.voicedFrames} pitched frames of your hum` },
           {
-            title: trace.grid ? "On the beat" : drums ? "As hummed" : "In key",
-            sub: trace.grid ? `Snapped to the ${quantize} grid` + (drums ? "" : `, fitted to ${keyName(after)}`) : drums ? "Timing kept as hummed" : `Fitted to ${keyName(after)}, timing kept`,
+            title: trace.grid ? "On the beat" : drums || keptPitch ? "As hummed" : "In key",
+            sub: trace.grid ? `Snapped to the ${quantize} grid` + (drums ? "" : `, ${fitted}`) : drums ? "Timing kept as hummed" : `${fitted[0].toUpperCase()}${fitted.slice(1)}, timing kept`,
           },
           ...(drums ? [] : [{ title: keyName(after), sub: after.bars.map(chordName).join(" ") }]),
         ];
@@ -408,7 +415,7 @@ export default function Studio() {
     const [tonic, mode] = value.split(" ");
     const h = withKey({ tonic: Number(tonic), mode: mode as Mode }, tracks.find((t) => t.instrument.id === "melody")?.notes ?? []);
     setHarmony(h);
-    setTracks((ts) => ts.map((t) => refit(t, h)));
+    setTracks((ts) => ts.map((t) => refit(t, h, true)));
   }
 
   /** A hand edit replaces the part's notes; an edited Sample is the user's part from then on. */

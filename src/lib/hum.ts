@@ -79,15 +79,16 @@ export async function startMic(ctx: MicContext, onFrame: (f: HumFrame) => void):
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
   });
-  const src = ctx.createMediaStreamSource(stream);
+  let src: MediaStreamAudioSourceNode | undefined;
   // The context is shared with playback, so it stays open.
   const cleanup = () => {
-    src.disconnect();
+    src?.disconnect();
     stream.getTracks().forEach((t) => t.stop());
   };
 
   let tap: AudioWorkletNode;
   try {
+    src = ctx.createMediaStreamSource(stream);
     // The worklet delivers every sample on the audio thread; the main thread only analyses.
     await ctx.addModule("/hum-worklet.js");
     tap = ctx.createWorklet("hum-tap", {
@@ -105,8 +106,8 @@ export async function startMic(ctx: MicContext, onFrame: (f: HumFrame) => void):
   const analyser = ctx.createAnalyser();
   analyser.fftSize = WINDOW_SIZE;
   analyser.smoothingTimeConstant = 0.2;
-  src.connect(analyser);
-  src.connect(tap);
+  src!.connect(analyser);
+  src!.connect(tap);
 
   const spec = new Float32Array(analyser.frequencyBinCount);
   const hzPerBin = ctx.sampleRate / analyser.fftSize;
@@ -126,6 +127,7 @@ export async function startMic(ctx: MicContext, onFrame: (f: HumFrame) => void):
 
   return () => {
     tap.port.onmessage = null;
+    tap.port.postMessage("stop"); // lets the processor return false and be collected
     tap.disconnect();
     cleanup();
   };
