@@ -64,12 +64,12 @@ This split reflects the **existing repository**, not a blank project. At the tim
 ### What to work on
 
 - [ ] Verify existing `src/lib/playback.ts` can play all five instrument tracks with correct pitch, duration, volume, and timing.
-- [ ] Make BPM changes preserve beat-aligned scheduling, not shift where notes sit on the musical grid.
+- [x] Make BPM changes preserve beat-aligned scheduling, not shift where notes sit on the musical grid.
 - [ ] Verify Play, Pause, Stop, Rewind, and current playhead position; make displayed transport state match the actual audio.
-- [ ] Check mute and solo combinations, including editing notes while playback is stopped or running.
-- [ ] Prevent duplicate Tone Transport callbacks or stuck voices when rescheduling/replaying; release/dispose synth resources cleanly.
-- [ ] Ensure browser audio starts only following a real user gesture; do not initialize Tone audio during server rendering.
-- [ ] Add metronome and count-in **only after** basic playback is reliable.
+- [x] Check mute and solo combinations, including editing notes while playback is stopped or running (deterministic regression tests; listening pending).
+- [x] Prevent duplicate Tone Transport callbacks or stuck voices when rescheduling/replaying; release/dispose synth resources cleanly (regression tests; listening pending).
+- [x] Ensure browser audio starts only following a real user gesture; do not initialize Tone audio during server rendering.
+- [x] Add metronome and count-in **only after** basic playback is reliable (core checks passed before implementation; count-in precedes playback).
 - [ ] Test the generated melody alongside another track (e.g., sample drums or keys) to prove simultaneous multitrack playback.
 
 **Primary files:** `src/lib/playback.ts` and isolated transport/audio controls. Person 4 owns the overall `Studio.tsx` layout; coordinate any transport-hookup changes rather than both editing the same component simultaneously.
@@ -77,6 +77,85 @@ This split reflects the **existing repository**, not a blank project. At the tim
 **Handoff to Person 4:** Documented functions to initialize, schedule `Track[]`, play/pause, rewind, and report playhead position, with a hardcoded test arrangement.
 
 **Definition of done:** Repeated play/stop/rewind and track changes work audibly, stay synchronized with note positions, and do not build up overlapping scheduled events.
+
+### Person 2 implementation handoff
+
+**Implementation delivered; real-browser listening sign-off remains open.** The
+engine now schedules melodic attacks and releases in beats, supports all five
+instruments, separates Pause from Stop, preserves running state on Rewind,
+handles live note/mute/solo/tempo changes, and cleans up queued synths and owned
+transport callbacks. The metronome and cancellable four-beat playback count-in
+are optional. No `Note`, `Track`, or `Project` fields changed.
+
+**Files changed:**
+
+- `src/lib/playback.ts`
+- `src/lib/audio/playback-engine.ts`
+- `src/lib/audio/tone-backend.ts`
+- `src/lib/audio/click-track.ts`
+- `src/components/Studio.tsx` (transport hookup, defaults, error handling, teardown only)
+- `src/components/icons.tsx` (Pause icon)
+- `src/tests/playback.test.ts`
+- `src/tests/fixtures/playback.ts`
+- `tsconfig.test.json`
+- `package.json` (test script; no dependency changes)
+- `.gitignore` and `eslint.config.mjs` (ignore compiled test output)
+- `TECHNICAL_SPEC.md`, `README.md`, and `WORKLOAD_SPLIT.md`
+
+**Public integration:** Call `await ensureAudio()` from a Play click, then
+`schedule(currentTracks, bpm)` and `play()`. Re-run `schedule` after immutable
+track edits or BPM changes. Use `pause()` to retain the beat, `stop()` to reset,
+`rewind()` to return to zero, `positionBeats()` for the playhead, and `state()` for
+the actual transport status. Optional `setMetronome(true)` enables beat clicks;
+`await countIn(bpm, remaining => ...)` returns true on completion or false when
+cancelled. Always call `dispose()` during studio teardown. These functions are
+documented in technical-spec section 9.
+
+**Fixture:** `playbackFixtureTracks()` provides a deterministic melody, bass,
+keys, strings, and drum arrangement. Tests inject an audio backend to check
+timing/lifecycle without browser audio. The existing UI's labeled Demo hum can
+also be generated into Melody while the sample Keys/Drums remain present.
+
+**Verification on 2026-10-10:** Dependency installation, lint, TypeScript, and
+production build were run successfully. The regression suite covers simultaneous
+five-track scheduling, BPM/onset/release alignment, repeated scheduling,
+pause/resume, stop/rewind, mute/solo, live note changes, same-pitch overlaps,
+loop boundaries, invalid/oversized input, teardown, metronome/count-in timing,
+and count-in cancellation/failure. A local HTTP check returned 200 and confirmed
+Play/Stop/count-in controls render. Remote browser testing returned
+`ERR_CONNECTION_REFUSED`; local Computer Use stopped because it could not
+determine the browser URL reliably. Neither attempt verified audible output.
+
+**Security review:** The playback path has no server endpoint, authentication,
+file upload, network audio, or logging of microphone/project data. Track IDs,
+numeric inputs, drum lanes, note count, and simultaneous polyphony are validated
+before replacing a schedule; prototype-like instrument IDs are rejected. Full
+`npm audit` reported five existing high-severity development-tool findings in
+the ESLint/fast-glob/micromatch/braces chain. `npm audit --omit=dev` reported zero
+production findings. No force update/downgrade was applied.
+
+**Known limits:** The eight-bar loop clips notes at beat 32. Drum hits use fixed
+percussive envelopes. Live schedule changes silence/recreate voices and can
+briefly re-attack held notes. Count-in is wired to playback; Persons 1/4 must
+coordinate recording count-in so permission prompts and clicks are excluded
+from recorded time. Full project persistence/editor work is outside Person 2.
+
+**Next integration step — listening sign-off on the demo laptop:**
+
+1. Run `npm run dev` and open localhost in desktop Chrome/Edge with headphones.
+2. Play the sample Keys/Drums, pause mid-note, wait, resume, then Stop. Verify
+   silence while paused, a stationary paused playhead, and reset to `1.1.1` on Stop.
+3. Rewind while running, replay repeatedly, and change BPM between 60, 120, and
+   180. Verify the grid position and sound remain aligned without duplicated hits.
+4. Test mute, one solo, multiple solos, and a muted solo; mute must take precedence.
+5. Generate the labeled Demo hum into Melody (and Bass/Strings for all five),
+   then listen alongside sample Keys/Drums. Verify pitch, balance, duration, and
+   loop transition. Exercise Person 3's note-edit callback while paused/running.
+6. Enable M for metronome; check downbeat accents. Enable 4; confirm four clicks
+   before playback and Stop cancels counting. Navigate away and verify silence.
+
+The remaining unchecked Person 2 items above require this listening check;
+automated scheduling tests do not establish audible quality.
 
 ## 5. Person 3 — Multitrack editor and editable piano roll
 

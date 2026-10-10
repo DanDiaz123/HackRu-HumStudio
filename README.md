@@ -2,9 +2,9 @@
 
 **Turn a melody in your head into editable music.**
 
-HumStudio is a proposed browser-based music sketchpad for **HackRU Fall 2026**. Hum or sing a simple tune, convert its pitches and rhythm into MIDI notes, adjust those notes on a piano roll, and play or export the result.
+HumStudio is a browser-based music sketchpad in development for **HackRU Fall 2026**. Hum or sing a simple tune, convert its pitches and rhythm into MIDI notes, adjust those notes on a piano roll, and play or export the result.
 
-> **Current repository status:** This handoff contains **design and implementation documentation**. It does **not** contain a built or deployed application. The features below describe the planned HackRU MVP unless explicitly marked completed by the team.
+> **Current repository status:** The repository contains the Next.js studio with five instrument tracks, microphone/demo input, a prototype generation stage, playback, and MIDI export. Playback includes separate pause/stop, rewind, mute/solo, a metronome, and a four-beat playback count-in. Editing, persistence, live transcription quality, and deployment remain separate workstreams. See the [Person 2 handoff](WORKLOAD_SPLIT.md#person-2-implementation-handoff) for verification and limitations.
 
 ## What are we building?
 
@@ -66,7 +66,7 @@ The demo targets **clear, one-note-at-a-time vocal melodies** in a reasonably qu
 
 ## Getting started
 
-The commands below describe **how to create and run the planned app**. They are not runnable inside this documentation-only bundle, because no `package.json` or source code is included yet.
+The app already exists. Install the locked dependencies with `npm ci`, then run `npm run dev`. On Windows PowerShell, use `npm.cmd`/`npx.cmd` if script execution policy blocks the `.ps1` wrappers. The bootstrap instructions below apply only to a new empty repository.
 
 ### Requirements
 
@@ -107,7 +107,7 @@ npm install tone pitchy @tonejs/midi
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). Until the team implements the editor, the page will be the ordinary Next.js scaffold, **not** HumStudio's finished UI.
+Open [http://localhost:3000](http://localhost:3000). Keys and Drums start with labeled sample notes. Press Play to unlock audio; Pause holds the position, Stop resets it, and Rewind returns to the start while preserving playback state. The **M** transport button toggles the metronome; **4** toggles a count-in before playback. Stop also cancels a pending count-in. A default tempo of 120 BPM and 1/16 snapping follow the shared contract.
 
 ### 4. Check the implementation
 
@@ -120,7 +120,7 @@ npm run build
 npm run test --if-present
 ```
 
-Pure pitch/timing/quantization tests should be added with Vitest if the team has time; a real browser microphone test is still necessary.
+`npm test` runs the playback regression suite using TypeScript and Node's built-in test runner, without adding a testing dependency. Real browser listening and microphone tests are still necessary. The production build downloads the existing Archivo font from Google Fonts when it is not cached.
 
 ## Planned file structure
 

@@ -362,30 +362,42 @@ Do **not** label a DSP pitch detector as a trained neural model unless a model i
 
 ## 9. Tone.js playback service
 
+**Implemented playback scope (2026-10-10):** The current studio plays the five
+`Track[]` instruments in `src/lib/tracks.ts`, following `PRODUCT.md` and the
+Person 2 assignment. The legacy single-track `Project` persistence contract
+elsewhere in this document is still a separate integration-owner task. Playback
+does not change the canonical `Note` fields or store audio resources in tracks.
+
 ### Public interface
 
 ```ts
-export interface PlaybackEngine {
-  initializeFromUserGesture(): Promise<void>;
-  setBpm(bpm: number): void;
-  scheduleNotes(notes: readonly Note[]): void;
-  play(): void;
-  pause(): void;
-  stop(): void;
-  rewind(): void;
-  dispose(): void;
-}
+// Public functions exported by src/lib/playback.ts:
+export function ensureAudio(): Promise<void>;
+export function schedule(tracks: readonly Track[], bpm: number): void;
+export function play(): void;
+export function pause(): void;
+export function stop(): void;
+export function rewind(): void;
+export function positionBeats(): number;
+export function state(): "started" | "paused" | "stopped";
+export function setMetronome(enabled: boolean): void;
+export function countIn(bpm: number, onBeat?: (remaining: number) => void): Promise<boolean>;
+export function dispose(): void;
 ```
 
 Contract and lifecycle:
 
 - Use `Tone.start()` in the user-gesture initialization path and await its promise.
-- Use a shared `Tone.getTransport()` and simple `Tone.PolySynth`.
+- Import Tone only during browser initialization after a Play gesture. Use a shared `Tone.getTransport()` and simple `Tone.PolySynth`; use synthesized percussion rather than downloaded samples.
 - Convert `startBeat` to transport ticks (`Math.round(startBeat * transport.PPQ)`) and use supported tick/musical-time scheduling; this avoids hard-coding an absolute seconds timeline that becomes wrong when BPM changes.
 - Use the transport callback's scheduled `time` parameter for `triggerAttackRelease`, not `Date.now()`/`setTimeout()`.
-- Convert `durationBeats` to a musical duration at current BPM; re-check the selected Tone.js major version's API when implementing.
-- Track every scheduled callback ID. `scheduleNotes` must clear old events first to prevent duplicates, especially after edits/tempo changes.
-- `pause` must preserve transport position while releasing sounding voices; `stop` halts playback and releases voices; `rewind` resets transport position. On unmount, clear events and dispose synth.
+- Schedule melodic note releases in ticks as well as attacks, so note lengths remain aligned to beats after tempo changes. Release boundary notes through the transport's `loopEnd` event because the loop resets before processing beat 32.
+- Track every scheduled callback ID. `schedule` clears old owned events before replacement. On live edits/tempo changes, restart at the audible beat and recover sustained notes; a brief re-attack is an intentional tradeoff for cancelling lookahead audio reliably.
+- `pause` preserves transport position and disposes pending/sounding voices; `stop` halts playback and resets to zero; `rewind` resets to zero while preserving running/paused state. On unmount, clear owned events, count-in timers, listeners, and synths. Do not close Tone's shared AudioContext.
+- Validate all tracks before replacing the existing schedule: supported unique instrument IDs, boolean mute/solo flags, valid finite notes, BPM 60..180, at most 10,000 notes and 32 simultaneous notes per instrument. Playback covers the visible 32-beat loop; later onsets are silent and note ends are clipped at its boundary.
+- Muted tracks are silent even when soloed. Multiple solo tracks play together. Independent synth lanes preserve durations of overlapping notes at the same pitch. Synthesized drums support MIDI 36, 38, 42, 46, and 49 with fixed percussive envelopes rather than sustained pitched-note durations.
+- `positionBeats` reads transport ticks at the current audible AudioContext time, excluding Tone's lookahead. Before initialization it returns zero; `state` returns `stopped`.
+- The optional metronome accents every four beats. `countIn` schedules four clicks on the audio clock without advancing the arrangement, and resolves `false` on pause/stop/rewind/reschedule/disposal. Count-in currently precedes playback; recording count-in remains a Person 1/4 integration decision, and must start microphone-relative timestamps only after counting completes.
 - MIDI pitch is numeric in state. At synth boundary convert to note name/frequency with Tone helpers or verified pitch conversion; never change canonical note format.
 - The editor is the canonical state. Tone.js scheduling is a **derived side effect**, never the only copy of the arrangement.
 

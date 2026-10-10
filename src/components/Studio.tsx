@@ -15,7 +15,7 @@ import {
   initialTracks,
   midiName,
 } from "@/lib/tracks";
-import { DownloadIcon, PlayIcon, RewindIcon, StopIcon } from "./icons";
+import { DownloadIcon, PauseIcon, PlayIcon, RewindIcon, StopIcon } from "./icons";
 import TrackRow, { type Phase, REVEAL_SEC } from "./TrackRow";
 
 const COLLAPSED_H = 36;
@@ -29,8 +29,8 @@ function readout(beat: number) {
 
 export default function Studio() {
   const [tracks, setTracks] = useState<Track[]>(initialTracks);
-  const [bpm, setBpm] = useState(100);
-  const [quantize, setQuantize] = useState<QuantizeDivision>("1/8");
+  const [bpm, setBpm] = useState(120);
+  const [quantize, setQuantize] = useState<QuantizeDivision>("1/16");
   const [zoomedId, setZoomedId] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState("");
@@ -40,6 +40,11 @@ export default function Studio() {
   const [elapsed, setElapsed] = useState(0);
   const [stage, setStage] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [startingAudio, setStartingAudio] = useState(false);
+  const [playbackError, setPlaybackError] = useState("");
+  const [metronome, setMetronome] = useState(false);
+  const [countIn, setCountIn] = useState(false);
+  const [countInBeat, setCountInBeat] = useState<number | null>(null);
   const [avail, setAvail] = useState(0);
 
   const rowsRef = useRef<HTMLDivElement>(null);
@@ -47,9 +52,11 @@ export default function Studio() {
   const posRef = useRef<HTMLOutputElement>(null);
   const stopRef = useRef<StopFn | null>(null);
   const audioReady = useRef(false);
+  const playbackRequest = useRef(0);
+  const arrangementRef = useRef({ tracks, bpm });
   const stopTake = useRef<() => void>(() => {});
 
-  const busy = phase === "requesting" || phase === "recording" || phase === "generating" || phase === "revealing";
+  const busy = startingAudio || phase === "requesting" || phase === "recording" || phase === "generating" || phase === "revealing";
   const zoomed = tracks.find((t) => t.instrument.id === zoomedId) ?? null;
 
   useLayoutEffect(() => {
@@ -61,7 +68,18 @@ export default function Studio() {
 
   // Keep the transport in sync with notes, mutes and tempo.
   useEffect(() => {
-    if (audioReady.current) playback.schedule(tracks, bpm);
+    arrangementRef.current = { tracks, bpm };
+    if (!audioReady.current) return;
+    try {
+      playback.schedule(tracks, bpm);
+    } catch {
+      playback.stop();
+      const frame = requestAnimationFrame(() => {
+        setPlaying(false);
+        setPlaybackError("These notes could not be played. Check their pitch, timing, and tempo.");
+      });
+      return () => cancelAnimationFrame(frame);
+    }
   }, [tracks, bpm]);
 
   // Playhead + position readout run outside React.
@@ -72,14 +90,23 @@ export default function Studio() {
       const beat = playback.positionBeats() % TOTAL_BEATS;
       if (headRef.current) headRef.current.style.left = `${beatX(beat)}%`;
       if (posRef.current) posRef.current.textContent = readout(beat);
+      if (playback.state() !== "started") {
+        setPlaying(false);
+        return;
+      }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [playing]);
 
-  // Release the mic if the page goes away mid-take.
-  useEffect(() => () => stopRef.current?.(), []);
+  // Cancel pending starts and release browser audio resources when the page goes away.
+  useEffect(() => () => {
+    stopRef.current?.();
+    playbackRequest.current++;
+    audioReady.current = false;
+    playback.dispose();
+  }, []);
 
   const setPos = (beat: number) => {
     if (headRef.current) headRef.current.style.left = `${beatX(beat)}%`;
@@ -87,16 +114,50 @@ export default function Studio() {
   };
 
   async function togglePlay() {
-    if (playing) {
-      playback.stop();
+    if (playback.state() === "started") {
+      playback.pause();
+      setPos(playback.positionBeats());
       setPlaying(false);
       return;
     }
-    await playback.ensureAudio();
-    audioReady.current = true;
-    playback.schedule(tracks, bpm);
-    playback.play();
-    setPlaying(true);
+    if (startingAudio) return;
+    const request = ++playbackRequest.current;
+    setStartingAudio(true);
+    setPlaybackError("");
+    try {
+      await playback.ensureAudio();
+      if (request !== playbackRequest.current) return;
+      audioReady.current = true;
+      const current = arrangementRef.current;
+      playback.schedule(current.tracks, current.bpm);
+      playback.setMetronome(metronome);
+      if (countIn) {
+        const completed = await playback.countIn(current.bpm, setCountInBeat);
+        if (!completed || request !== playbackRequest.current) return;
+      }
+      setCountInBeat(null);
+      playback.play();
+      setPlaying(playback.state() === "started");
+    } catch {
+      if (request !== playbackRequest.current) return;
+      playback.stop();
+      setPlaying(false);
+      setPlaybackError("Audio could not start. Check your output device and try Play again.");
+    } finally {
+      if (request === playbackRequest.current) {
+        setStartingAudio(false);
+        setCountInBeat(null);
+      }
+    }
+  }
+
+  function stopPlayback() {
+    playbackRequest.current++;
+    setStartingAudio(false);
+    setCountInBeat(null);
+    playback.stop();
+    setPlaying(false);
+    setPos(0);
   }
 
   function rewind() {
@@ -164,8 +225,9 @@ export default function Studio() {
 
   async function record(useDemo: boolean) {
     if (!zoomed || busy) return;
-    if (playing) {
-      playback.stop();
+    if (playback.state() === "started") {
+      playback.pause();
+      setPos(playback.positionBeats());
       setPlaying(false);
     }
     const taken: HumFrame[] = [];
@@ -222,12 +284,20 @@ export default function Studio() {
           <span>Hum</span>Studio
         </h1>
         <div className="transport-group">
-          <button className="t-btn" onClick={rewind} aria-label="Back to start">
+          <button className="t-btn" onClick={rewind} disabled={busy || startingAudio} aria-label="Back to start">
             <RewindIcon />
           </button>
-          <button className={`t-btn play${playing ? " on" : ""}`} onClick={togglePlay} disabled={busy} aria-label={playing ? "Stop" : "Play"}>
-            {playing ? <StopIcon /> : <PlayIcon />}
+          <button className={`t-btn play${playing ? " on" : ""}`} onClick={togglePlay} disabled={busy || startingAudio} aria-label={startingAudio ? "Starting audio" : playing ? "Pause" : "Play"}>
+            {playing ? <PauseIcon /> : <PlayIcon />}
           </button>
+          <button className="t-btn" onClick={stopPlayback} disabled={busy && !startingAudio} aria-label="Stop">
+            <StopIcon />
+          </button>
+          <button className={metronome ? "t-btn play" : "t-btn"} aria-label="Metronome" title="Metronome" aria-pressed={metronome} disabled={busy} onClick={() => {
+            playback.setMetronome(!metronome);
+            setMetronome(!metronome);
+          }}>M</button>
+          <button className={countIn ? "t-btn play" : "t-btn"} aria-label="Four-beat count-in" title="Four-beat count-in before playback" aria-pressed={countIn} disabled={busy} onClick={() => setCountIn(!countIn)}>4</button>
           <output ref={posRef} className="position" aria-label="Position, bar.beat.sixteenth">
             1.1.1
           </output>
@@ -259,6 +329,9 @@ export default function Studio() {
           <DownloadIcon /> <span className="lbl">Export MIDI</span>
         </button>
       </header>
+
+      {playbackError && <p role="alert">{playbackError}</p>}
+      {countInBeat !== null && <p role="status" aria-live="polite">Count-in: {countInBeat}</p>}
 
       <div className="ruler-row">
         <div className="ruler-corner">{!zoomed
