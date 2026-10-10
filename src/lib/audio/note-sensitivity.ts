@@ -1,4 +1,4 @@
-import type { SegmentationConfig } from "./segment-notes";
+import type { SegmentationConfig } from "./segment-notes.ts";
 
 export const NOTE_SENSITIVITY_LEVELS = ["low", "medium", "high"] as const;
 export type NoteSensitivity = typeof NOTE_SENSITIVITY_LEVELS[number];
@@ -8,7 +8,7 @@ export const DEFAULT_NOTE_SENSITIVITY: NoteSensitivity = "medium";
  * Fine-tune hum-to-note response here. A smaller pitch tolerance detects smaller
  * shifts; shorter stability/minimum durations and median windows react faster.
  * Pitch is measured from the held integer MIDI note; time values are milliseconds.
- * Silence hold stays independent of sensitivity so breath gaps keep the same behavior.
+ * Silence hold, re-attack and octave hold stay independent of sensitivity so breath gaps keep the same behavior.
  */
 export const NOTE_SENSITIVITY_PRESETS: Readonly<Record<NoteSensitivity, {
   label: string;

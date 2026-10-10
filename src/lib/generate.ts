@@ -6,14 +6,14 @@ import { DRUM_ROWS, type Instrument, type Note, type QuantizeDivision, QUANT_BEA
 
 export type NoteSensitivityVariants = Record<NoteSensitivity, Note[]>;
 
-/** Apply a grid to existing notes without changing pitch or accumulating prior rounding. */
+/** Snap a source note set without changing pitch, ids, or manual polyphonic overlaps. */
 export function snapNotesToGrid(inst: Instrument, notes: readonly Note[], quantize: QuantizeDivision): Note[] {
   if (!Object.hasOwn(QUANT_BEATS, quantize)) throw new RangeError("Unsupported quantization.");
   const grid = QUANT_BEATS[quantize];
   if (!grid) return notes.map((note) => ({ ...note }));
   return notes.map((note) => {
     const startBeat = Math.min(TOTAL_BEATS - grid, Math.max(0, Math.round(note.startBeat / grid) * grid));
-    if (inst.kind === "drums") return { ...note, startBeat };
+    if (inst.kind === "drums") return { ...note, startBeat, durationBeats: Math.min(note.durationBeats, TOTAL_BEATS - startBeat) };
     const endBeat = Math.min(TOTAL_BEATS, Math.max(startBeat + grid, Math.round((note.startBeat + note.durationBeats) / grid) * grid));
     return { ...note, startBeat, durationBeats: endBeat - startBeat };
   });
@@ -28,7 +28,8 @@ export async function generateTrack(
   harmony: Harmony,
   sensitivity: NoteSensitivity = DEFAULT_NOTE_SENSITIVITY,
 ): Promise<Note[]> {
-  return generateNotes(inst, frames, bpm, quantize, harmony, sensitivity);
+  noteSensitivityConfig(sensitivity);
+  return generateNotes(inst, frames, bpm, quantize, harmony, undefined, sensitivity);
 }
 
 /** Generate Low, Medium, and High from one take so changing the menu never needs another recording. */
@@ -41,6 +42,8 @@ export function generateTrackVariants(
   selected: NoteSensitivity = DEFAULT_NOTE_SENSITIVITY,
   trace?: GenTrace,
 ): NoteSensitivityVariants {
+  // The selected profile also determines the trace; reject it before generating any variants.
+  noteSensitivityConfig(selected);
   const variants = {} as NoteSensitivityVariants;
   if (inst.kind === "drums") {
     const notes = generateNotes(inst, frames, bpm, quantize, harmony, trace, selected);
@@ -60,7 +63,8 @@ export function generateTrackVariants(
  * Drums classify beatbox hits instead. Off preserves unsnapped timing.
  * Invalid tempo/grid or oversized input throws; unusable melodic frames return []
  * so the recording UI can preserve existing notes.
- * Pass `trace` to read back the intermediate stages (for the reveal animation).
+ * The final arguments accept (sensitivity, trace) or the earlier (trace, sensitivity)
+ * order. A trace is a plain output object ({} is valid); each may be supplied once.
  */
 export function generateNotes(
   inst: Instrument,
@@ -69,13 +73,34 @@ export function generateNotes(
   quantize: QuantizeDivision,
   harmony: Harmony,
   traceOrSensitivity?: GenTrace | NoteSensitivity,
-  sensitivityArg?: NoteSensitivity,
+  sensitivityOrTrace?: NoteSensitivity | GenTrace,
 ): Note[] {
   if (!Number.isFinite(bpm) || bpm < 60 || bpm > 180) throw new RangeError("BPM must be between 60 and 180.");
   if (!Object.hasOwn(QUANT_BEATS, quantize)) throw new RangeError("Unsupported quantization.");
   if (!Array.isArray(frames) || frames.length > MAX_SEGMENTATION_FRAMES) throw new RangeError("Too many analysis frames.");
-  const trace = typeof traceOrSensitivity === "string" ? undefined : traceOrSensitivity;
-  const sensitivity = typeof traceOrSensitivity === "string" ? traceOrSensitivity : sensitivityArg ?? DEFAULT_NOTE_SENSITIVITY;
+  let trace: GenTrace | undefined;
+  let sensitivity = DEFAULT_NOTE_SENSITIVITY;
+  const traceContainer = (value: unknown): GenTrace => {
+    if (value === null || typeof value !== "object" || Array.isArray(value) ||
+      ![null, Object.prototype].includes(Object.getPrototypeOf(value)))
+      throw new RangeError("Generation trace must be a plain object.");
+    return value as GenTrace;
+  };
+  // Both integration branches used this seam; normalize their two argument orders here.
+  if (typeof traceOrSensitivity === "string") {
+    sensitivity = traceOrSensitivity;
+    if (sensitivityOrTrace !== undefined) trace = traceContainer(sensitivityOrTrace);
+  } else if (traceOrSensitivity !== undefined) {
+    trace = traceContainer(traceOrSensitivity);
+    if (sensitivityOrTrace !== undefined) {
+      if (typeof sensitivityOrTrace !== "string") throw new RangeError("Specify generation trace only once.");
+      sensitivity = sensitivityOrTrace;
+    }
+  } else if (typeof sensitivityOrTrace === "string") {
+    sensitivity = sensitivityOrTrace;
+  } else if (sensitivityOrTrace !== undefined) {
+    trace = traceContainer(sensitivityOrTrace);
+  }
   const config = noteSensitivityConfig(sensitivity);
   const grid = QUANT_BEATS[quantize];
   // Shift the whole take by the constant offset that best fits its onsets to the grid, then convert to beats.
@@ -84,7 +109,11 @@ export function generateNotes(
     return (tSec: number) => Math.max(0, ((tSec + shiftSec) * bpm) / 60);
   };
   const snap = (b: number) => grid ? Math.round(b / grid) * grid : b;
-  if (trace) Object.assign(trace, { voicedFrames: frames.filter((f) => f.hz !== null).length, raw: [], key: { tonic: harmony.tonic, mode: harmony.mode }, grid });
+  if (trace) Object.assign(trace, {
+    voicedFrames: frames.filter((f) => f && f.hz !== null && Number.isFinite(f.hz) &&
+      f.hz >= 80 && f.hz <= 1000 && Number.isFinite(f.rms) && f.rms >= 0.01).length,
+    raw: [], key: { tonic: harmony.tonic, mode: harmony.mode }, grid,
+  });
   if (inst.kind === "drums") return drums(frames, beatsFrom, snap, trace);
 
   const line = (fit: (notes: Note[]) => Note[]) => hummedLine(inst, frames, beatsFrom, snap, grid, bpm, fit, config, trace);
@@ -367,20 +396,39 @@ function drums(
   snap: (b: number) => number,
   trace?: GenTrace,
 ): Note[] {
-  // ponytail: duration (snares ring longer) is skipped; the 85 ms analysis window blurs hits shorter than that.
+  // Match segmentation's ordered, finite timestamp boundary; invalid amplitude cannot become velocity.
+  let lastFrameSec = -Infinity;
+  const usable = frames.filter((frame) => {
+    if (!frame || !Number.isFinite(frame.tSec) || frame.tSec < 0 || frame.tSec <= lastFrameSec ||
+      !Number.isFinite(frame.rms) || frame.rms < 0) return false;
+    lastFrameSec = frame.tSec;
+    return true;
+  });
+  // Fixed hit durations: the 85 ms analysis window blurs attacks shorter than that.
   const hits: { tSec: number; peak: number; kick: boolean; hiss: boolean | null }[] = [];
   let lastOnset = -Infinity;
-  for (let i = 0; i < frames.length; i++) {
-    const f = frames[i];
-    const floor = i ? Math.min(...frames.slice(Math.max(0, i - 4), i).map((p) => p.rms)) : 0;
+  for (let i = 0; i < usable.length; i++) {
+    const f = usable[i];
+    const floor = i ? Math.min(...usable.slice(Math.max(0, i - 4), i).map((p) => p.rms)) : 0;
     if (f.rms <= 0.02 || !(floor <= 0.02 || f.rms >= 2 * floor) || f.tSec - lastOnset < HIT_REFRACTORY_SEC) continue;
     lastOnset = f.tSec;
-    const hit = frames.slice(i).filter((w) => w.tSec - f.tSec <= HIT_WINDOW_SEC);
+    let end = i + 1;
+    while (end < usable.length && usable[end].tSec - f.tSec <= HIT_WINDOW_SEC) end++;
+    const hit = usable.slice(i, end);
     let mass = 0;
     let moment = 0;
-    for (const w of hit) w.bins.forEach((b, k) => { mass += b; moment += b * k; });
-    const lowPitch = hit.some((w) => w.hz !== null && w.hz < 160);
-    const zcr = hit.flatMap((w) => w.zcrHz ?? []);
+    for (const w of hit) {
+      // Older/malformed analysis can omit bins. Only the 48 display bins inform classification.
+      if (!(w.bins instanceof Float32Array) && !Array.isArray(w.bins)) continue;
+      for (let k = 0; k < Math.min(w.bins.length, 48); k++) {
+        const value = w.bins[k];
+        if (!Number.isFinite(value) || value < 0) continue;
+        mass += value;
+        moment += value * k;
+      }
+    }
+    const lowPitch = hit.some((w) => w.hz !== null && Number.isFinite(w.hz) && w.hz > 0 && w.hz < 160);
+    const zcr = hit.flatMap((w) => w.zcrHz !== undefined && Number.isFinite(w.zcrHz) && w.zcrHz >= 0 ? [w.zcrHz] : []);
     hits.push({
       tSec: f.tSec,
       peak: Math.max(...hit.map((w) => w.rms)),
@@ -402,10 +450,10 @@ function drums(
     if (raw < TOTAL_BEATS) trace?.raw.push({ ...note, startBeat: raw });
     if (b >= TOTAL_BEATS || taken.has(`${b}:${midi}`)) continue;
     taken.add(`${b}:${midi}`);
-    out.push(note);
+    out.push({ ...note, durationBeats: Math.min(note.durationBeats, TOTAL_BEATS - b) });
   }
-  if (!out.some((n) => n.midi === HAT)) {
-    const end = Math.min(TOTAL_BEATS, Math.ceil(beatOf(frames.at(-1)?.tSec ?? 0) / 4) * 4);
+  if (out.length && !out.some((n) => n.midi === HAT)) {
+    const end = Math.min(TOTAL_BEATS, Math.ceil(beatOf(usable.at(-1)?.tSec ?? 0) / 4) * 4);
     for (let b = 0; b < end; b += 0.5)
       out.push({ id: noteId(), midi: HAT, startBeat: b, durationBeats: 0.25, velocity: b % 1 ? 0.45 : 0.7 });
   }

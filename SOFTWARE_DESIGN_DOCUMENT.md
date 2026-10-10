@@ -1,6 +1,6 @@
 # HumStudio - Software Design Document (SDD)
 
-**Status:** Studio UI and deterministic melodic generation implemented; real-microphone tuning, editing, and persistence pending
+**Status:** Studio UI, note editing, and deterministic melodic generation implemented; physical-microphone tuning, human listening, and persistence pending
 **Version:** 1.1 (multi-track revision)
 **Date:** 2026-10-10
 **Event:** HackRU Fall 2026  
@@ -15,9 +15,9 @@
 
 ## 1. Executive summary
 
-HumStudio is a browser-based, voice-first music composition tool laid out like a familiar DAW: five instrument tracks (Melody, Bass, Keys, Drums, Strings) over an 8-bar 4/4 timeline. The user opens a track, records a short **monophonic** hum, watches a live spectrogram print across the lane, and sees generated notes for that instrument revealed on the track. The arrangement plays through Tone.js with mute/solo and exports as multi-track MIDI. Note editing and project save/reopen are planned.
+HumStudio is a browser-based, voice-first music composition tool laid out like a familiar DAW: five instrument tracks (Melody, Bass, Keys, Drums, Strings) over an 8-bar 4/4 timeline. The user opens a track, records a short **monophonic** hum, watches a live spectrogram, edits generated notes, and plays the arrangement through Tone.js with mute/solo. Multi-track MIDI export is implemented; project save/reopen is planned.
 
-The project's differentiator is the interface: a person can express a melody with their voice instead of entering notes one at a time. Pitch detection is **digital signal processing (DSP)** via Pitchy. The current generator is a placeholder heuristic; do not describe it as a trained model. A real generator (transcription and/or arrangement, possibly a backend) replaces `generateTrack(...)` later.
+The project's differentiator is the interface: a person can express a melody with their voice instead of entering notes one at a time. Pitch detection uses Pitchy and deterministic DSP segmentation, with rule-based instrument roles. No trained model or generation backend is implemented.
 
 ### Success scenario
 
@@ -26,7 +26,7 @@ The project's differentiator is the interface: a person can express a melody wit
 3. Click **Record**, allow microphone access, and hum a clear 4-8-note melody for about 5-10 seconds while the spectrogram prints live.
 4. Stop. A "Setting the session" loading state runs, then the generated notes set in left to right over a ghost of the hum.
 5. Return to all tracks and press **Play** to hear the arrangement; mute/solo tracks.
-6. *(Planned)* Drag one wrong note to a new pitch, then play again.
+6. Drag one wrong note to a new pitch, then play again.
 7. Export a `.mid` file; *(planned)* save the project to a `.humstudio.json` file.
 
 ## 2. Problem, users, and goals
@@ -84,7 +84,6 @@ Music software expects users to translate ideas into piano-roll clicks, keyboard
 | FR-10 | Microphone tracks are stopped after recording, errors, or unmount. **Built.** | Browser recording indicator stops after cleanup. |
 | FR-11 | While recording, a live spectrogram draws over the zoomed track; a loading state covers generation; notes are revealed with an animation (skipped under reduced motion). **Built.** | Visual check; reduced-motion check. |
 | FR-12 | Mic failure or an empty take shows a clear message and a labeled **Demo hum** option; existing notes are never erased. **Built.** | Deny permission, then record silence. |
-| FR-13 | Low/Medium/High note sensitivity is selectable; each take generates all three profiles, and Snap immediately regenerates captured notes on the selected grid. **Built.** | Switch sensitivity without recording again, then change Snap and confirm note positions update. |
 
 ## 5. Nonfunctional requirements
 
@@ -214,11 +213,11 @@ interface Track { instrument: Instrument; presetId: string; notes: Note[]; muted
 ### 8.1 Microphone acquisition
 
 - Use `navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } })` where the browser permits; these are preferences, not promises.
-- Create a browser `AudioContext`, a `MediaStreamAudioSourceNode`, and an `AnalyserNode` with `fftSize = 4096`.
+- Use Tone's shared browser audio context to create a `MediaStreamAudioSourceNode`, an analysis-only worklet, and an `AnalyserNode` with `fftSize = 4096`.
 - An AudioWorklet (`public/hum-worklet.js`) delivers every mic sample in 20 ms hops; `src/lib/hum.ts` runs Pitchy on a 4096-sample sliding window per hop. Unlike animation-frame polling, no readings are lost when the page is busy or hidden, and the rate is the same on every display. The AnalyserNode's frequency data feeds the 48-bin spectrogram display only.
 - Use the **actual** `audioContext.sampleRate` (not a guessed 44.1/48 kHz value).
 - Timestamp each frame relative to recording start (`hum.ts` uses the audio clock: the worklet's sample index at the centre of each analysis window).
-- Disconnect graph nodes, stop all `MediaStreamTrack`s, cancel the frame loop, and release the analysis context after recording.
+- Disconnect graph nodes, stop every `MediaStreamTrack`, stop the worklet, and close its message port after recording or any setup failure. Cleanup is idempotent and leaves Tone's shared context available for playback.
 
 ### 8.2 Pitch estimation
 
@@ -233,10 +232,10 @@ interface Track { instrument: Instrument; presetId: string; notes: Note[]; muted
 2. Require 120 ms of consistent pitch before opening a note; retain the active/candidate pitch within a 0.7-semitone hold region to suppress vibrato.
 3. When a different pitch is stable for 120 ms, close the previous segment and start the next one at the candidate onset.
 4. Preserve pitch history across unvoiced gaps <= 150 ms. Longer silence closes at the last voiced frame and marks a new phrase; missing-frame gaps also separate phrases. Thresholds are measured in seconds independently of BPM.
-5. Apply the selected sensitivity thresholds, then merge identical pitches within the same phrase before snapping. Confirmed rests still separate notes. Reject fragments shorter than the selected profile's minimum note length.
+5. Melody retains confirmed rounded pitches and defines harmony after the take; other melodic parts fit that harmony. Merge identical pitches within the same phrase before snapping. Confirmed rests still separate notes. Reject fragments shorter than 100 ms in Medium.
 6. Preserve the first and last observed voiced timestamps within the recording window.
 
-The Low/Medium/High thresholds are starting heuristics configured together in `src/lib/audio/note-sensitivity.ts`, not guaranteed-optimal values. Medium uses the baseline above; Low requires larger, longer pitch changes, while High responds to smaller, quicker changes. Every take generates all three variants. A level dip and return on one pitch re-strikes the note (1.8x RMS), but identical notes separated only by near-silence <= 150 ms still merge. Real-device tuning uses the scored takes in `src/tests/takes/`.
+These constants are **starting heuristics**, configured as the Medium profile in `src/lib/audio/note-sensitivity.ts` (`SEGMENTATION_DEFAULTS`). A level dip and return on one pitch re-strikes the note (1.8x RMS), but near-silence <= 150 ms is bridged and fast pitch changes can be suppressed. Real-device tuning uses scored takes in `src/tests/takes/`. Low uses a 1.5-semitone hold, 200 ms stability, and seven-frame median; High uses 0.5 semitones, 60 ms stability/minimum note, and three frames. All profiles are cached per take for immediate switching. Snap rebuilds using the capture BPM, preserving beat positions after tempo changes and original timing for Off. Manual edits opt out of profile swaps; a picked key persists until a new Melody take.
 
 ### 8.4 Beat conversion and quantization
 
@@ -268,7 +267,7 @@ A 1/16-note grid is `0.25` quarter-note beats; 1/8 is `0.5`, 1/4 is `1.0`. Snap 
 - 8 bars x 4 beats = 32 beats, fitted to the viewport width (no horizontal scroll yet).
 - Grid lines for bars/beats and labels for C notes.
 
-**Editing (planned, Person 3):**
+**Editing (implemented, Person 3):**
 
 - Drag body horizontally to adjust start beat; drag body vertically to adjust pitch in semitones; drag right edge to adjust duration. Snap horizontal edits to the selected grid (Off = fine movement).
 - Keep click-to-select distinct from drag behavior. `pointerdown` -> `pointermove` -> `pointerup`; handle pointer cancellation.
@@ -292,7 +291,7 @@ Today `Studio.tsx` owns `Track[]`, BPM, and quantize in React state and replaces
 ### MIDI
 
 - Instantiate `new Midi()` from `@tonejs/midi`.
-- Set the file tempo to the project BPM, add **one MIDI track per non-empty instrument track** (Drums on channel 10), and convert each beat time/duration to seconds: `seconds = beats * (60 / bpm)`. Implemented in `src/lib/midi.ts`; downloads as `humstudio.mid`.
+- Validate BPM/notes, set the file tempo, and add **one MIDI track per non-empty instrument track** with distinct melodic channels and Drums on channel 10. Beat boundaries map to PPQ ticks, with at least one tick of duration. Pure `createMidiBytes` is tested; `exportMidi` downloads `humstudio.mid` and always revokes the object URL.
 - Export `midi.toArray()` as a downloaded `audio/midi` or `application/octet-stream` Blob with `.mid` extension.
 - JSON is the **editable HumStudio project**; MIDI is the **interchange format**. MIDI does not preserve UI-only project settings.
 
@@ -314,8 +313,7 @@ Today `Studio.tsx` owns `Track[]`, BPM, and quantize in React state and replaces
 
 ### Automated checks
 
-- Implemented: 65 regression tests using TypeScript and Node's built-in test runner, covering playback (22), preset loading/voices (14), harmony (6), segmentation (12), and generation (11), including short wobbles/dropouts, real rests, tempo independence, Off timing, invalid input, stale loads, fallback/retry, and sample lifetimes. Browser evidence and remaining human checks are documented in [`SMPLR_INTEGRATION.md`](SMPLR_INTEGRATION.md).
-- Target: pure unit tests for `frequencyToMidi`, `secondsToBeats`, grid snapping, segment merging, note invariants, and MIDI export time conversion.
+- Implemented: TypeScript regressions using Node's built-in test runner cover playback, preset loading/voices, harmony, segmentation, generation, cached settings, microphone resource cleanup, and MIDI encoding. Fixtures include wobbles/dropouts, real rests, all three profiles, preserved Melody pitches, capture-tempo Snap, invalid input, stale callbacks, fallback/retry, sample lifetimes, independent MIDI channels, and download cleanup. Preset browser evidence and remaining human checks are in [`SMPLR_INTEGRATION.md`](SMPLR_INTEGRATION.md).
 - Target: round-trip test where project -> JSON -> validated project retains BPM, note count, positions and pitches.
 - Implemented: time-stamped synthetic `HumFrame[]` fixtures with known pitches, vibrato, short noise, and dropouts.
 

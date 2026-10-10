@@ -120,6 +120,17 @@ test("repeated syllables on one pitch re-strike when the level dips and returns"
   assert.ok(Math.abs(notes[1].startSec - 0.36) < 1e-9, `re-strike at ${notes[1].startSec}`);
 });
 
+test("a dip older than the re-attack window cannot split a held note after a short frame stall", () => {
+  const frames = [
+    ...pitchFrames([{ midi: 60, durationSec: 0.5 }]),
+    { ...pitchFrames([{ midi: 60, durationSec: 0.02, rms: 0.03 }])[0], tSec: 0.5 },
+    ...pitchFrames([{ midi: 60, durationSec: 0.6 }], 0.02, 0.64),
+  ];
+  const notes = segmentPitchFrames(frames);
+  assert.equal(notes.length, 1);
+  assert.equal(notes[0].endSec, frames.at(-1)!.tSec);
+});
+
 test("a short octave slip folds back into the held note, a sustained leap does not", () => {
   const slip = segmentPitchFrames(pitchFrames([
     { midi: 57, durationSec: 0.5 }, { midi: 69, durationSec: 0.2 }, { midi: 57, durationSec: 0.5 },

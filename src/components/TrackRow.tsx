@@ -17,6 +17,7 @@ import {
   beatX,
   midiName,
   noteH,
+  noteId,
   noteRow,
   noteY,
   pitchRows,
@@ -107,10 +108,10 @@ function PitchLabels({ track }: { track: Track }) {
           .filter((m) => m % 12 === 0)
           .map((m) => ({ midi: m, text: midiName(m) }));
   return (
-    <div className="pitch-labels" aria-hidden>
+    <div className="pitch-labels" aria-hidden style={{ "--rows": pitchRows(inst) } as CSSProperties}>
       {labels.map((l) => (
         <span key={l.midi} style={{ top: `${noteY(l.midi, inst)}%`, height: `${noteH(inst)}%` }}>
-          {l.text}
+          <b>{l.text}</b>
         </span>
       ))}
     </div>
@@ -234,7 +235,7 @@ function EditableNotes(p: {
   function add(e: PointerEvent) {
     if (p.disabled || e.button || e.target !== e.currentTarget) return;
     const { beat, row } = at(e);
-    const n: Note = { id: crypto.randomUUID(), midi: rowMidi(row, inst), startBeat: 0, durationBeats: minLen, velocity: 0.8 };
+    const n: Note = { id: noteId(), midi: rowMidi(row, inst), startBeat: 0, durationBeats: minLen, velocity: 0.8 };
     p.onEdit([...notes, { ...n, startBeat: place(n, Math.floor(beat / step) * step) }]);
   }
   function key(e: KeyboardEvent, n: Note) {
@@ -301,7 +302,7 @@ function LaneChords({ harmony, stamp }: { harmony: Harmony; stamp?: boolean }) {
     <ol className={`lane-chords${stamp ? " stamp" : ""}`} aria-label={`Chords in ${keyName(harmony)}`}>
       {harmony.bars.map((c, bar) => (
         <li key={bar} style={{ left: `${beatX(bar * 4)}%`, "--d": `${bar * 60}ms` } as CSSProperties}>
-          <b>{chordName(c)}</b> {romanNumeral(c, harmony)}
+          <b>{chordName(c)}</b> <span>{romanNumeral(c, harmony)}</span>
         </li>
       ))}
     </ol>
@@ -379,7 +380,7 @@ export default function TrackRow(p: Props) {
     : recording ? <>{p.demo ? "Demo hum" : "Recording"} <LiveClock frames={p.frames} /></>
     : phase === "generating" ? "Generating"
     : phase === "revealing" ? "Setting notes"
-    : phase === "error" ? "Not recorded"
+    : phase === "error" ? hasNotes ? `${track.notes.length} notes kept${track.sample ? " · Sample" : ""}` : "Not recorded"
     : hasNotes ? `${track.notes.length} notes${track.sample ? " · Sample" : ""}`
     : "Empty";
 
@@ -427,7 +428,7 @@ export default function TrackRow(p: Props) {
             </button>
           ) : (
             <button className="rec" onClick={() => p.onRecord(false)} disabled={phase === "requesting"}>
-              <RecordIcon /> {hasNotes && !track.sample ? "Re-record" : "Record"}
+              <RecordIcon /> <span className="rec-label">{hasNotes && !track.sample ? "Re-record" : "Record"}</span>
             </button>
           )}
           {!recording && !working && (
@@ -441,7 +442,7 @@ export default function TrackRow(p: Props) {
           </p>
         </div>
       </div>
-      <div className="lane flood">
+      <div className={`lane flood${labels ? " labeled" : ""}`}>
         <PitchLabels track={track} />
         {showSpec && (
           <div className={`spec-wrap${recording ? "" : phase === "generating" || r?.step === 0 ? " dim" : " ghost"}`}>

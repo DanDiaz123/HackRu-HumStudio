@@ -4,6 +4,7 @@ import { getDrumMachineNames, getElectricPianoNames, getSoundfontNames, type Not
 import { DEFAULT_PRESET_IDS, INSTRUMENT_PRESETS, drumMapForPreset, presetForTrack, presetsForTrack, validatePresetCatalog } from "../lib/audio/instrument-presets.ts";
 import { createPresetManager, type PresetStatus } from "../lib/audio/preset-manager.ts";
 import { createSampledVoice, type SampledInstrument } from "../lib/audio/sampled-voice.ts";
+import { fetchSampleAsset } from "../lib/audio/smplr-backend.ts";
 import type { PlaybackVoice } from "../lib/audio/playback-engine.ts";
 import { initialTracks, type Track } from "../lib/tracks.ts";
 
@@ -249,4 +250,32 @@ test("ended notes are forgotten, normalized velocity is clamped, and invalid att
   sample.starts[0].onEnded?.(sample.starts[0]);
   voice.dispose();
   assert.equal(sample.stops.length, 0);
+});
+
+test("sample asset requests reject arbitrary origins and cannot follow redirects", async (t) => {
+  const requests: { url: string; options?: RequestInit }[] = [];
+  t.mock.method(globalThis, "fetch", async (url: string, options?: RequestInit) => {
+    requests.push({ url, options });
+    return new Response("sample", { status: 200 });
+  });
+  for (const url of [
+    "http://gleitz.github.io/sample.ogg", "https://example.com/sample.ogg",
+    "https://gleitz.github.io.evil.test/sample.ogg", "https://gleitz.github.io:8443/sample.ogg",
+    "https://user:password@gleitz.github.io/sample.ogg", "file:///sample.ogg", "not-a-url",
+  ]) await assert.rejects(fetchSampleAsset(url));
+  assert.equal(requests.length, 0);
+  for (const host of ["gleitz.github.io", "smpldsnds.github.io"]) {
+    await fetchSampleAsset(`https://${host}/sample.ogg`);
+  }
+  assert.equal(requests.length, 2);
+  for (const { options } of requests) {
+    assert.equal(options!.credentials, "omit");
+    assert.equal(options!.redirect, "error");
+    assert.ok(options!.signal instanceof AbortSignal);
+  }
+});
+
+test("sample asset HTTP failure is surfaced for the existing synth fallback", async (t) => {
+  t.mock.method(globalThis, "fetch", async () => new Response("", { status: 404 }));
+  await assert.rejects(fetchSampleAsset("https://smpldsnds.github.io/sample.ogg"), /could not be fetched/);
 });

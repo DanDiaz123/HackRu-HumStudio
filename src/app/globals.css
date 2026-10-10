@@ -94,10 +94,9 @@ button:disabled {
   min-height: 56px;
   flex: none;
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 8px 20px;
-  padding: 9px 16px 9px 0;
+  gap: 8px 16px;
+  padding: 8px 16px 8px 0;
   background: var(--panel);
   border-bottom: 1px solid var(--line);
 }
@@ -149,8 +148,16 @@ button:disabled {
   text-align: center;
   white-space: nowrap;
 }
+.transport-fields {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
 .field {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -164,6 +171,7 @@ button:disabled {
   white-space: normal;
 }
 .field span {
+  white-space: nowrap;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.08em;
@@ -179,6 +187,10 @@ button:disabled {
   color: var(--text);
   font-size: 15px;
   font-weight: 600;
+}
+.field select {
+  min-width: 0;
+  text-overflow: ellipsis;
 }
 .field input {
   width: 64px;
@@ -210,6 +222,8 @@ button:disabled {
   border-bottom: 1px solid var(--line);
 }
 .ruler-corner {
+  overflow: hidden;
+  white-space: nowrap;
   padding-left: 16px;
   border-right: 1px solid var(--line);
   font-size: 14px;
@@ -291,6 +305,10 @@ button:disabled {
   outline-color: var(--ink);
 }
 .head-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  padding: 6px 0; /* room for the hover underline inside the clip */
   font-size: 24px;
   font-weight: 900;
   letter-spacing: 0.01em;
@@ -357,6 +375,9 @@ button.lane:focus-visible {
 }
 .clip-label {
   position: absolute;
+  right: 8px;
+  overflow: hidden;
+  white-space: nowrap;
   top: 5px;
   left: 8px;
   font-size: 14px;
@@ -544,6 +565,8 @@ button.lane:focus-visible {
   font-size: 20px;
   font-weight: 800;
   letter-spacing: 0.03em;
+  white-space: nowrap;
+  overflow: hidden;
 }
 .rec svg {
   color: var(--rec);
@@ -564,6 +587,8 @@ button.lane:focus-visible {
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
 }
 .ghost-btn:hover:not(:disabled) {
   background: var(--ink);
@@ -590,6 +615,7 @@ button.lane:focus-visible {
 
 .lane.flood {
   background-color: var(--flood);
+  container-type: inline-size;
 }
 .lane.flood > .pitch-labels,
 .lane.flood > .notes-area,
@@ -597,8 +623,11 @@ button.lane:focus-visible {
   position: absolute;
   inset: 14px 0;
 }
+/* One line under every pitch (or drum) row, on the same boundary as the C labels' rule. */
 .pitch-labels {
+  --row: calc(100% / var(--rows));
   pointer-events: none;
+  background: repeating-linear-gradient(to bottom, transparent 0 calc(var(--row) - 1px), rgb(0 0 0 / 0.08) calc(var(--row) - 1px) var(--row));
 }
 .pitch-labels span {
   position: absolute;
@@ -612,8 +641,21 @@ button.lane:focus-visible {
   font-weight: 700;
   color: var(--ink);
 }
+/* Above the notes, so a note on beat 1 can't hide its row's name. */
+.pitch-labels b {
+  position: relative;
+  z-index: 1;
+  padding: 1px 3px;
+  background: var(--flood);
+  line-height: 1;
+  white-space: nowrap;
+}
+/* Learn labels every note with its pitch, so there a note may cover its row's name instead of colliding with it. */
+.lane.labeled .pitch-labels b {
+  z-index: auto;
+}
 .lane.flood .note {
-  box-shadow: inset -2px 0 0 var(--flood);
+  box-shadow: inset -1px 0 0 var(--flood);
 }
 .note.set {
   animation: set-in 380ms var(--ease) var(--d) both;
@@ -639,9 +681,10 @@ button.lane:focus-visible {
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
-  padding: 0 0 28px 6%;
+  padding: 0 12px 28px 6%;
   overflow: hidden;
   pointer-events: none;
+  z-index: 2;
 }
 .scan {
   position: absolute;
@@ -653,7 +696,7 @@ button.lane:focus-visible {
 }
 .gen-title {
   margin: 0;
-  font-size: clamp(48px, 7vw, 6rem);
+  font-size: clamp(28px, 8cqw, 6rem);
   font-weight: 900;
   line-height: 0.82;
   font-stretch: 62%;
@@ -661,7 +704,7 @@ button.lane:focus-visible {
 }
 .gen-stage {
   margin: 14px 0 0;
-  font-size: 17px;
+  font-size: clamp(13px, 2.4cqw, 17px);
   font-weight: 600;
 }
 .sweep {
@@ -680,14 +723,17 @@ button.lane:focus-visible {
   align-items: center;
   justify-content: center;
   gap: 10px;
+  padding: 0 12px;
   text-align: center;
   pointer-events: none;
+  z-index: 2;
 }
 .prompt p {
   margin: 0;
-  font-size: clamp(40px, 6vw, 96px);
+  font-size: clamp(24px, 9cqw, 96px);
   font-weight: 900;
   line-height: 0.85;
+  text-wrap: balance;
 }
 .prompt > span {
   font-size: 14px;
@@ -698,12 +744,14 @@ button.lane:focus-visible {
 }
 .prompt.error p {
   max-width: 20ch;
-  font-size: clamp(26px, 3.2vw, 44px);
+  font-size: clamp(20px, 5cqw, 44px);
   line-height: 0.95;
 }
 .prompt-actions {
   margin-top: 10px;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   align-items: center;
   gap: 10px;
 }
@@ -743,6 +791,8 @@ button.lane:focus-visible {
 .lane-chords li {
   position: absolute;
   top: 0;
+  max-width: 12.5%;
+  overflow: hidden;
   height: 14px;
   padding: 0 5px;
   font-size: 10px;
@@ -768,7 +818,8 @@ button.lane:focus-visible {
 }
 .theory div {
   display: flex;
-  gap: 8px;
+  flex-wrap: wrap;
+  column-gap: 8px;
   align-items: baseline;
 }
 .theory dt {
@@ -787,7 +838,7 @@ button.lane:focus-visible {
   position: absolute;
   top: 22px;
   right: 16px;
-  z-index: 1;
+  z-index: 2;
   display: grid;
   justify-items: end;
   gap: 2px;
@@ -883,33 +934,128 @@ button.lane:focus-visible {
   50% { opacity: 0.2; }
 }
 
-@media (max-width: 720px) {
-  :root {
-    --head: 104px;
+/* Header squeeze, widest first: drop the chord readout, stack field labels, shorten Export, then the rest.
+   The header only wraps on narrow screens, and then into fixed rows. */
+@media (max-width: 1680px) {
+  .harmony-value {
+    display: none;
   }
-  .transport {
-    gap: 8px 10px;
-    padding-right: 10px;
+}
+@media (max-width: 1540px) {
+  .field {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 3px;
   }
+  .field span {
+    font-size: 10px;
+    line-height: 1;
+  }
+  .field input,
+  .field select {
+    height: 30px;
+  }
+}
+@media (max-width: 1280px) {
+  .export .lbl {
+    display: none;
+  }
+  .export {
+    padding: 0 10px;
+  }
+}
+@media (max-width: 1180px) {
   .wordmark {
     width: auto;
-    font-size: 18px;
-    padding-left: 10px;
-  }
-  .field span,
-  .export .lbl,
-  .ms {
-    display: none;
   }
   .transport-group .position {
     display: none;
   }
-  .harmony-field span,
-  .sensitivity-field span {
-    display: inline;
+}
+@media (max-width: 1060px) {
+  .transport {
+    gap: 8px 10px;
+  }
+  .transport-fields {
+    gap: 10px;
+  }
+  .wordmark {
+    font-size: 20px;
+  }
+}
+/* Too narrow for one row: brand, transport and Export on top, settings below. */
+@media (max-width: 860px) {
+  .transport {
+    flex-wrap: wrap;
+    padding: 8px 12px;
+  }
+  .wordmark {
+    padding-left: 0;
   }
   .export {
-    padding: 0 10px;
+    order: 2;
+  }
+  .transport-fields {
+    order: 3;
+    flex: 1 1 100%;
+  }
+  .transport-fields .field {
+    flex: 1 1 auto;
+  }
+  .transport-fields .field:first-child {
+    flex: none;
+  }
+}
+/* Phone: brand and Export, then transport, then settings. */
+@media (max-width: 480px) {
+  .export {
+    order: 1;
+  }
+  .transport-group {
+    order: 2;
+    flex: 1 1 100%;
+  }
+  .t-btn.learn {
+    padding: 0 8px;
+  }
+  .transport-fields {
+    gap: 6px;
+  }
+  .field input,
+  .field select {
+    padding: 0 4px;
+    font-size: 14px;
+  }
+  .field input {
+    width: 52px;
+  }
+}
+
+/* Narrow lanes: chord names only, smaller live pitch. */
+@container (max-width: 560px) {
+  .lane-chords li span {
+    display: none;
+  }
+  .live-pitch b {
+    font-size: 28px;
+  }
+  .tune {
+    width: 80px;
+  }
+}
+
+@media (max-width: 720px) {
+  :root {
+    --head: 104px;
+  }
+  .wordmark {
+    font-size: 18px;
+  }
+  .ms {
+    display: none;
+  }
+  .theory div {
+    display: grid;
   }
   .head {
     padding: 0 8px 0 10px;
@@ -937,6 +1083,12 @@ button.lane:focus-visible {
     width: 12px;
     height: 12px;
     flex: none;
+  }
+  /* The compact spine can wrap Re-record at its hyphen without clipping the action or shrinking its icon. */
+  .rec-controls .rec-label {
+    min-width: 0;
+    white-space: normal;
+    line-height: 1.1;
   }
   .ghost-btn {
     padding: 0 6px;

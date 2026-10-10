@@ -4,7 +4,7 @@
 
 HumStudio is a browser-based music sketchpad for **HackRU Fall 2026**. It looks like a familiar multi-track editor: one track per instrument (Melody, Bass, Keys, Drums, Strings). Click a track to zoom into it, hum into your microphone while a live spectrogram prints your voice across the lane, and watch the track fill with generated notes. Then play the arrangement or export it as MIDI.
 
-> **Current repository status:** The Next.js app and **studio UI are built**: arrangement view, track zoom, live hum spectrogram, loading state, animated note reveal, five-instrument Tone.js playback, and multi-track MIDI export. Playback includes separate pause/stop, rewind, mute/solo, a metronome, a four-beat playback count-in, and regression tests. **Melodic generation uses deterministic DSP segmentation** (`src/lib/audio/segment-notes.ts`) with harmony fitting and quantization; Drums still use simple RMS-onset heuristics. Note editing and project save/load remain separate workstreams. Real-microphone and audible playback verification remain open. See the [Person 2 handoff](WORKLOAD_SPLIT.md#person-2-implementation-handoff) for verification and limitations, and [`WORKLOAD_SPLIT.md`](WORKLOAD_SPLIT.md) for ownership.
+> **Current repository status:** The Next.js studio includes arrangement view, track zoom, live hum spectrogram, animated note reveal, note editing, five-instrument playback, and multi-track MIDI export. Playback supports pause/stop, rewind, mute/solo, metronome, and count-in. **Melodic generation uses deterministic DSP segmentation** with instrument roles and quantization; Drums use RMS-onset heuristics. Sensitivity profiles are cached for immediate switching. Project save/load, physical-microphone tuning, and human listening remain open. See [`WORKLOAD_SPLIT.md`](WORKLOAD_SPLIT.md) for ownership.
 
 ## What are we building?
 
@@ -32,10 +32,10 @@ Pick an instrument track
 - [x] **Arrangement view:** five instrument tracks over 8 bars of 4/4, with a transport bar (play/pause/stop, rewind, position, metronome, playback count-in, BPM, snap, Export MIDI).
 - [x] **Zoom:** clicking a track floods it with its color and collapses the others; Escape or "All tracks" returns.
 - [x] **Record:** microphone capture (up to 15 s or the end of the timeline) with Pitchy pitch estimation and a live spectrogram.
-- [x] **Generate:** stable pitch segmentation, instrument-role shaping, and Off/1/4/1/8/1/16 timing for captured parts.
-- [x] **Sensitivity:** Low, Medium, and High profiles are generated from each take and can be swapped from the transport; changing Snap immediately regenerates captured parts on the selected grid.
-- [x] **Reveal:** shows the pipeline's real stages: the hummed notes print in, move onto the grid where applicable, then the key and chords stamp in. Skipped under reduced motion.
+- [x] **Generate:** stable pitch segmentation, harmony fitting, and Off/1/4/1/8/1/16 timing for melodic tracks.
+- [x] **Reveal:** shows the pipeline's real stages: detected notes print in, timing snaps when enabled, and the key/chords appear. Melody keeps confirmed pitches; other roles fit harmony. Skipped under reduced motion.
 - [x] **Learn:** chord names and roman numerals on the zoomed lane's bar grid (the current chord lights during playback), key and part role in the track panel, do-re-mi on notes, and a live pitch readout (note, degree, cents) while recording.
+- [x] **Note sensitivity:** Low, Medium, and High in the top menu; all three profiles are generated per take and swap immediately. Snap updates existing notes immediately. Hand edits opt a part out of automatic profile switching.
 - [x] **Play:** Tone.js playback of all tracks with mute/solo and BPM 60–180.
 - [x] **Track sounds:** independent smplr preset dropdowns beneath expanded track titles, with lazy loading, retry, and the original synth fallback.
 - [x] **Playback count-in / metronome:** optional four-beat count-in and beat clicks; listening verification remains open.
@@ -68,7 +68,19 @@ The demo targets **clear, one-note-at-a-time humming** in a reasonably quiet roo
 
 **Important:** Nothing in this repo is a trained AI model. Pitch detection is DSP (Pitchy), and note generation uses deterministic heuristics. Describe it accurately when presenting.
 
-Held notes tolerate short pitch wobbles and unvoiced gaps. Choose Low for large, sustained pitch changes, Medium for balanced response, or High for smaller, faster changes; the thresholds are grouped in `src/lib/audio/note-sensitivity.ts`. Each take stores all three generated note sets, so changing sensitivity swaps the visible notes without recording again. Changing Snap regenerates captured tracks immediately from local pitch-analysis frames. Melody keeps confirmed semitone changes instead of forcing every note into its detected scale; the detected melody still drives the song key and chords. Repeated syllables on one pitch split on a level dip, and short octave slips are folded back. Repeated notes separated only by near-silence of 150 ms or less can merge.
+Held notes tolerate short pitch wobbles and unvoiced gaps: Medium uses 120 ms of stable pitch before a change, 150 ms of silence hold, a five-frame median, and a 0.7-semitone hold region. Confirmed rests still separate notes. Off preserves unsnapped timing. Voiced repeated syllables split on a level dip; recovery after a bridged dropout waits through the 100 ms re-attack window so it does not break a continuous note. Short octave slips are folded back. Repeated notes separated only by near-silence of 150 ms or less can still merge.
+
+### Fine-tuning note sensitivity
+
+Edit the three `config` objects in [`src/lib/audio/note-sensitivity.ts`](src/lib/audio/note-sensitivity.ts), the single source of segmentation tuning values (`SEGMENTATION_DEFAULTS` is Medium):
+
+| Level | Pitch hold (semitones) | Stable change (ms) | Median window (voiced frames) | Minimum note (ms) |
+|---|---|---|---|---|
+| Low | 1.5 | 200 | 7 | 100 |
+| Medium (default) | 0.7 | 120 | 5 | 100 |
+| High | 0.5 | 60 | 3 | 60 |
+
+Smaller `pitchToleranceSemitones` makes smaller changes count; smaller `stableMs`/`medianWindow` reacts faster. Keep `minNoteMs` no larger than `stableMs`. Valid tolerance is 0.5..3 semitones. Silence hold, re-attack ratio and octave hold are shared by all profiles. Melody retains confirmed pitches at every level. Studio caches all three profiles plus analysis frames and the capture BPM in memory. **Sensitivity** swaps profiles; **Snap** rebuilds timing at the original BPM, so later tempo changes do not move notes. Off restores original timing. A selected key survives both settings until a new Melody take. A hand edit drops that part's take; Snap still works on edited/sample notes without discarding deliberate overlaps.
 
 ## Getting started
 
@@ -88,7 +100,7 @@ npm ci
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). Keys and Drums start with labeled sample notes. Press Play to unlock audio; Pause holds the position, Stop resets it, and Rewind returns to the start while preserving playback state. The **M** transport button toggles the metronome; **4** toggles a count-in before playback. Stop also cancels a pending count-in. A default tempo of 120 BPM, 1/4 snapping, and Medium note sensitivity follow the shared contract.
+Open [http://localhost:3000](http://localhost:3000). Keys and Drums start with labeled sample notes. Press Play to unlock audio; Pause holds the position, Stop resets it, and Rewind returns to the start while preserving playback state. The **M** transport button toggles the metronome; **4** toggles a count-in before playback. Stop also cancels a pending count-in. Studio defaults to 120 BPM, 1/4 snapping, and Medium sensitivity.
 
 No microphone handy? Open a track and press **Demo hum**: it feeds a synthetic, clearly labeled hum through the same pipeline.
 
@@ -131,13 +143,13 @@ src/
   tests/                 # playback, presets, harmony, segmentation, generation + synthetic fixtures
 ```
 
-Planned, not yet created: note editing (`PianoRoll.tsx` or inside `TrackRow.tsx`) and persistence under `src/lib/persistence/`. Exact contracts are in [`TECHNICAL_SPEC.md`](TECHNICAL_SPEC.md).
+Note editing is implemented in `TrackRow.tsx`; settings updates are coordinated by `src/lib/music/arrangement-settings.ts`. Persistence under `src/lib/persistence/` remains planned. Exact contracts are in [`TECHNICAL_SPEC.md`](TECHNICAL_SPEC.md).
 
 ## Key design choices
 
 - **One `Note` shape everywhere:** `midi`, `startBeat`, `durationBeats`, `velocity`, timed in **quarter-note beats** so BPM changes don't move notes. Defined in `src/lib/music/types.ts`.
 - **Tracks per instrument:** app state is `Track[]` (`src/lib/tracks.ts`). Each track has an instrument (color, pitch range, synth/drums), its notes, and mute/solo flags.
-- **One seam for generation:** the UI only calls `generateTrack(instrument, frames, bpm, quantize, harmony): Promise<Note[]>`. Swap the implementation; keep the signature (or coordinate a change).
+- **Generation boundary:** `generateTrack(...)` remains the async single-profile facade; `generateTrackVariants(...)` computes all three profiles for the UI. Pure settings helpers preserve capture tempo, manual edits, and harmony decisions.
 - **Pitch is not an FFT peak:** Pitchy estimates the fundamental; the spectrogram is display only.
 - **Honest samples:** Keys and Drums start with parts labeled **Sample**; the demo hum is labeled **Demo hum**. Never present a preset as live output.
 - **Local processing:** no account, API key, or network inference. Sampled presets fetch upstream assets on demand; the synth fallback works without them.
@@ -166,7 +178,7 @@ If the room or mic fails, use **Demo hum** and say it is a demo hum.
 
 ## Privacy and data
 
-Microphone audio is analyzed in the browser and discarded after the take; only note data is kept, and only in memory today. Nothing is uploaded. Saved projects (once built) will store notes, never audio.
+Microphone samples are analyzed locally and discarded. Notes and the latest take's analysis features/profile caches remain only in memory today; a hand edit removes that take cache. Nothing is uploaded. Saved projects (once built) will store notes, never audio.
 
 ## Documentation
 
