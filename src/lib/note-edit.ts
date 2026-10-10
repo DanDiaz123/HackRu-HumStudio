@@ -2,12 +2,23 @@
 import { type Note, TOTAL_BEATS } from "./tracks.ts";
 
 const EPS = 1e-6;
+const MAX_SEARCH_STEPS = 10_000;
 const end = (n: Note) => n.startBeat + n.durationBeats;
 const sameRow = (a: Note, b: Note) => a.id !== b.id && a.midi === b.midi;
+const validFields = (n: Note) => n && typeof n.id === "string" && n.id.length > 0 && n.id.length <= 200 &&
+  Number.isInteger(n.midi) && n.midi >= 0 && n.midi <= 127 &&
+  Number.isFinite(n.startBeat) && n.startBeat >= 0 && n.startBeat < TOTAL_BEATS &&
+  Number.isFinite(n.durationBeats) && n.durationBeats > 0 && n.durationBeats <= TOTAL_BEATS &&
+  Number.isFinite(n.velocity) && n.velocity >= 0 && n.velocity <= 1;
+const validNote = (n: Note) => validFields(n) && end(n) <= TOTAL_BEATS;
+const minimumLength = (minLen: number) => {
+  if (!Number.isFinite(minLen) || minLen <= 0 || minLen > TOTAL_BEATS)
+    throw new RangeError("Minimum note length must be positive and within the song.");
+};
 
 /** True when `n` stays inside the timeline and touches no other note on its pitch (end-to-start is fine). */
 export function fits(n: Note, notes: readonly Note[]): boolean {
-  if (n.startBeat < -EPS || end(n) > TOTAL_BEATS + EPS || n.durationBeats <= 0) return false;
+  if (!validNote(n) || !Array.isArray(notes) || !notes.every(validNote)) return false;
   return !notes.some((o) => sameRow(n, o) && n.startBeat < end(o) - EPS && o.startBeat < end(n) - EPS);
 }
 
@@ -26,12 +37,19 @@ function room(n: Note, notes: readonly Note[]) {
 /**
  * Move a note toward `target` (new start + pitch). If the spot is taken it slides to the nearest free
  * start on that row within `reach` beats; otherwise the move is refused (null) and the note stays put.
+ * Step 0 uses a quarter-beat search. Invalid/unbounded search controls throw; invalid candidates return null.
  */
 export function moveNote(n: Note, target: { startBeat: number; midi: number }, notes: readonly Note[], step: number, reach = 1): Note | null {
+  if (!Number.isFinite(step) || step < 0 || step > TOTAL_BEATS || !Number.isFinite(reach) || reach < 0 || reach > TOTAL_BEATS)
+    throw new RangeError("Note search step and reach must be finite and within the song.");
+  const s = step || 0.25;
+  // Bounds pointer work even if a future numeric input supplies an extremely small step.
+  if (reach / s > MAX_SEARCH_STEPS) throw new RangeError("Note search has too many steps.");
+  if (!validNote(n) || !target || !Number.isFinite(target.startBeat) ||
+    !Number.isInteger(target.midi) || target.midi < 0 || target.midi > 127) return null;
   const start = Math.min(TOTAL_BEATS - n.durationBeats, Math.max(0, target.startBeat));
   const want = { ...n, startBeat: start, midi: target.midi };
   if (fits(want, notes)) return want;
-  const s = step || 0.25;
   for (let k = 1; k * s <= reach + EPS; k++)
     for (const d of [-k * s, k * s]) {
       const c = { ...want, startBeat: start + d };
@@ -42,18 +60,27 @@ export function moveNote(n: Note, target: { startBeat: number; midi: number }, n
 
 /** Stretch the end (or the start, keeping the end) to `beat`, stopping at neighbours on the row and at `minLen`. */
 export function resizeNote(n: Note, edge: "start" | "end", beat: number, notes: readonly Note[], minLen: number): Note {
+  minimumLength(minLen);
+  if (!validNote(n) || !Number.isFinite(beat) || (edge !== "start" && edge !== "end"))
+    throw new RangeError("Cannot resize an invalid note or boundary.");
   const { from, to } = room(n, notes);
   if (edge === "end") {
-    const e = Math.min(to, Math.max(n.startBeat + minLen, beat));
-    return { ...n, durationBeats: Math.max(minLen, e - n.startBeat) };
+    // Existing finer-grid notes may have less room than the newly selected minimum.
+    const availableMin = Math.min(minLen, Math.max(0, to - n.startBeat));
+    const e = Math.min(to, Math.max(n.startBeat + availableMin, beat));
+    const candidate = { ...n, durationBeats: e - n.startBeat };
+    return fits(candidate, notes) ? candidate : { ...n };
   }
   const e = end(n);
-  const s = Math.max(from, Math.min(e - minLen, beat));
-  return { ...n, startBeat: s, durationBeats: e - s };
+  const s = Math.max(from, Math.min(e - Math.min(minLen, e - from), beat));
+  const candidate = { ...n, startBeat: s, durationBeats: e - s };
+  return fits(candidate, notes) ? candidate : { ...n };
 }
 
 /** A new note at `start` on `midi`: shortened to the next note on the row, or null when there's no room. */
 export function addNote(n: Note, notes: readonly Note[], minLen: number): Note | null {
+  minimumLength(minLen);
+  if (!validFields(n) || !Array.isArray(notes) || notes.some((other) => other.id === n.id)) return null;
   if (!fits({ ...n, durationBeats: minLen / 2 }, notes)) return null;
   const { to } = room(n, notes);
   const len = Math.min(n.durationBeats, to - n.startBeat);
@@ -62,13 +89,19 @@ export function addNote(n: Note, notes: readonly Note[], minLen: number): Note |
 
 /** Copy bars 1-4 onto bars 5-8 (replacing them) with fresh ids. */
 export function repeatFirstHalf(notes: readonly Note[], newId: () => string): Note[] {
+  if (!Array.isArray(notes) || !notes.every(validNote) || typeof newId !== "function")
+    throw new RangeError("Cannot repeat invalid notes.");
+  const ids = new Set(notes.map((note) => note.id));
+  if (ids.size !== notes.length) throw new RangeError("Cannot repeat duplicate note ids.");
   const half = TOTAL_BEATS / 2;
   // Bars 1-4 end at the halfway line so they can't run into their own copies.
   const first = notes.filter((n) => n.startBeat < half - EPS).map((n) => ({ ...n, durationBeats: Math.min(n.durationBeats, half - n.startBeat) }));
-  const copies = first.map((n) => ({
-    ...n,
-    id: newId(),
-    startBeat: n.startBeat + half,
-  }));
+  const copies = first.map((n) => {
+    const id = newId();
+    if (typeof id !== "string" || !id.length || id.length > 200 || ids.has(id))
+      throw new RangeError("Repeated notes require fresh unique ids.");
+    ids.add(id);
+    return { ...n, id, startBeat: n.startBeat + half };
+  });
   return [...first, ...copies];
 }

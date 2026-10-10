@@ -3,7 +3,7 @@
 **Team size:** 4 developers  
 **Event:** HackRU Fall 2026  
 **Working product name:** HumStudio  
-**Status:** Assignment plan; add names to the owner fields and track progress in the linked GitHub issues.
+**Status:** Current ownership and remaining-work plan as of 2026-10-10. Core implementation is merged on `main`; unchecked items are real-device, listening, deployment, or presentation follow-up.
 
 > **The demo goal:** Pick an instrument track, hum a short melody, see the live spectrogram, reveal editable notes, play the arrangement, and export MIDI. Finish a reliable end-to-end demo before adding extra features.
 
@@ -14,12 +14,12 @@ This split reflects the **existing repository**, not a blank project. At the tim
 - The Next.js/React/TypeScript app, plain-CSS styling, and GitHub repository are already initialized.
 - `src/components/Studio.tsx`, `TrackRow.tsx`, and `Spectrogram.tsx` implement a multitrack-oriented interface with recording/generation/reveal states.
 - `src/lib/hum.ts` contains microphone capture and Pitchy pitch estimation.
-- `src/lib/generate.ts` has a **prototype / simulated generation stage** with simple note-building logic; it is not a trained AI backend.
-- `src/lib/playback.ts` and `src/lib/midi.ts` contain initial Tone.js playback and MIDI export implementations.
+- `src/lib/generate.ts` contains deterministic DSP segmentation, quantization, harmony fitting, and instrument-role generation; it is not a trained AI backend.
+- `src/lib/playback.ts` and `src/lib/midi.ts` contain tested Tone.js playback and multi-track MIDI export implementations.
 - `DESIGN.md` defines the existing visual identity. **Improve and use it; do not start branding from scratch.**
 - Presence of source code **does not mean each feature has been tested** on a real microphone or deployed browser.
 
-**Product-scope clarification:** The newer `PRODUCT.md` explicitly calls for a **multitrack, instrument-specific editor** and a live spectrogram/reveal sequence. The older single-track MVP in `SOFTWARE_DESIGN_DOCUMENT.md` and `TECHNICAL_SPEC.md` has been revised (v1.1) to this multitrack direction, with built vs. planned parts marked; Person 4 keeps them current. The team must decide early whether the output is primarily **faithful hum-to-MIDI transcription** or **a generated instrument arrangement inspired by a hum**. Do not advertise machine learning or a backend that has not been implemented.
+**Product-scope clarification:** The repository now implements the **multitrack, instrument-specific editor** and live spectrogram/reveal sequence. The app produces a generated instrument arrangement inspired by a monophonic hum, using deterministic DSP and harmony rules; it does not claim faithful transcription, machine learning, or a backend. Remaining unchecked work is validation on real hardware, deployment, listening, and presentation.
 
 ## 2. Assignment summary
 
@@ -41,17 +41,17 @@ This split reflects the **existing repository**, not a blank project. At the tim
 ### What to work on
 
 - [ ] Test `startMic()` with a **real microphone** in Chrome/Edge, including permission denial, silence, and stopping early.
-- [ ] Stabilize Pitchy output: minimum RMS, confidence/clarity gating, octave-error handling where reasonable, and pitch smoothing.
-- [ ] Convert continuous `HumFrame[]` readings into discrete note onsets/offsets; suppress short pitch jitter, reject invalid notes, and handle pauses between notes.
-- [ ] Convert start/end seconds into **quarter-note beats** using current BPM; apply Off, 1/4, 1/8, and 1/16 snapping correctly.
-- [ ] Improve/replace the prototype logic in `generateNotes(inst, frames, bpm, quantize, harmony, sensitivity?, trace?): Note[]` while preserving that public integration point or coordinating an API change.
-- [ ] Return notes appropriate for the selected instrument's range; document the limitations of drum/beatbox mapping separately from monophonic melodic pitch.
-- [ ] Ensure empty/failed recordings leave existing notes untouched.
-- [ ] Add deterministic tests using synthetic voiced/unvoiced frames; then verify live pitch-to-note output.
+- [x] Stabilize the initial Pitchy path: RMS/clarity/frequency gates, sliding-window analysis, pitch smoothing, and resource cleanup are implemented; real-device tuning remains open.
+- [x] Convert continuous `HumFrame[]` readings into discrete note onsets/offsets with jitter suppression, rests, and dropout handling.
+- [x] Convert start/end seconds into **quarter-note beats** using capture BPM; apply Off, 1/4, 1/8, and 1/16 snapping correctly.
+- [x] Implement deterministic `generateTrack(...)` generation with Low/Medium/High cached sensitivity profiles and harmony/instrument fitting.
+- [x] Return notes appropriate for the selected instrument's range; drum/RMS mapping remains documented as a separate limitation.
+- [x] Ensure empty/failed recordings leave existing notes untouched.
+- [x] Add deterministic voiced/unvoiced, wobble, dropout, sensitivity, and generation fixtures; live pitch-to-note verification remains open.
 
 **Primary files:** `src/lib/hum.ts`, `src/lib/generate.ts`, and any small extracted pure pitch/segmentation/quantization helpers under `src/lib/audio/` or `src/lib/music/`. Coordinate changes to `src/components/Spectrogram.tsx` with Person 3.
 
-**Handoff to Person 4:** The tested `generateNotes(...)` output as canonical `Note[]` plus accurate loading/error status and a short recorded-demo procedure.
+**Handoff to Person 4:** The tested `generateTrack(...)` output as canonical `Note[]` plus accurate loading/error status and a short recorded-demo procedure.
 
 **Definition of done:** A 5–15-second clean hum creates recognizably correct note pitches and approximate timing on the selected track; no microphone leaks or disappearing existing notes. This is a **DSP prototype**, not automatically a neural AI system.
 
@@ -63,14 +63,14 @@ This split reflects the **existing repository**, not a blank project. At the tim
 
 ### What to work on
 
-- [ ] Verify existing `src/lib/playback.ts` can play all five instrument tracks with correct pitch, duration, volume, and timing.
+- [x] Verify scheduling logic for all five instrument tracks with correct pitch, duration, volume, and timing in deterministic regression tests; audible sign-off remains open.
 - [x] Make BPM changes preserve beat-aligned scheduling, not shift where notes sit on the musical grid.
-- [ ] Verify Play, Pause, Stop, Rewind, and current playhead position; make displayed transport state match the actual audio.
+- [x] Implement Play, Pause, Stop, Rewind, and current playhead position with transport state matching the scheduled engine; audible sign-off remains open.
 - [x] Check mute and solo combinations, including editing notes while playback is stopped or running (deterministic regression tests; listening pending).
 - [x] Prevent duplicate Tone Transport callbacks or stuck voices when rescheduling/replaying; release/dispose synth resources cleanly (regression tests; listening pending).
 - [x] Ensure browser audio starts only following a real user gesture; do not initialize Tone audio during server rendering.
 - [x] Add metronome and count-in **only after** basic playback is reliable (core checks passed before implementation; count-in precedes playback).
-- [ ] Test the generated melody alongside another track (e.g., sample drums or keys) to prove simultaneous multitrack playback.
+- [ ] Listen to generated melody alongside sample drums/keys on the demo laptop to prove simultaneous audible multitrack playback.
 
 **Primary files:** `src/lib/playback.ts` and isolated transport/audio controls. Person 4 owns the overall `Studio.tsx` layout; coordinate any transport-hookup changes rather than both editing the same component simultaneously.
 
@@ -163,15 +163,15 @@ automated scheduling tests do not establish audible quality.
 
 ### What to work on
 
-- [ ] Use the existing `TrackRow.tsx` layout as the starting point; preserve track opening/zooming and current note/spectrogram visuals.
-- [ ] Make the notes in a zoomed track **editable**, not merely decorative.
-- [ ] Implement note selection and dragging **up/down for pitch** and **left/right for start beat**, with quantization snapping.
-- [ ] Implement resizing note duration; provide a simple numeric selected-note duration control as a fallback if pointer resizing takes too long.
-- [ ] Support selecting/deleting notes and, if time permits, click-to-add notes.
-- [ ] Clamp notes to valid ranges (MIDI 0–127, beat ≥ 0, duration > 0); use stable note IDs.
-- [ ] Keep the piano roll aligned with the beat ruler, track clips, instrument range, and Person 2's playhead.
-- [ ] Preserve instrument-specific lanes, including drum rows where appropriate.
-- [ ] Keep editing logic separate from audio scheduling and microphone capture.
+- [x] Use the existing `TrackRow.tsx` layout while preserving track opening/zooming and note/spectrogram visuals.
+- [x] Make notes in a zoomed track editable with immutable parent updates.
+- [x] Implement pitch/time dragging with selected-grid snapping and collision-aware nearest-free placement.
+- [x] Implement resizing from either edge with neighbor/timeline bounds.
+- [x] Support selection, deletion, click-to-add, Clear, Repeat, and keyboard nudging.
+- [x] Clamp notes to valid ranges (MIDI 0–127, beat ≥ 0, duration > 0); use stable note IDs.
+- [x] Keep the piano roll aligned with the beat ruler, track clips, instrument range, and playhead.
+- [x] Preserve instrument-specific lanes, including drum rows where appropriate.
+- [x] Keep editing logic separate in `src/lib/note-edit.ts` from audio scheduling and microphone capture.
 
 **Primary files:** `src/components/TrackRow.tsx`, a new `src/components/PianoRoll.tsx` if helpful, and presentation/geometry helpers. Coordinate spectrogram changes with Person 1. Person 4 owns global CSS/design tokens; request a style change rather than independently restyling all of `globals.css`.
 
@@ -187,24 +187,24 @@ automated scheduling tests do not establish audible quality.
 
 ### Application and integration — first priority
 
-- [ ] Keep the current Next.js app operational and own the **shared project/track state** in `Studio.tsx` (or a small extracted state module).
-- [ ] Coordinate the Person 1 `generateNotes(...)` result, Person 3 editing callbacks, and Person 2 scheduling so all use the same current `Track[]`.
-- [ ] Implement local save/restore of **all tracks**, BPM, quantization, mute/solo flags, and note edits; validate imported JSON before replacing state.
-- [ ] Verify/finish multi-track MIDI export with `@tonejs/midi` and check the resulting file in a compatible music editor.
-- [ ] Make recording failures, stale asynchronous callbacks, and reloads safe; never replace good notes on an empty/failed take.
-- [ ] Own build/lint/type-check integration and deploy a real HTTPS demo (microphone works on HTTPS/localhost).
+- [x] Keep the current Next.js app operational and own the **shared project/track state** in `Studio.tsx`.
+- [x] Coordinate generation, editing callbacks, and playback scheduling around the same current `Track[]`.
+- [x] Implement local save/restore of **all tracks**, BPM, quantization, sensitivity, harmony, mute/solo flags, and note edits; validate imported JSON before replacing state.
+- [x] Implement and test multi-track MIDI export with `@tonejs/midi`; checking it in an external music editor remains open.
+- [x] Make recording failures, stale asynchronous callbacks, and reloads safe; never replace good notes on an empty/failed take.
+- [ ] Own deployment of a real HTTPS demo and verify microphone behavior there.
 - [x] Reconcile the old single-track documentation with the newer `PRODUCT.md` and the actual `Track[]` data model (README, SDD, TECHNICAL_SPEC, AGENTS updated 2026-10-10).
-- [ ] Agree on a versioned multitrack save format (draft `ProjectV2` in `TECHNICAL_SPEC.md` §3.1).
+- [x] Agree on and implement the versioned multitrack save format (`ProjectV2`, strict validation, v1 migration).
 
 ### Branding and visual presentation — same owner, after core loop
 
-- [ ] Use **`DESIGN.md` as the existing design reference** (palette, Archivo typography, squared-off controls, instrument colors).
-- [ ] Finalize the HumStudio name/tagline with the team; refine the existing wordmark, favicon, and page metadata.
-- [ ] Maintain consistent buttons, controls, error/loading/recording states and accessible contrast across the app.
-- [ ] Polish the overall studio shell, responsive desktop layout, recording call-to-action, and empty/onboarding states.
-- [ ] Keep the live spectrogram and note-reveal animation legible, honest, and respectful of reduced-motion settings.
-- [ ] Capture clean screenshots, write short Devpost presentation copy, and organize a **90-second judge demo** with an obvious live-recording moment.
-- [ ] Coordinate Person 3's piano-roll styling via existing design tokens rather than modifying their editing logic.
+- [x] Use **`DESIGN.md` as the visual reference** (palette, Archivo typography, squared-off controls, instrument colors).
+- [x] Establish the HumStudio name/tagline, wordmark, favicon, and page metadata.
+- [x] Maintain consistent buttons, controls, error/loading/recording states and accessible contrast.
+- [x] Polish the studio shell, responsive desktop layout, recording call-to-action, and empty/onboarding states.
+- [x] Keep the live spectrogram and note-reveal animation legible, honest, and respectful of reduced-motion settings.
+- [ ] Capture final screenshots, write short Devpost presentation copy, and rehearse a **90-second judge demo** with a real recording moment.
+- [x] Coordinate piano-roll styling through the existing design tokens.
 
 **Primary files:** `src/components/Studio.tsx`, `src/app/`, `src/app/globals.css`, `src/lib/midi.ts`, persistence/state modules, `public/` branding assets, and product/demo docs. **Do not rebuild the app scaffold or overwrite teammates' components.**
 
@@ -260,15 +260,15 @@ Make **small PRs as soon as a vertical slice works**, instead of waiting for all
 
 ## 10. Shared minimum acceptance test
 
-- [ ] On Chrome/Edge over HTTPS or localhost, the user can open the studio and choose a track.
-- [ ] Live mic permission and start/stop work; a clean hummed phrase becomes note data in that selected track.
-- [ ] Live spectrogram, processing state, note reveal, and Demo hum fallback are clearly labeled and understandable.
-- [ ] Generated notes appear at approximately the right pitches/beat positions without dozens of noise artifacts.
-- [ ] At least one note can be edited, and the edited part plays back at the selected BPM.
-- [ ] At least two tracks play together with functioning mute/solo and no duplicated notes on repeat playback.
-- [ ] A user can export valid MIDI; ideally also save/reopen the complete multitrack project.
-- [ ] Mic denial, silence, refresh, and invalid input do not crash the app or silently erase a good arrangement.
-- [ ] Deployment and 90-second live demo are tested on the laptop that will be used for judging.
+- [x] On local Chrome/Edge, the user can open the studio and choose a track.
+- [ ] Live mic permission and start/stop work with a real device; synthetic browser coverage passes.
+- [x] Live spectrogram, processing state, note reveal, and Demo hum fallback are clearly labeled.
+- [x] Generated notes are covered by deterministic pitch/beat regression fixtures without dozens of noise artifacts.
+- [x] At least one note can be edited; browser regression covers edits and state preservation.
+- [x] At least two tracks schedule together with mute/solo and no duplicated notes in deterministic transport tests.
+- [x] A user can export valid MIDI and save/reopen the complete multitrack project.
+- [x] Mic denial, silence, refresh, and invalid input preserve good state in code/browser regression coverage.
+- [ ] Deployment and 90-second live demo are tested on the judging laptop.
 
 ### Cut order if the team falls behind
 

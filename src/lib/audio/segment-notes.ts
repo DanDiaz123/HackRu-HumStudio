@@ -76,6 +76,7 @@ export function segmentPitchFrames(
   let levels: { tSec: number; rms: number }[] = [];
   let phraseOnsetSec: number | null = null;
   let octaveSinceSec: number | null = null;
+  let reattackRecoverySec: number | null = null;
 
   const closeActive = (endSec: number) => {
     if (active && endSec - active.startSec + EPSILON_SEC >= minNoteSec)
@@ -106,11 +107,19 @@ export function segmentPitchFrames(
       levels = [];
       phraseOnsetSec = null;
       octaveSinceSec = null;
+      reattackRecoverySec = null;
     }
+    if (voiced && silenceStartSec !== null && lastVoicedSec !== null) {
+      // A bridged dropout refills the analysis window gradually. Its recovery ramp
+      // belongs to the held note; wait until its first low frame has left the dip window.
+      levels = [];
+      reattackRecoverySec = tSec;
+    }
+    // Expire dips before lookup so a briefly stalled frame loop cannot create a false re-attack.
+    levels = levels.filter((l) => tSec - l.tSec <= REATTACK_WINDOW_SEC + EPSILON_SEC);
     // Quietest recent frame, before this one joins the history.
     const dip = levels.reduce<{ tSec: number; rms: number } | null>((m, l) => (!m || l.rms < m.rms ? l : m), null);
     if (Number.isFinite(frame.rms)) levels.push({ tSec, rms: frame.rms });
-    levels = levels.filter((l) => tSec - l.tSec <= REATTACK_WINDOW_SEC + EPSILON_SEC);
 
     if (!voiced || hz === null) {
       silenceStartSec ??= tSec;
@@ -149,7 +158,8 @@ export function segmentPitchFrames(
 
     if (active && active.midi === midi) {
       // Same pitch, but the level dipped and came back: a new syllable, not a held note.
-      if (dip && dip.rms >= MIN_VOICED_RMS && frame.rms >= config.reattackRatio * dip.rms &&
+      const recovered = reattackRecoverySec === null || tSec - reattackRecoverySec > REATTACK_WINDOW_SEC + EPSILON_SEC;
+      if (recovered && dip && dip.rms >= MIN_VOICED_RMS && frame.rms >= config.reattackRatio * dip.rms &&
         dip.tSec - active.startSec + EPSILON_SEC >= minNoteSec) {
         // The old note ends where the level fell; the new one starts where it came back.
         closeActive(dip.tSec);

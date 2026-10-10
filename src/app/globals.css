@@ -1159,6 +1159,18 @@ button.lane:focus-visible {
     height: 12px;
     flex: none;
   }
+  /* The compact spine can wrap Re-record at its hyphen without clipping the action or shrinking its icon. */
+  .rec-controls .rec-label {
+    min-width: 0;
+    white-space: normal;
+    line-height: 1.1;
+  }
+  .part-actions {
+    flex-direction: column;
+  }
+  .part-actions .ghost-btn {
+    flex: none;
+  }
   .ghost-btn {
     padding: 0 6px;
     font-size: 10px;

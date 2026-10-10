@@ -3,7 +3,7 @@ import { test } from "node:test";
 import ToneMidi from "@tonejs/midi";
 import { midiBytes } from "../lib/midi.ts";
 import { DEFAULT_HARMONY } from "../lib/music/harmony.ts";
-import { type LoadedProject, MAX_PROJECT_CHARS, parseProject, serializeProject } from "../lib/persistence/project.ts";
+import { type LoadedProject, MAX_PROJECT_CHARS, MAX_PROJECT_NOTES, parseProject, serializeProject, toProject } from "../lib/persistence/project.ts";
 import { INSTRUMENTS, initialTracks } from "../lib/tracks.ts";
 
 const { Midi } = ToneMidi; // CommonJS package: Node has no named export
@@ -54,15 +54,71 @@ test("T-09: invalid files throw instead of loading part of them", () => {
   for (const text of bad) assert.throws(() => parseProject(text), /not a valid HumStudio project/, text.slice(0, 80));
 });
 
-test("missing tracks and legacy preset ids get defaults; unknown fields are dropped", () => {
+test("missing tracks and legacy preset ids get defaults", () => {
   const p = parseProject(json((p) => {
     const tracks = p.tracks as Record<string, unknown>[];
-    p.tracks = [{ ...tracks[0], presetId: undefined, notes: [{ ...(tracks[0].notes as object[])[0], evil: 1 }] }];
+    p.tracks = [{ ...tracks[0], presetId: undefined }];
   }));
   assert.equal(p.tracks.length, INSTRUMENTS.length);
   assert.equal(p.tracks[0].presetId, "melody.flute");
   assert.deepEqual(Object.keys(p.tracks[0].notes[0]).sort(), ["durationBeats", "id", "midi", "startBeat", "velocity"]);
   assert.deepEqual(p.tracks[1].notes, []);
+});
+
+test("project import rejects unexpected fields and prototype-pollution keys at every object boundary", () => {
+  for (const field of ["unexpected", "__proto__", "constructor", "prototype"]) {
+    for (const boundary of ["project", "harmony", "track", "note"]) {
+      const input = json((p) => {
+        const track = (p.tracks as Record<string, unknown>[])[0];
+        const target = boundary === "project" ? p : boundary === "harmony" ? p.harmony as object :
+          boundary === "track" ? track : (track.notes as object[])[0];
+        Object.defineProperty(target, field, { enumerable: true, value: { polluted: true } });
+      });
+      assert.throws(() => parseProject(input), /not a valid HumStudio project/, `${boundary} ${field}`);
+    }
+  }
+  assert.equal(Object.hasOwn(Object.prototype, "polluted"), false);
+});
+
+test("project import uses strict field types without coercing preset ids or JSON inputs", () => {
+  for (const value of [null, 1, {}, ["melody.flute"], true, new String("melody.flute")]) {
+    // JSON.stringify(new String(...)) produces a primitive string; test the runtime input boundary separately.
+    if (!(value instanceof String))
+      assert.throws(() => parseProject(json(p => { (p.tracks as Record<string, unknown>[])[0].presetId = value; })), /not a valid HumStudio project/);
+    assert.throws(() => parseProject(value as unknown as string), /not a valid HumStudio project/);
+  }
+  for (const value of [null, "false", 0, []]) for (const field of ["muted", "solo", "sample"])
+    assert.throws(() => parseProject(json(p => { (p.tracks as Record<string, unknown>[])[0][field] = value; })), /not a valid HumStudio project/);
+});
+
+test("note and harmony schema boundaries reject oversized data and notes beyond the song", () => {
+  const invalid = [
+    json(p => { (p.tracks as { notes: { startBeat: number; durationBeats: number }[] }[])[0].notes[0] =
+      { ...(p.tracks as { notes: { startBeat: number; durationBeats: number }[] }[])[0].notes[0], startBeat: 31.5, durationBeats: 1 }; }),
+    json(p => { (p.harmony as { bars: number[][] }).bars[0] = [0, 0, 0]; }),
+    json(p => { p.name = "x".repeat(201); }),
+    json(p => { const tracks = p.tracks as { notes: unknown[] }[]; const note = tracks[0].notes[0] as object;
+      tracks[0].notes = Array.from({ length: MAX_PROJECT_NOTES + 1 }, (_, i) => ({ ...note, id: `n${i}` })); }),
+  ];
+  for (const input of invalid) assert.throws(() => parseProject(input), /not a valid HumStudio project/);
+  const exact = parseProject(json(p => { const note = (p.tracks as { notes: { startBeat: number; durationBeats: number }[] }[])[0].notes[0];
+    note.startBeat = 31.5; note.durationBeats = 0.5; }));
+  assert.equal(exact.tracks[0].notes[0].startBeat + exact.tracks[0].notes[0].durationBeats, 32);
+});
+
+test("save snapshots and empty legacy harmony do not share mutable arrays with studio state", () => {
+  const state = project();
+  const beforeHarmony = structuredClone(state.harmony);
+  const snapshot = toProject(state);
+  snapshot.tracks[0].notes[0].midi = 70;
+  snapshot.harmony.bars[0][0] = 2;
+  assert.equal(state.tracks[0].notes[0].midi, 64);
+  assert.deepEqual(state.harmony, beforeHarmony);
+  const v1 = { schemaVersion: 1, id: "empty", name: "Empty", bpm: 120, quantize: "off", notes: [],
+    createdAt: "2026-10-09T00:00:00.000Z", updatedAt: "2026-10-09T00:00:00.000Z" };
+  const first = parseProject(JSON.stringify(v1));
+  first.harmony.bars[0][0] = 2;
+  assert.deepEqual(parseProject(JSON.stringify(v1)).harmony, DEFAULT_HARMONY);
 });
 
 test("a v1 file loads as the Melody track with harmony inferred from it", () => {

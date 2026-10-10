@@ -73,20 +73,40 @@ export interface MicContext {
   createWorklet(name: string, options: AudioWorkletNodeOptions): AudioWorkletNode;
 }
 
-/** Frames are stamped in `ctx`'s audio-clock seconds; the caller rebases them to recording start. */
+/**
+ * Starts analysis without monitoring the microphone. Frames use `ctx`'s audio clock;
+ * the caller rebases them to recording start. Returns an idempotent stop function.
+ * Failed setup releases every acquired resource while leaving the shared context open.
+ */
 export async function startMic(ctx: MicContext, onFrame: (f: HumFrame) => void): Promise<() => void> {
-  if (!navigator.mediaDevices?.getUserMedia) throw new DOMException("insecure", "SecurityError");
+  if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia)
+    throw new DOMException("insecure", "SecurityError");
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
   });
   let src: MediaStreamAudioSourceNode | undefined;
+  let tap: AudioWorkletNode | undefined;
+  let analyser: AnalyserNode | undefined;
+  let stopped = false;
   // The context is shared with playback, so it stays open.
   const cleanup = () => {
-    src?.disconnect();
-    stream.getTracks().forEach((t) => t.stop());
+    if (stopped) return;
+    stopped = true;
+    if (tap) tap.port.onmessage = null;
+    // One failed disconnect must not prevent the remaining resources from being released.
+    const release = [
+      () => tap?.port.postMessage("stop"),
+      () => tap?.port.close(),
+      () => tap?.disconnect(),
+      () => analyser?.disconnect(),
+      () => src?.disconnect(),
+      ...stream.getTracks().map((track) => () => track.stop()),
+    ];
+    for (const dispose of release) {
+      try { dispose(); } catch { /* Continue releasing the other microphone resources. */ }
+    }
   };
 
-  let tap: AudioWorkletNode;
   try {
     src = ctx.createMediaStreamSource(stream);
     // The worklet delivers every sample on the audio thread; the main thread only analyses.
@@ -98,39 +118,35 @@ export async function startMic(ctx: MicContext, onFrame: (f: HumFrame) => void):
       channelCountMode: "explicit", // stereo mics are mixed down to mono
       processorOptions: { hop: Math.round(ctx.sampleRate / HOPS_PER_SEC) },
     });
+    // The analyser only feeds the display; pitch comes from the worklet's samples.
+    const display = ctx.createAnalyser();
+    analyser = display;
+    display.fftSize = WINDOW_SIZE;
+    display.smoothingTimeConstant = 0.2;
+    src.connect(display);
+    src.connect(tap);
+
+    const spec = new Float32Array(display.frequencyBinCount);
+    const hzPerBin = ctx.sampleRate / display.fftSize;
+    const detector = PitchDetector.forFloat32Array(WINDOW_SIZE);
+    const push = slidingWindow(WINDOW_SIZE);
+
+    tap.port.onmessage = (e: MessageEvent<{ samples: Float32Array; endFrame: number }>) => {
+      if (stopped) return;
+      const { hz, rms, zcrHz } = analyzeWindow(push(e.data.samples), ctx.sampleRate, detector);
+      display.getFloatFrequencyData(spec);
+      const bins = new Float32Array(BIN_COUNT);
+      for (let i = 0; i < BIN_COUNT; i++) {
+        const k = Math.min(spec.length - 1, Math.round(binHz(i) / hzPerBin));
+        bins[i] = Math.min(1, Math.max(0, (spec[k] + 90) / 60)); // -90..-30 dB -> 0..1
+      }
+      onFrame({ tSec: windowCenterSec(e.data.endFrame, ctx.sampleRate), bins, hz, rms, zcrHz });
+    };
+    return cleanup;
   } catch (e) {
     cleanup();
     throw e;
   }
-  // The analyser only feeds the spectrogram display; pitch comes from the worklet's samples.
-  const analyser = ctx.createAnalyser();
-  analyser.fftSize = WINDOW_SIZE;
-  analyser.smoothingTimeConstant = 0.2;
-  src!.connect(analyser);
-  src!.connect(tap);
-
-  const spec = new Float32Array(analyser.frequencyBinCount);
-  const hzPerBin = ctx.sampleRate / analyser.fftSize;
-  const detector = PitchDetector.forFloat32Array(WINDOW_SIZE);
-  const push = slidingWindow(WINDOW_SIZE);
-
-  tap.port.onmessage = (e: MessageEvent<{ samples: Float32Array; endFrame: number }>) => {
-    const { hz, rms, zcrHz } = analyzeWindow(push(e.data.samples), ctx.sampleRate, detector);
-    analyser.getFloatFrequencyData(spec);
-    const bins = new Float32Array(BIN_COUNT);
-    for (let i = 0; i < BIN_COUNT; i++) {
-      const k = Math.min(spec.length - 1, Math.round(binHz(i) / hzPerBin));
-      bins[i] = Math.min(1, Math.max(0, (spec[k] + 90) / 60)); // -90..-30 dB -> 0..1
-    }
-    onFrame({ tSec: windowCenterSec(e.data.endFrame, ctx.sampleRate), bins, hz, rms, zcrHz });
-  };
-
-  return () => {
-    tap.port.onmessage = null;
-    tap.port.postMessage("stop"); // lets the processor return false and be collected
-    tap.disconnect();
-    cleanup();
-  };
 }
 
 /** Synthetic hum for demos without a mic. Labeled "Demo hum" wherever it's shown. */

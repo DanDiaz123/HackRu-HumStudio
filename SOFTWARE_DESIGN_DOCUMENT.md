@@ -1,6 +1,6 @@
 # HumStudio - Software Design Document (SDD)
 
-**Status:** Studio UI and deterministic melodic generation implemented; real-microphone tuning, editing, and persistence pending
+**Status:** Studio UI, note editing, deterministic generation, undo/redo, and project persistence implemented; physical-microphone tuning and human listening pending
 **Version:** 1.1 (multi-track revision)
 **Date:** 2026-10-10
 **Event:** HackRU Fall 2026  
@@ -11,13 +11,13 @@
 >
 > **Scope principle:** Build a convincing hum-to-music sketchpad with a familiar multi-track layout, not a professional digital audio workstation (DAW).
 
-> [`PRODUCT.md`](PRODUCT.md) made **multi-track core**: one track per instrument, click a track to zoom, record a hum with a live spectrogram, a loading state, then an animated note reveal. That UI now exists. Output is a **generated part for the selected instrument**, not necessarily a 1:1 transcription: local DSP segmentation in `src/lib/audio/segment-notes.ts` feeds instrument/harmony fitting and quantization in `src/lib/generate.ts`. Anything not built yet is marked *planned*.
+> [`PRODUCT.md`](PRODUCT.md) made **multi-track core**: one track per instrument, click a track to zoom, record a hum with a live spectrogram, a loading state, then an animated note reveal. That UI now exists. Output is a **generated part for the selected instrument**, not necessarily a 1:1 transcription: local DSP segmentation in `src/lib/audio/segment-notes.ts` feeds instrument/harmony fitting and quantization in `src/lib/generate.ts`. Current implementation status is recorded below; remaining open work is real-device tuning, listening, deployment, and presentation.
 
 ## 1. Executive summary
 
-HumStudio is a browser-based, voice-first music composition tool laid out like a familiar DAW: five instrument tracks (Melody, Bass, Keys, Drums, Strings) over an 8-bar 4/4 timeline. The user opens a track, records a short **monophonic** hum, watches a live spectrogram print across the lane, and sees generated notes for that instrument revealed on the track. The arrangement plays through Tone.js with mute/solo and exports as multi-track MIDI. Note editing and project save/reopen are planned.
+HumStudio is a browser-based, voice-first music composition tool with five instrument tracks over an 8-bar 4/4 timeline. A user records a short monophonic hum, watches the spectrogram, edits generated notes, and plays the arrangement with mute/solo. MIDI export, project autosave/Save/Open, and undo/redo are implemented.
 
-The project's differentiator is the interface: a person can express a melody with their voice instead of entering notes one at a time. Pitch detection is **digital signal processing (DSP)** via Pitchy. The current generator is a placeholder heuristic; do not describe it as a trained model. A real generator (transcription and/or arrangement, possibly a backend) replaces `generateNotes(...)` later.
+The project's differentiator is the interface: a person can express a melody with their voice instead of entering notes one at a time. Pitch detection uses Pitchy and deterministic DSP segmentation, with rule-based instrument roles. No trained model or generation backend is implemented.
 
 ### Success scenario
 
@@ -26,8 +26,8 @@ The project's differentiator is the interface: a person can express a melody wit
 3. Click **Record**, allow microphone access, and hum a clear 4-8-note melody for about 5-10 seconds while the spectrogram prints live.
 4. Stop. A "Setting the session" loading state runs, then the generated notes set in left to right over a ghost of the hum.
 5. Return to all tracks and press **Play** to hear the arrangement; mute/solo tracks.
-6. *(Planned)* Drag one wrong note to a new pitch, then play again.
-7. Export a `.mid` file; *(planned)* save the project to a `.humstudio.json` file.
+6. Drag one wrong note to a new pitch, then play again.
+7. Export a `.mid` file or save the project to a `.humstudio.json` file.
 
 ## 2. Problem, users, and goals
 
@@ -62,8 +62,8 @@ Music software expects users to translate ideas into piano-roll clicks, keyboard
 
 | Tier | Deliverables | Rationale |
 |---|---|---|
-| **P0 - demo-critical** | Five-instrument arrangement view **(built)**; click-to-zoom track **(built)**; mic permission and capture with live spectrogram **(built)**; loading state and animated note reveal **(built)**; Tone.js playback of all tracks with mute/solo, BPM, play/pause/stop/rewind **(built)**; multi-track MIDI export **(built)**; demo-hum fallback and error states **(built)**; deterministic melodic generation (pitch, segmentation, quantization) **(built; real-device tuning pending)**; drag notes to change pitch/time and basic length edit *(planned)*; local autosave and JSON project export/import for all tracks *(planned)* | Completes the end-to-end promise and makes the output reusable. |
-| **P1 - polish** | Four-beat playback count-in and metronome **(built; listening pending)**; recording count-in with click **(built; listening pending)**; manual add/delete; undo/redo; instrument sound polish; confirm before overwriting a generated part | Increases demo clarity and resilience. |
+| **P0 - demo-critical** | Five-instrument arrangement view **(built)**; click-to-zoom track **(built)**; mic permission and capture with live spectrogram **(built)**; loading state and animated note reveal **(built)**; Tone.js playback of all tracks with mute/solo, BPM, play/pause/stop/rewind **(built)**; multi-track MIDI export **(built)**; demo-hum fallback and error states **(built)**; deterministic melodic generation (pitch, segmentation, quantization) **(built; real-device tuning pending)**; drag notes to change pitch/time and basic length edit **(built)**; local autosave and JSON project export/import for all tracks **(built)** | Completes the end-to-end promise and makes the output reusable. |
+| **P1 - polish** | Four-beat playback count-in and metronome **(built; listening pending)**; recording count-in with click **(built; listening pending)**; manual add/delete, collision-aware editing, undo/redo, Clear/Repeat, keyboard shortcuts, and confirm-before-overwrite **(built)**; instrument sound polish and demo rehearsal remain | Increases demo clarity and resilience. |
 | **P2 - stretch** | Generation backend or ML arrangement model; Supabase login/cloud saves; uploaded audio; MIDI import; chord estimation; user-created tracks; collaboration | Valuable later, but not required to demonstrate the core product. |
 
 **Scope cut rule:** If the transcription, editing, and playback loop is unstable, cut P1/P2 before attempting new features. When time is tight, allow note duration editing through a numeric control rather than sophisticated edge dragging.
@@ -105,10 +105,10 @@ flowchart TD
     Mic --> Frames[Web Audio time-domain frames]
     Frames --> Pitch[Pitchy pitch + clarity]
     Frames --> Spec[Spectrogram bins, display only]
-    Pitch --> Gen[generateNotes: segment / quantize / fit to instrument]
+    Pitch --> Gen[generateTrack: segment / quantize / fit to instrument]
     Gen --> State[Studio state: Track array]
     UI <--> State
-    State --> Piano[Track lanes: render, reveal, edit planned]
+    State --> Piano[Track lanes: render, reveal, edit]
     State --> Playback[Tone.js Transport + smplr / synth fallback]
     State --> Save[Local storage + JSON file]
     State --> Midi[@tonejs/midi export]
@@ -117,23 +117,23 @@ flowchart TD
 
 ### Architectural boundary
 
-**Client-side today.** Next.js provides the shell; interactive audio/editor code runs in Client Components (`'use client'`) or browser-only modules. No API routes exist. A future generation backend plugs in behind `generateNotes(...)`; if it is remote, sending audio or pitch data off-device needs an explicit team decision and user consent (see privacy). Supabase is deliberately excluded until the core flow is proven.
+**Client-side today.** Next.js provides the shell; interactive audio/editor code runs in Client Components (`'use client'`) or browser-only modules. No API routes exist. A future generation backend plugs in behind `generateTrack(...)`; if it is remote, sending audio or pitch data off-device needs an explicit team decision and user consent (see privacy). Supabase is deliberately excluded until the core flow is proven.
 
 ### Component responsibilities
 
 | Component/module | Responsibility | Status |
 |---|---|---|
 | `src/components/Studio.tsx` | App shell: transport bar, ruler, row layout, canonical `Track[]` state, record → generate → reveal flow, playhead. | Built |
-| `src/components/TrackRow.tsx` | One track: arrangement clip or zoomed lane with prompts, phases, pitch labels, note reveal. | Built (note editing planned) |
+| `src/components/TrackRow.tsx` | One track: arrangement clip or zoomed lane with prompts, phases, pitch labels, note reveal, and editing gestures. | Built |
 | `src/components/Spectrogram.tsx` | Live halftone canvas of the hum on the lane's pitch axis. Display only. | Built |
 | `src/lib/tracks.ts` | `Instrument`, `Track`, `INSTRUMENTS`, labeled sample parts, lane geometry helpers. | Built (shared contract) |
 | `src/lib/hum.ts` | `getUserMedia`, AnalyserNode, Pitchy pitch/RMS gating, `HumFrame` stream, demo hum, teardown, mic error messages. | Built (needs real-mic testing) |
-| `src/lib/generate.ts` | `generateNotes(instrument, frames, bpm, quantize, harmony, sensitivity?, trace?) → Note[]`, pure and synchronous. | Built (DSP heuristics; real-device tuning pending) |
+| `src/lib/generate.ts` | `generateTrack(instrument, frames, bpm, quantize, harmony) → Promise<Note[]>`; pure `generateNotes` for fixtures. | Built (DSP heuristics; real-device tuning pending) |
 | `src/lib/playback.ts` | Browser-only facade for scheduling, play/pause/stop/rewind/position, metronome, count-in, and teardown; delegates to `src/lib/audio/`. | Built (playback regression tests; listening pending) |
 | `src/lib/midi.ts` | `Track[]` → multi-track `.mid` download. | Built |
-| `src/lib/music/types.ts` | Shared `Note`/`QuantizeDivision` contract. `Project`/`PitchFrame` and shared timing/grid helpers remain targets; implemented segment types live in `audio/segment-notes.ts`. | Built (`Note` only) |
+| `src/lib/music/types.ts` | Shared `Note`/`QuantizeDivision` contract. The legacy `Project` shape remains a compatibility contract; current saved projects use `ProjectV2` in `src/lib/persistence/project.ts`. | Built |
 | `src/lib/audio/segment-notes.ts` | Stabilize gated `HumFrame` pitch into second-based segments with rest boundaries. | Built (synthetic regression fixtures; real-device tuning pending) |
-| `src/lib/persistence/local-project.ts` | Validate/store/reopen multi-track project JSON. | Planned |
+| `src/lib/persistence/project.ts` | Validate/store/reopen multi-track project JSON, with v1 migration. | Built |
 
 ### Data flow: capture to MIDI notes
 
@@ -206,18 +206,18 @@ interface Track { instrument: Instrument; presetId: string; notes: Note[]; muted
 
 `Studio.tsx` holds `Track[]` (one per instrument in `INSTRUMENTS`), plus `bpm` and `quantize`. `sample: true` marks preset parts shown with a "Sample" label until a recording replaces them. Drum notes use General MIDI kit numbers (36 kick, 38 snare, 42 closed hat, 46 open hat, 49 crash).
 
-**Saved format is not decided yet.** `Project` v1 above stores one flat `notes[]`. Saving the multi-track arrangement needs a versioned format (for example `schemaVersion: 2` with `tracks: { instrumentId, presetId, notes, muted, solo }[]`) with an explicit migration from v1. Missing legacy preset IDs receive category defaults; unknown/cross-category selections reject. Person 4 owns this decision ([`WORKLOAD_SPLIT.md`](WORKLOAD_SPLIT.md)); do not silently change `Project` v1.
+**Saved format:** schema v2 stores all tracks, sounds, notes, mute/solo/sample flags, BPM, Snap, Sensitivity, harmony, and metadata. The original v1 note list migrates to Melody. Missing legacy preset IDs receive category defaults; invalid selections and unexpected fields reject. Runtime take/profile caches are not serialized. See `src/lib/persistence/project.ts` and `TECHNICAL_SPEC.md` §3.1.
 
 ## 8. Audio analysis design
 
 ### 8.1 Microphone acquisition
 
 - Use `navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } })` where the browser permits; these are preferences, not promises.
-- Create a browser `AudioContext`, a `MediaStreamAudioSourceNode`, and an `AnalyserNode` with `fftSize = 4096`.
+- Use Tone's shared browser audio context to create a `MediaStreamAudioSourceNode`, an analysis-only worklet, and an `AnalyserNode` with `fftSize = 4096`.
 - An AudioWorklet (`public/hum-worklet.js`) delivers every mic sample in 20 ms hops; `src/lib/hum.ts` runs Pitchy on a 4096-sample sliding window per hop. Unlike animation-frame polling, no readings are lost when the page is busy or hidden, and the rate is the same on every display. The AnalyserNode's frequency data feeds the 48-bin spectrogram display only.
 - Use the **actual** `audioContext.sampleRate` (not a guessed 44.1/48 kHz value).
 - Timestamp each frame relative to recording start (`hum.ts` uses the audio clock: the worklet's sample index at the centre of each analysis window).
-- Disconnect graph nodes, stop all `MediaStreamTrack`s, cancel the frame loop, and release the analysis context after recording.
+- Disconnect graph nodes, stop every `MediaStreamTrack`, stop the worklet, and close its message port after recording or any setup failure. Cleanup is idempotent and leaves Tone's shared context available for playback.
 
 ### 8.2 Pitch estimation
 
@@ -235,7 +235,7 @@ interface Track { instrument: Instrument; presetId: string; notes: Note[]; muted
 5. Melody retains confirmed rounded pitches and defines harmony after the take; other melodic parts fit that harmony. Merge identical pitches within the same phrase before snapping. Confirmed rests still separate notes. Reject fragments shorter than 100 ms in Medium.
 6. Preserve the first and last observed voiced timestamps within the recording window.
 
-These constants are **starting heuristics**, configured as the Medium profile in `src/lib/audio/note-sensitivity.ts` (`SEGMENTATION_DEFAULTS`), not guaranteed-optimal thresholds. A level dip and return on one pitch re-strikes the note (1.8x RMS), but identical notes separated only by near-silence <= 150 ms still merge; fast pitch changes shorter than 120 ms can be suppressed. Real-device tuning uses the scored takes in `src/tests/takes/`. The top-menu Sensitivity select adds Low (1.5-semitone hold, 200 ms stability, seven-frame median) and High (0.5-semitone hold, 60 ms stability/minimum note, three-frame median); changing it or Snap re-generates every part that still has its take cached.
+These constants are **starting heuristics**, configured as the Medium profile in `src/lib/audio/note-sensitivity.ts` (`SEGMENTATION_DEFAULTS`). A level dip and return on one pitch re-strikes the note (1.8x RMS), but near-silence <= 150 ms is bridged and fast pitch changes can be suppressed. Real-device tuning uses scored takes in `src/tests/takes/`. Low uses a 1.5-semitone hold, 200 ms stability, and seven-frame median; High uses 0.5 semitones, 60 ms stability/minimum note, and three frames. All profiles are cached per take for immediate switching. Snap rebuilds using the capture BPM, preserving beat positions after tempo changes and original timing for Off. Manual edits opt out of profile swaps; a picked key persists until a new Melody take.
 
 ### 8.4 Beat conversion and quantization
 
@@ -267,31 +267,31 @@ A 1/16-note grid is `0.25` quarter-note beats; 1/8 is `0.5`, 1/4 is `1.0`. Snap 
 - 8 bars x 4 beats = 32 beats, fitted to the viewport width (no horizontal scroll yet).
 - Grid lines for bars/beats and labels for C notes.
 
-**Editing (planned, Person 3):**
+**Editing (implemented, Person 3):**
 
 - Drag body horizontally to adjust start beat; drag body vertically to adjust pitch in semitones; drag right edge to adjust duration. Snap horizontal edits to the selected grid (Off = fine movement).
 - Keep click-to-select distinct from drag behavior. `pointerdown` -> `pointermove` -> `pointerup`; handle pointer cancellation.
 - Prioritize note editing over a mixing console or extra visual effects.
 
-### Proposed state ownership
+### Current state ownership and future refactor
 
-Today `Studio.tsx` owns `Track[]`, BPM, and quantize in React state and replaces arrays immutably. As editing and persistence land, move to one reducer with track-scoped actions such as `REPLACE_TRACK_NOTES`, `MOVE_NOTE`, `RESIZE_NOTE`, `DELETE_NOTE`, `TOGGLE_MUTE`, `SET_BPM`, `LOAD_PROJECT`. Audio objects/streams/timers stay in refs or service modules, **not** in serializable state.
+Today `Studio.tsx` owns tracks and settings in React state, replaces arrays immutably, and synchronizes an arrangement ref for asynchronous operations. Undo/redo snapshots also preserve metadata, key decisions, capture tempo, cached sensitivity variants, and original Snap sources. Open validates before applying and clears capture caches. A future reducer may consolidate these track-scoped mutations. Audio objects/streams/timers stay in refs or service modules, **not** in serializable state.
 
 ## 11. Persistence and export
 
-### Project JSON (planned)
+### Project JSON (implemented)
 
 - Save **all tracks** (instrument id, notes, mute/solo) plus BPM and quantize, in the versioned multi-track format from section 7.
-- Autosavevalid project JSON to `localStorage` key `humstudio:project:v1` after a short debounce.
+- Autosave project JSON to `localStorage` key `humstudio:project:v2` after a 400 ms debounce; skip incomplete recording states.
 - **Save Project:** download `<safe-name>.humstudio.json`.
 - **Open Project:** use an explicit user-selected `.json` file, validate schema/invariants, then replace current project on success only.
 - Handle unavailable/blocked/full local storage with a nonfatal UI warning.
-- Schema migration is out of scope for MVP; unsupported `schemaVersion` produces a helpful error.
+- v1 files migrate to Melody; unsupported versions or invalid input produce a helpful error without replacing notes.
 
 ### MIDI
 
 - Instantiate `new Midi()` from `@tonejs/midi`.
-- Set the file tempo to the project BPM, add **one MIDI track per non-empty instrument track** (Drums on channel 10), and convert each beat time/duration to seconds: `seconds = beats * (60 / bpm)`. Implemented in `src/lib/midi.ts`; downloads as `humstudio.mid`.
+- Validate BPM/notes, set the file tempo, and add **one MIDI track per non-empty instrument track** with distinct melodic channels and Drums on channel 10. Beat boundaries map to PPQ ticks, with at least one tick of duration. Pure `createMidiBytes` is tested; `exportMidi` downloads `humstudio.mid` and always revokes the object URL.
 - Export `midi.toArray()` as a downloaded `audio/midi` or `application/octet-stream` Blob with `.mid` extension.
 - JSON is the **editable HumStudio project**; MIDI is the **interchange format**. MIDI does not preserve UI-only project settings.
 
@@ -313,9 +313,8 @@ Today `Studio.tsx` owns `Track[]`, BPM, and quantize in React state and replaces
 
 ### Automated checks
 
-- Implemented: 77 regression tests using TypeScript and Node's built-in test runner, covering playback (23), preset loading/voices (14), harmony (6), segmentation (12), generation (11), and sensitivity (11). Fixtures include short wobbles/dropouts, real rests, the three sensitivity profiles, preserved Melody semitone changes, tempo independence, Off timing, invalid input, duplicate metronome ticks, stale loads, fallback/retry, and sample lifetimes. Preset browser evidence and remaining human checks are documented in [`SMPLR_INTEGRATION.md`](SMPLR_INTEGRATION.md).
-- Target: pure unit tests for `frequencyToMidi`, `secondsToBeats`, grid snapping, segment merging, note invariants, and MIDI export time conversion.
-- Target: round-trip test where project -> JSON -> validated project retains BPM, note count, positions and pitches.
+- Implemented: TypeScript regressions using Node's built-in test runner cover playback, preset loading/voices, harmony, segmentation, generation, cached settings, microphone resource cleanup, MIDI encoding, project persistence, and editing. Fixtures include wobbles/dropouts, real rests, all three profiles, preserved Melody pitches, capture-tempo Snap, invalid input, stale callbacks, fallback/retry, sample lifetimes, independent MIDI channels, download cleanup, strict project schemas, and collision-aware edits. Preset browser evidence and remaining human checks are in [`SMPLR_INTEGRATION.md`](SMPLR_INTEGRATION.md).
+- Implemented: project JSON round-trip and v1 migration tests retain BPM, notes, settings, and track flags; malformed, oversized, and unexpected fields reject before changing the studio.
 - Implemented: time-stamped synthetic `HumFrame[]` fixtures with known pitches, vibrato, short noise, and dropouts.
 
 ### Manual test matrix
@@ -339,8 +338,8 @@ A team member can run the app locally, open a track, hum a short single-voice me
 | 2. Studio + playback | Tracks, zoom, transport, BPM, synths, MIDI export, record/spectrogram/reveal flow **(done)** | Shared note contract |
 | 3. Capture + analysis | Mic input, Pitchy frames, clear statuses | Browser setup |
 | 4. Segmentation + quantization | `HumFrame[] -> Note[]` working with fixtures **(done; real-microphone tuning pending)** | HumFrame contract |
-| 5. Integration | Real `generateNotes` output lands on the selected track; notes editable; arrangement plays | Phases 2-4 |
-| 6. Finish | JSON persistence, MIDI export, tests, deploy, demo rehearsal | Stable main workflow |
+| 5. Integration | Real `generateTrack` output lands on the selected track; notes editable; arrangement plays **(done)** | Phases 2-4 |
+| 6. Finish | JSON persistence, MIDI export, tests **(done)**; real-device tuning, listening, deploy, demo rehearsal **(open)** | Stable main workflow |
 
 Ownership is assigned in [`WORKLOAD_SPLIT.md`](WORKLOAD_SPLIT.md): **voice-to-notes**, **playback/transport**, **track editor**, and **integration/branding/persistence**. Work in parallel behind the interfaces in `TECHNICAL_SPEC.md`.
 
@@ -356,7 +355,7 @@ Ownership is assigned in [`WORKLOAD_SPLIT.md`](WORKLOAD_SPLIT.md): **voice-to-no
 | ADR-006 | Desktop Chrome/Edge first | Limit browser variability during a weekend build. |
 | ADR-007 | DSP terminology is accurate | Do not advertise model training or neural AI that is not implemented. |
 | ADR-008 | Multi-track instrument editor is P0 | `PRODUCT.md`: the demo is "pick an instrument, hum, watch it fill"; overrides the original single-track P0. |
-| ADR-009 | Generation behind one function (`generateNotes`) | Keep the UI independent of DSP implementation or a future generation backend. |
+| ADR-009 | Generation behind one function (`generateTrack`) | Keep the UI independent of DSP implementation or a future generation backend. |
 
 ## 16. Future iterations (not HackRU commitments)
 

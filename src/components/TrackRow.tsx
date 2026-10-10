@@ -388,7 +388,7 @@ export default function TrackRow(p: Props) {
     : recording ? <>{p.demo ? "Demo hum" : "Recording"} <LiveClock frames={p.frames} /></>
     : phase === "generating" ? "Generating"
     : phase === "revealing" ? "Setting notes"
-    : phase === "error" ? "Not recorded"
+    : phase === "error" ? hasNotes ? `${track.notes.length} notes kept${track.sample ? " · Sample" : ""}` : "Not recorded"
     : hasNotes ? `${track.notes.length} notes${track.sample ? " · Sample" : ""}`
     : "Empty";
 
@@ -436,7 +436,7 @@ export default function TrackRow(p: Props) {
             </button>
           ) : (
             <button className="rec" onClick={() => p.onRecord(false)} disabled={phase === "requesting"}>
-              <RecordIcon /> {hasNotes && !track.sample ? "Re-record" : "Record"}
+              <RecordIcon /> <span className="rec-label">{hasNotes && !track.sample ? "Re-record" : "Record"}</span>
             </button>
           )}
           {!recording && !working && (

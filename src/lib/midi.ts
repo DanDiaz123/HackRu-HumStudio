@@ -1,25 +1,53 @@
-import ToneMidi from "@tonejs/midi";
+import * as MidiModule from "@tonejs/midi";
 import { download } from "./download.ts";
 import type { Track } from "./tracks";
 
-const { Midi } = ToneMidi; // CommonJS package: Node has no named export
+// Node exposes the package's UMD build as default; the browser bundler exposes named exports.
+const Midi = MidiModule.Midi ?? (MidiModule as unknown as { default: typeof MidiModule }).default.Midi;
 
-/** Standard MIDI bytes: one track per non-empty part, drums on channel index 9, beats -> seconds at `bpm`. */
-export function midiBytes(tracks: readonly Track[], bpm: number): Uint8Array {
+/** Encode each nonempty track in quarter-note beats, rejecting invalid data before download. */
+export function createMidiBytes(tracks: readonly Track[], bpm: number): Uint8Array {
+  if (!Number.isFinite(bpm) || bpm < 60 || bpm > 180) {
+    throw new RangeError("BPM must be finite and between 60 and 180.");
+  }
+  for (const track of tracks) {
+    for (const note of track.notes) {
+      if (!Number.isInteger(note.midi) || note.midi < 0 || note.midi > 127
+        || !Number.isFinite(note.startBeat) || note.startBeat < 0
+        || !Number.isFinite(note.durationBeats) || note.durationBeats <= 0
+        || !Number.isFinite(note.startBeat + note.durationBeats)
+        || !Number.isFinite(note.velocity) || note.velocity < 0 || note.velocity > 1) {
+        throw new RangeError("MIDI notes must have valid pitch, beat timing, and velocity.");
+      }
+    }
+  }
   const midi = new Midi();
   midi.header.setTempo(bpm);
-  const spb = 60 / bpm;
+  let melodicChannel = 0;
   for (const t of tracks) {
     if (!t.notes.length) continue;
     const mt = midi.addTrack();
     mt.name = t.instrument.name;
-    mt.channel = t.instrument.kind === "drums" ? 9 : mt.channel;
-    for (const n of [...t.notes].sort((a, b) => a.startBeat - b.startBeat))
-      mt.addNote({ midi: n.midi, time: n.startBeat * spb, duration: n.durationBeats * spb, velocity: n.velocity });
+    // MIDI note-offs apply to a channel, even when events live in separate file tracks.
+    mt.channel = t.instrument.kind === "drums" ? 9 : melodicChannel++;
+    for (const n of [...t.notes].sort((a, b) => a.startBeat - b.startBeat || a.midi - b.midi)) {
+      const ticks = Math.round(n.startBeat * midi.header.ppq);
+      const durationTicks = Math.max(1, Math.round(n.durationBeats * midi.header.ppq));
+      // MIDI encodes time deltas in at most 28 bits; avoid overflow and zero-length notes.
+      if (!Number.isSafeInteger(ticks + durationTicks) || ticks + durationTicks > 0x0fffffff) {
+        throw new RangeError("Note timing exceeds the MIDI file range.");
+      }
+      mt.addNote({ midi: n.midi, ticks, durationTicks, velocity: n.velocity });
+    }
   }
   return midi.toArray();
 }
 
-export function exportMidi(tracks: readonly Track[], bpm: number) {
-  download(midiBytes(tracks, bpm) as BlobPart, "audio/midi", "humstudio.mid");
+/** Compatibility name used by project export; shares the same validation and channel handling. */
+export const midiBytes = createMidiBytes;
+
+/** Download a local MIDI file; sound selections, mute, and solo do not remove stored notes. */
+export function exportMidi(tracks: readonly Track[], bpm: number): void {
+  const bytes = createMidiBytes(tracks, bpm);
+  download(bytes as BlobPart, "audio/midi", "humstudio.mid");
 }
