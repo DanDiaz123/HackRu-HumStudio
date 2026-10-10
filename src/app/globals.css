@@ -232,6 +232,66 @@ button:disabled {
   color: var(--muted);
 }
 
+/* ---------- Learn: chord strip ---------- */
+.t-btn.learn {
+  width: auto;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.chord-row {
+  flex: none;
+  display: grid;
+  grid-template-columns: var(--head) 1fr;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+.chord-corner {
+  color: var(--text);
+}
+.chord-strip {
+  position: relative;
+  height: 28px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.chord-cell {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 12.5%;
+  padding-left: 6px;
+  border-left: 1px solid #3a3a3a;
+  line-height: 27px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.chord-cell b {
+  font-size: 14px;
+  font-weight: 800;
+}
+.chord-cell span {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.note-label {
+  display: block;
+  padding-left: 3px;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--flood);
+  position: relative;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
 /* ---------- Rows ---------- */
 .rows {
   position: relative;

@@ -203,3 +203,20 @@ export const keyName = (k: Key) => `${NAMES[k.tonic]} ${k.mode}`;
 export const KEYS: Key[] = (["major", "minor"] as const).flatMap((mode) => NAMES.map((_, tonic) => ({ tonic, mode })));
 export const harmonyLabel = (h: Harmony, bars = h.bars.length) =>
   `${keyName(h)} · ${h.bars.slice(0, bars).map(chordName).join(" ")}`;
+
+// ---------- Learn mode: name what harmony.ts already decided ----------
+const ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII"];
+
+/** Roman numeral of a diatonic triad in `key`: upper for major, lower for minor, ° for diminished; "?" if not in the key. */
+export function romanNumeral(chord: number[], key: Key): string {
+  const d = ROMAN.findIndex((_, i) => triad(key, i).every((p, j) => p === chord[j]));
+  if (d < 0) return "?";
+  const name = chordName(chord);
+  return name.endsWith("dim") ? `${ROMAN[d].toLowerCase()}°` : name.endsWith("m") ? ROMAN[d].toLowerCase() : ROMAN[d];
+}
+
+/** Scale degree 1..7 of a note in `key`, or null when it is outside the scale. */
+export function scaleDegree(midi: number, key: Key): number | null {
+  const i = SCALES[key.mode].indexOf(pc(midi - key.tonic));
+  return i < 0 ? null : i + 1;
+}
