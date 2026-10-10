@@ -267,6 +267,21 @@ test("metronome accents downbeats and repeated toggles do not accumulate callbac
   assert.ok(backend.calls.some((call) => call.action === "dispose"));
 });
 
+test("duplicate or out-of-order metronome ticks cannot retrigger a voice; stopping resets the clock", () => {
+  const { backend, engine } = setup();
+  engine.schedule([], 120);
+  engine.setMetronome(true);
+  engine.play();
+  for (const time of [30, 30, 30.0000001, 29.5, NaN, Infinity, 30.5, 31]) backend.fire(0, time);
+  assert.deepEqual(backend.calls.filter(call => call.action === "attack").map(call => call.time), [30, 30.5, 31]);
+  engine.stop();
+  engine.play();
+  backend.fire(0, 30);
+  assert.equal(backend.calls.filter(call => call.action === "attack").at(-1)!.time, 30);
+  assert.equal(backend.calls.filter(call => call.action === "create").length, 2);
+  engine.dispose();
+});
+
 test("four-beat count-in uses BPM/audio-clock times and preserves the playhead", async () => {
   const { backend, engine } = setup();
   backend.tick = backend.ppq * 3;

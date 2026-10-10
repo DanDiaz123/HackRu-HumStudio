@@ -214,12 +214,18 @@ export async function generateTrack(
   bpm: number,
   quantize: QuantizeDivision,
   harmony: Harmony,
+  sensitivity?: NoteSensitivity,
 ): Promise<Note[]>;
+
+export function generateTrackVariants(
+  inst: Instrument, frames: readonly HumFrame[], bpm: number,
+  quantize: QuantizeDivision, harmony: Harmony, selected?: NoteSensitivity,
+): Record<NoteSensitivity, Note[]>;
 ```
 
-The UI calls only this. It delegates to the pure `generateNotes(inst, frames, bpm, quantize, harmony): Note[]` and retains the existing ~2.4 s presentation delay. Melodic generation segments frames in seconds, octave-fits the instrument, corrects harmony, merges identical pitches within the same phrase, then converts/snaps beat boundaries into one hummed line. Off preserves raw beat timing. A confirmed rest changes the phrase ID so later correction or snapping cannot merge separate attacks. The line is then shaped by instrument role (`src/tests/roles.test.ts`):
+The UI uses `generateTrackVariants` to create Low, Medium, and High note sets from the same analysis frames; changing sensitivity swaps the cached set without recording again. A Snap change regenerates captured frames on the selected grid immediately and snaps sample or hand-edited notes in place. The pure `generateNotes(inst, frames, bpm, quantize, harmony, trace?, sensitivity?)` segments frames in seconds, octave-fits the instrument, applies the selected sensitivity, merges identical pitches within the same phrase, then converts/snaps beat boundaries into a hummed line. Off preserves raw beat timing. A confirmed rest changes the phrase ID so later correction or snapping cannot merge separate attacks. The line is then shaped by instrument role (`src/tests/roles.test.ts`):
 
-- **Melody:** snapped to its own detected scale; a short note 10+ semitones from both neighbours in the same direction is an octave error and folds back; velocity accents beat 1 > beat 3 > other beats > off-beats.
+- **Melody:** confirmed semitone changes are preserved; a short note 10+ semitones from both neighbours in the same direction is an octave error and folds back; velocity accents beat 1 > beat 3 > other beats > off-beats. The melody still supplies the detected key and inferred chords.
 - **Bass:** root/fifth of each bar's chord; notes are split at barlines so a held note re-strikes on the new root, and a bar's first note within beat 1 is pulled onto the downbeat as the root.
 - **Keys:** the hum is snapped to the song's scale and picks the chords: per bar, `pickChords` takes the diatonic triad covering the hummed notes best (+0.5 toward the current chord; unhummed bars keep theirs). Each hummed note becomes that triad, hummed pitch on top, the other tones within the octave below.
 - **Strings:** a pad. Each note is held into the next (through breaths up to 2 beats, otherwise to its barline), split at barlines and re-fitted to chord tones, and doubled by the next chord tone below.
@@ -237,7 +243,7 @@ export interface Harmony { tonic: number; mode: "major" | "minor"; bars: number[
 export const DEFAULT_HARMONY: Harmony; // C major, Am F C G x2 (the Keys sample)
 ```
 
-- **Melody sets it.** A Melody take is snapped to its own detected key (Krumhansl-Schmuckler, `detectKey`), then `inferHarmony` picks one diatonic triad per bar (chord tones weighted by duration, x2 on beats 1 and 3, small priors for I/IV/V/vi and a tonic first bar; empty bars repeat the previous chord). `detectKey` gives a one-beat bonus each to the last and the longest note. Bars are chosen together by Viterbi with small bonuses for progression moves (V-I, IV-V, ii-V and similar), so a bar the melody fits about equally to two chords follows the progression.
+- **Melody sets it.** Melody keeps confirmed pitch changes, including semitones outside the inferred scale. `inferHarmony` picks one diatonic triad per bar (chord tones weighted by duration, x2 on beats 1 and 3, small priors for I/IV/V/vi and a tonic first bar; empty bars repeat the previous chord). Key detection gives a one-beat bonus each to the last and the longest note. Bars are chosen together by Viterbi with small bonuses for progression moves (V-I, IV-V, ii-V and similar), so a bar the melody fits about equally to two chords follows the progression.
 - **The user can override the key.** The transport's Key select calls `withKey`: chords are re-picked from the Melody in that key (or the sample progression moves to it), and every pitched part, Melody included, is refitted.
 - **Everything else fits it.** `fitToHarmony` moves pitches, never deletes notes: Bass to the nearest root/fifth of the bar's chord, Keys and Strings to the nearest chord tone, Melody to the scale, Drums untouched, all kept in the instrument's range.
 - **Keys re-picks the chords.** A Keys take keeps the key but sets each hummed bar's chord to the triad it plays (`chordsFromVoicing` reads it back from the notes).
@@ -470,7 +476,7 @@ Do **not** label a DSP pitch detector as a trained neural model unless a model i
 
 ### 8.2 Transport and recording controls
 
-- **Transport bar (implemented):** wordmark, Rewind, Play/Pause toggle (pause preserves position), separate Stop (resets to zero), metronome toggle, four-beat playback count-in toggle, position readout `bar.beat.sixteenth`, BPM number input (60-180), Key select (24 keys) with the first four bars' chords, Snap select (Off, 1/4, 1/8, 1/16), Export MIDI. *Target:* Save Project, Open Project.
+- **Transport bar (implemented):** wordmark, Rewind, Play/Pause toggle (pause preserves position), separate Stop (resets to zero), metronome toggle, four-beat playback count-in toggle, position readout `bar.beat.sixteenth`, BPM number input (60-180), Key select (24 keys) with the first four bars' chords, Snap select (Off, 1/4, 1/8, 1/16) that immediately regenerates recorded tracks, Low/Medium/High Sensitivity select, Export MIDI. *Target:* Save Project, Open Project.
 - **Zoomed header (implemented):** All tracks (back), instrument name, hint, Record / Stop / Re-record, Demo hum, and a status line with a filled-or-hollow mark plus text (e.g. "Demo hum 0:05.2", "Generating", "8 notes").
 - A first Play click awaits `Tone.start()` before audio. Recording uses its own `AudioContext` and does not need Tone.
 - **Defaults (implemented):** BPM = 120, quantization = 1/4, matching `Studio.tsx` and the shared defaults.

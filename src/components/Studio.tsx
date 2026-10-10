@@ -1,12 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { type GenTrace, generateNotes } from "@/lib/generate";
+import { type GenTrace, generateTrackVariants, snapNotesToGrid, type NoteSensitivityVariants } from "@/lib/generate";
+import { DEFAULT_NOTE_SENSITIVITY, NOTE_SENSITIVITY_LEVELS, NOTE_SENSITIVITY_PRESETS, isNoteSensitivity, type NoteSensitivity } from "@/lib/audio/note-sensitivity";
 import { type HumFrame, micErrorMessage, startDemoHum, startMic } from "@/lib/hum";
 import { exportMidi } from "@/lib/midi";
 import {
   DEFAULT_HARMONY,
   type Harmony,
+  type Key,
   KEYS,
   type Mode,
   chordName,
@@ -41,6 +43,9 @@ const COLLAPSED_H = 36;
 const refit = (t: Track, h: Harmony): Track =>
   t.instrument.kind === "drums" ? t : { ...t, notes: t.sample ? voiceChords(h) : fitToHarmony(t.notes, t.instrument, h) };
 
+const sameHarmony = (a: Harmony, b: Harmony) => a.tonic === b.tonic && a.mode === b.mode &&
+  a.bars.length === b.bars.length && a.bars.every((bar, index) => bar.length === b.bars[index].length && bar.every((pitch, i) => pitch === b.bars[index][i]));
+
 function readout(beat: number) {
   const bar = Math.floor(beat / 4) + 1;
   const b = Math.floor(beat % 4) + 1;
@@ -54,6 +59,8 @@ export default function Studio() {
   const [learn, setLearn] = useState(true);
   const [bpm, setBpm] = useState(120);
   const [quantize, setQuantize] = useState<QuantizeDivision>("1/4");
+  const [sensitivity, setSensitivity] = useState<NoteSensitivity>(DEFAULT_NOTE_SENSITIVITY);
+  const [sensitivityNotes, setSensitivityNotes] = useState<Record<string, NoteSensitivityVariants>>({});
   const [zoomedId, setZoomedId] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState("");
@@ -75,6 +82,11 @@ export default function Studio() {
   const stopRef = useRef<(() => void) | null>(null);
   // Re-record clears the part up front; a failed take puts it back (never lose a part to an empty take).
   const clearedRef = useRef<{ id: string; notes: Note[] } | null>(null);
+  // Keep only analysis frames, never microphone samples, so Snap can regenerate from the take.
+  const sensitivityFramesRef = useRef<Record<string, HumFrame[]>>({});
+  const snapSourceNotesRef = useRef<Record<string, Note[]>>({});
+  const harmonyDriverRef = useRef<"melody" | "keys" | null>(null);
+  const keyOverrideRef = useRef<Key | null>(null);
   const playbackRequest = useRef(0);
   const arrangementRef = useRef({ tracks, bpm });
   const stopTake = useRef<() => void>(() => {});
@@ -277,7 +289,8 @@ export default function Studio() {
       try {
         const inst = zoomed.instrument;
         const trace = {} as GenTrace;
-        const notes = generateNotes(inst, taken, bpm, quantize, harmony, trace);
+        const variants = generateTrackVariants(inst, taken, bpm, quantize, harmony, sensitivity, trace);
+        const notes = variants[sensitivity];
         if (!notes.length) throw new Error("empty");
         // A Melody take sets the key and chords, a Keys take re-picks the chords; other pitched parts
         // are re-fitted (moved, never deleted).
@@ -291,8 +304,10 @@ export default function Studio() {
             ? { title: noun(trace.raw.length, "hit"), sub: "Heard in your beatbox" }
             : { title: noun(trace.raw.length, "note"), sub: `Found in ${trace.voicedFrames} pitched frames of your hum` },
           {
-            title: trace.grid ? "On the beat" : drums ? "As hummed" : "In key",
-            sub: trace.grid ? `Snapped to the ${quantize} grid` + (drums ? "" : `, fitted to ${keyName(after)}`) : drums ? "Timing kept as hummed" : `Fitted to ${keyName(after)}, timing kept`,
+            title: trace.grid ? "On the beat" : drums || inst.id === "melody" ? "As hummed" : "In key",
+            sub: trace.grid
+              ? `Snapped to the ${quantize} grid` + (drums || inst.id === "melody" ? "" : `, fitted to ${keyName(after)}`)
+              : drums || inst.id === "melody" ? "Timing kept; confirmed pitch changes preserved" : `Fitted to ${keyName(after)}, timing kept`,
           },
           ...(drums ? [] : [{ title: keyName(after), sub: after.bars.map(chordName).join(" ") }]),
         ];
@@ -304,8 +319,16 @@ export default function Studio() {
           await wait(i === 1 && stepMs ? (REVEAL_SEC + 0.3) * 1000 : stepMs); // step 0 lasts as long as the print-in sweep
           setReveal((r) => r && { ...r, step: i });
         }
-        if (h) setHarmony(h);
+        if (h) {
+          setHarmony(h);
+          snapSourceNotesRef.current = {};
+        }
         clearedRef.current = null;
+        setSensitivityNotes((previous) => ({ ...previous, [inst.id]: variants }));
+        sensitivityFramesRef.current[inst.id] = taken.map((frame) => ({ ...frame }));
+        delete snapSourceNotesRef.current[inst.id];
+        if (inst.id === "melody" || inst.id === "keys") harmonyDriverRef.current = inst.id;
+        if (inst.id === "melody") keyOverrideRef.current = null;
         setTracks((ts) =>
           ts.map((t) => {
             if (t.instrument.id === inst.id) return { ...t, notes, sample: false };
@@ -321,7 +344,7 @@ export default function Studio() {
         setError("No notes came out of that take. Try a longer, steadier hum.");
       }
     },
-    [zoomed, bpm, quantize, harmony],
+    [zoomed, bpm, quantize, harmony, sensitivity],
   );
 
   function restoreCleared() {
@@ -401,14 +424,76 @@ export default function Studio() {
   /** A wrong key guess is one pick away: chords re-picked from the melody, every pitched part refitted. */
   function changeKey(value: string) {
     const [tonic, mode] = value.split(" ");
-    const h = withKey({ tonic: Number(tonic), mode: mode as Mode }, tracks.find((t) => t.instrument.id === "melody")?.notes ?? []);
+    const key = { tonic: Number(tonic), mode: mode as Mode };
+    keyOverrideRef.current = key;
+    snapSourceNotesRef.current = {};
+    const h = withKey(key, tracks.find((t) => t.instrument.id === "melody")?.notes ?? []);
     setHarmony(h);
     setTracks((ts) => ts.map((t) => refit(t, h)));
   }
 
   /** A hand edit replaces the part's notes; an edited Sample is the user's part from then on. */
   function editNotes(id: string, notes: Note[]) {
+    delete sensitivityFramesRef.current[id];
+    snapSourceNotesRef.current[id] = notes.map((note) => ({ ...note }));
+    setSensitivityNotes((previous) => {
+      if (!previous[id]) return previous;
+      const next = { ...previous };
+      delete next[id];
+      return next;
+    });
     setTracks((ts) => ts.map((t) => (t.instrument.id === id ? { ...t, notes, sample: false } : t)));
+  }
+
+  /** Swap a cached profile and refit dependent parts if its inferred song harmony changed. */
+  function updateDisplayedNotes(level: NoteSensitivity, variantsById = sensitivityNotes, snapUncaptured?: QuantizeDivision) {
+    const melodyVariant = variantsById.melody?.[level];
+    const melodyNotes = melodyVariant ?? tracks.find((track) => track.instrument.id === "melody")?.notes ?? [];
+    const keysVariant = variantsById.keys?.[level];
+    const nextHarmony = keyOverrideRef.current
+      ? withKey(keyOverrideRef.current, melodyNotes)
+      : harmonyDriverRef.current === "melody" && melodyVariant
+        ? inferHarmony(melodyVariant)
+        : harmonyDriverRef.current === "keys" && keysVariant
+          ? chordsFromVoicing(keysVariant, harmony)
+          : harmony;
+    const harmonyChanged = !sameHarmony(nextHarmony, harmony);
+    if (harmonyChanged) snapSourceNotesRef.current = {};
+    setHarmony(nextHarmony);
+    setTracks((current) => current.map((track) => {
+      const variant = variantsById[track.instrument.id]?.[level];
+      if (variant) {
+        const nextTrack = { ...track, notes: variant, sample: false };
+        if (track.instrument.id === "melody" || track.instrument.kind === "drums" ||
+          (track.instrument.id === "keys" && harmonyDriverRef.current === "keys" && !keyOverrideRef.current)) return nextTrack;
+        return refit(nextTrack, nextHarmony);
+      }
+      const fitted = harmonyChanged ? refit(track, nextHarmony) : track;
+      if (snapUncaptured) {
+        const source = snapSourceNotesRef.current[track.instrument.id] ?? fitted.notes.map((note) => ({ ...note }));
+        snapSourceNotesRef.current[track.instrument.id] = source;
+        return { ...fitted, notes: snapNotesToGrid(track.instrument, source, snapUncaptured) };
+      }
+      return fitted;
+    }));
+  }
+
+  function selectSensitivity(level: NoteSensitivity) {
+    setSensitivity(level);
+    updateDisplayedNotes(level);
+  }
+
+  /** Rebuild all cached profiles from analysis frames, then commit notes immediately on the new grid. */
+  function selectQuantize(division: QuantizeDivision) {
+    setQuantize(division);
+    const nextVariants = { ...sensitivityNotes };
+    for (const [id, capturedFrames] of Object.entries(sensitivityFramesRef.current)) {
+      const instrument = tracks.find((track) => track.instrument.id === id)?.instrument;
+      if (!instrument) continue;
+      nextVariants[id] = generateTrackVariants(instrument, capturedFrames, bpm, division, harmony, sensitivity);
+    }
+    setSensitivityNotes(nextVariants);
+    updateDisplayedNotes(sensitivity, nextVariants, division);
   }
 
   function toggle(id: string, key: "muted" | "solo") {
@@ -473,11 +558,21 @@ export default function Studio() {
         </div>
         <label className="field">
           <span>Snap</span>
-          <select value={quantize} onChange={(e) => setQuantize(e.target.value as QuantizeDivision)} disabled={busy}>
+          <select value={quantize} onChange={(e) => selectQuantize(e.target.value as QuantizeDivision)} disabled={busy}>
             <option value="off">Off</option>
             <option value="1/4">1/4</option>
             <option value="1/8">1/8</option>
             <option value="1/16">1/16</option>
+          </select>
+        </label>
+        <label className="field sensitivity-field" title={`${NOTE_SENSITIVITY_PRESETS[sensitivity].description} Each take generates all three versions for immediate switching.`}>
+          <span>Sensitivity</span>
+          <select aria-label="Note sensitivity" value={sensitivity} disabled={busy} onChange={(event) => {
+            if (isNoteSensitivity(event.target.value)) selectSensitivity(event.target.value);
+          }}>
+            {NOTE_SENSITIVITY_LEVELS.map((level) => (
+              <option key={level} value={level}>{NOTE_SENSITIVITY_PRESETS[level].label}</option>
+            ))}
           </select>
         </label>
         <button className="export" aria-label="Export MIDI" onClick={() => exportMidi(tracks, bpm)} disabled={busy || tracks.every((t) => !t.notes.length)}>

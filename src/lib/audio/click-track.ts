@@ -3,17 +3,23 @@ import type { PlaybackBackend, PlaybackVoice } from "./playback-engine";
 /** Audio-clock clicks shared by transport metronome and a cancellable four-beat count-in. */
 export function createClickTrack(backend: PlaybackBackend) {
   let metronomeVoice: PlaybackVoice | null = null;
+  let lastClickSec = -Infinity;
   let cancelCountIn: (() => void) | null = null;
 
   function silenceMetronome() {
     metronomeVoice?.dispose();
     metronomeVoice = null;
+    lastClickSec = -Infinity;
   }
 
   return {
     click(time: number, accent: boolean) {
+      // Transport clock catch-up can repeat a tick. Tone's single click voice
+      // requires increasing attack times (with a 1 microsecond comparison margin).
+      if (!Number.isFinite(time) || time <= lastClickSec + 1e-6) return;
       metronomeVoice ??= backend.createVoice("metronome");
       metronomeVoice.attack(accent ? 84 : 76, time, accent ? 0.65 : 0.4);
+      lastClickSec = time;
     },
     silenceMetronome,
     countIn(bpm: number, onBeat: (remaining: number) => void): Promise<boolean> {

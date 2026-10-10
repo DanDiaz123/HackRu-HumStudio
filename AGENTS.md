@@ -127,7 +127,7 @@ Extract smaller modules when it helps parallel work, but **keep separation of co
 - **Rhythm:** calculate seconds relative to **recording start**, then convert to beats at `Project.bpm` and quantize. Do not count permission prompt or count-in as recorded time.
 - **Claims:** This MVP uses DSP and deterministic generation heuristics. Do not claim a trained AI model or a backend is implemented when it is not.
 
-Initial detector tuning values: 4096-sample frames, approximately 20 ms hop, min clarity 0.85, min RMS 0.01, fundamental 80..1000 Hz. Implemented segmentation defaults: 120 ms pitch stability, 150 ms silence hold, 100 ms min note, five-frame median, 0.7-semitone pitch hold region, 1.8x level re-attack, and 250 ms octave-slip hold. These are configurable estimates, not universal truths; repeated attacks separated only by a near-silent gap of 150 ms or less still merge. Tune against real takes in `src/tests/takes/` (see `takes.test.ts`).
+Initial detector tuning values: 4096-sample frames, approximately 20 ms hop, min clarity 0.85, min RMS 0.01, fundamental 80..1000 Hz. The Low/Medium/High note-sensitivity profiles live in `src/lib/audio/note-sensitivity.ts`; edit those values together to fine-tune pitch stability, median window, pitch tolerance, and minimum note length. Medium defaults to 120 ms stability, 150 ms silence hold, 100 ms min note, a five-frame median, and a 0.7-semitone pitch hold region; all profiles retain the 1.8x level re-attack and 250 ms octave-slip hold. These are configurable estimates, not universal truths; repeated attacks separated only by a near-silent gap of 150 ms or less still merge. Tune against real takes in `src/tests/takes/` (see `takes.test.ts`).
 
 ## 6. UI and data policy
 

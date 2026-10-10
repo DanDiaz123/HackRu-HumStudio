@@ -1,7 +1,23 @@
 import type { HumFrame } from "./hum";
-import { MAX_SEGMENTATION_FRAMES, SEGMENTATION_DEFAULTS, segmentPitchFrames } from "./audio/segment-notes.ts";
+import { MAX_SEGMENTATION_FRAMES, segmentPitchFrames, type SegmentationConfig } from "./audio/segment-notes.ts";
+import { DEFAULT_NOTE_SENSITIVITY, NOTE_SENSITIVITY_LEVELS, noteSensitivityConfig, type NoteSensitivity } from "./audio/note-sensitivity.ts";
 import { type Harmony, type Key, chordAt, detectKey, fitToHarmony, nearest, pickChords, snapToScale } from "./music/harmony.ts";
 import { DRUM_ROWS, type Instrument, type Note, type QuantizeDivision, QUANT_BEATS, TOTAL_BEATS, noteId } from "./tracks.ts";
+
+export type NoteSensitivityVariants = Record<NoteSensitivity, Note[]>;
+
+/** Apply a grid to existing notes without changing pitch or accumulating prior rounding. */
+export function snapNotesToGrid(inst: Instrument, notes: readonly Note[], quantize: QuantizeDivision): Note[] {
+  if (!Object.hasOwn(QUANT_BEATS, quantize)) throw new RangeError("Unsupported quantization.");
+  const grid = QUANT_BEATS[quantize];
+  if (!grid) return notes.map((note) => ({ ...note }));
+  return notes.map((note) => {
+    const startBeat = Math.min(TOTAL_BEATS - grid, Math.max(0, Math.round(note.startBeat / grid) * grid));
+    if (inst.kind === "drums") return { ...note, startBeat };
+    const endBeat = Math.min(TOTAL_BEATS, Math.max(startBeat + grid, Math.round((note.startBeat + note.durationBeats) / grid) * grid));
+    return { ...note, startBeat, durationBeats: endBeat - startBeat };
+  });
+}
 
 /** Generates canonical notes; raw audio stays local. */
 export async function generateTrack(
@@ -10,8 +26,30 @@ export async function generateTrack(
   bpm: number,
   quantize: QuantizeDivision,
   harmony: Harmony,
+  sensitivity: NoteSensitivity = DEFAULT_NOTE_SENSITIVITY,
 ): Promise<Note[]> {
-  return generateNotes(inst, frames, bpm, quantize, harmony);
+  return generateNotes(inst, frames, bpm, quantize, harmony, sensitivity);
+}
+
+/** Generate Low, Medium, and High from one take so changing the menu never needs another recording. */
+export function generateTrackVariants(
+  inst: Instrument,
+  frames: readonly HumFrame[],
+  bpm: number,
+  quantize: QuantizeDivision,
+  harmony: Harmony,
+  selected: NoteSensitivity = DEFAULT_NOTE_SENSITIVITY,
+  trace?: GenTrace,
+): NoteSensitivityVariants {
+  const variants = {} as NoteSensitivityVariants;
+  if (inst.kind === "drums") {
+    const notes = generateNotes(inst, frames, bpm, quantize, harmony, trace, selected);
+    for (const level of NOTE_SENSITIVITY_LEVELS) variants[level] = notes.map((note) => ({ ...note }));
+    return variants;
+  }
+  for (const level of NOTE_SENSITIVITY_LEVELS)
+    variants[level] = generateNotes(inst, frames, bpm, quantize, harmony, level === selected ? trace : undefined, level);
+  return variants;
 }
 
 /**
@@ -30,11 +68,15 @@ export function generateNotes(
   bpm: number,
   quantize: QuantizeDivision,
   harmony: Harmony,
-  trace?: GenTrace,
+  traceOrSensitivity?: GenTrace | NoteSensitivity,
+  sensitivityArg?: NoteSensitivity,
 ): Note[] {
   if (!Number.isFinite(bpm) || bpm < 60 || bpm > 180) throw new RangeError("BPM must be between 60 and 180.");
   if (!Object.hasOwn(QUANT_BEATS, quantize)) throw new RangeError("Unsupported quantization.");
   if (!Array.isArray(frames) || frames.length > MAX_SEGMENTATION_FRAMES) throw new RangeError("Too many analysis frames.");
+  const trace = typeof traceOrSensitivity === "string" ? undefined : traceOrSensitivity;
+  const sensitivity = typeof traceOrSensitivity === "string" ? traceOrSensitivity : sensitivityArg ?? DEFAULT_NOTE_SENSITIVITY;
+  const config = noteSensitivityConfig(sensitivity);
   const grid = QUANT_BEATS[quantize];
   // Shift the whole take by the constant offset that best fits its onsets to the grid, then convert to beats.
   const beatsFrom = (onsetsSec: number[]) => {
@@ -45,7 +87,7 @@ export function generateNotes(
   if (trace) Object.assign(trace, { voicedFrames: frames.filter((f) => f.hz !== null).length, raw: [], key: { tonic: harmony.tonic, mode: harmony.mode }, grid });
   if (inst.kind === "drums") return drums(frames, beatsFrom, snap, trace);
 
-  const line = (fit: (notes: Note[]) => Note[]) => hummedLine(inst, frames, beatsFrom, snap, grid, bpm, fit, trace);
+  const line = (fit: (notes: Note[]) => Note[]) => hummedLine(inst, frames, beatsFrom, snap, grid, bpm, fit, config, trace);
   switch (inst.id) {
     case "bass":
       return bassRole(line((n) => fitToHarmony(n, inst, harmony)), inst, harmony);
@@ -55,11 +97,11 @@ export function generateNotes(
     case "strings":
       return stringsRole(line((n) => fitToHarmony(n, inst, harmony)), inst, harmony);
     default:
-      // Melody sets the key (Studio infers chords from it), so it snaps to its own detected scale.
+      // Melody sets the key, but confirmed chromatic semitone changes must remain audible.
       return melodyRole(line((n) => {
         const key = detectKey(n);
         if (trace) trace.key = key;
-        return fitToHarmony(n, inst, { ...harmony, ...key });
+        return n;
       }), inst);
   }
 }
@@ -127,9 +169,10 @@ function hummedLine(
   grid: number,
   bpm: number,
   fit: (notes: Note[]) => Note[],
+  config: Readonly<SegmentationConfig>,
   trace?: GenTrace,
 ): Note[] {
-  const segments = segmentPitchFrames(frames);
+  const segments = segmentPitchFrames(frames, config);
   const beatOf = beatsFrom(segments.map((r) => r.startSec));
   const shift = octaveShift(inst, segments.map((r) => r.midi));
   const staged = segments.map((r) => {
@@ -145,7 +188,7 @@ function hummedLine(
   const fitted = fit(staged.map(({ note }) => note));
   const merged: { note: Note; phraseId: number }[] = [];
   // A duration, not a time: beatOf would add the alignment shift.
-  const mergeGapBeats = ((SEGMENTATION_DEFAULTS.silenceHoldMs / 1000) * bpm) / 60;
+  const mergeGapBeats = ((config.silenceHoldMs / 1000) * bpm) / 60;
   for (let i = 0; i < fitted.length; i++) {
     const note = fitted[i];
     const phraseId = staged[i].phraseId;

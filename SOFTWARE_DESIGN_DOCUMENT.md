@@ -84,6 +84,7 @@ Music software expects users to translate ideas into piano-roll clicks, keyboard
 | FR-10 | Microphone tracks are stopped after recording, errors, or unmount. **Built.** | Browser recording indicator stops after cleanup. |
 | FR-11 | While recording, a live spectrogram draws over the zoomed track; a loading state covers generation; notes are revealed with an animation (skipped under reduced motion). **Built.** | Visual check; reduced-motion check. |
 | FR-12 | Mic failure or an empty take shows a clear message and a labeled **Demo hum** option; existing notes are never erased. **Built.** | Deny permission, then record silence. |
+| FR-13 | Low/Medium/High note sensitivity is selectable; each take generates all three profiles, and Snap immediately regenerates captured notes on the selected grid. **Built.** | Switch sensitivity without recording again, then change Snap and confirm note positions update. |
 
 ## 5. Nonfunctional requirements
 
@@ -232,10 +233,10 @@ interface Track { instrument: Instrument; presetId: string; notes: Note[]; muted
 2. Require 120 ms of consistent pitch before opening a note; retain the active/candidate pitch within a 0.7-semitone hold region to suppress vibrato.
 3. When a different pitch is stable for 120 ms, close the previous segment and start the next one at the candidate onset.
 4. Preserve pitch history across unvoiced gaps <= 150 ms. Longer silence closes at the last voiced frame and marks a new phrase; missing-frame gaps also separate phrases. Thresholds are measured in seconds independently of BPM.
-5. After harmony fitting, merge identical pitches within the same phrase before snapping. Confirmed rests still separate notes. Reject fragments shorter than 100 ms.
+5. Apply the selected sensitivity thresholds, then merge identical pitches within the same phrase before snapping. Confirmed rests still separate notes. Reject fragments shorter than the selected profile's minimum note length.
 6. Preserve the first and last observed voiced timestamps within the recording window.
 
-These constants are **starting heuristics**, configured in `SEGMENTATION_DEFAULTS`, not guaranteed-optimal thresholds. A level dip and return on one pitch re-strikes the note (1.8x RMS), but identical notes separated only by near-silence <= 150 ms still merge; fast pitch changes shorter than 120 ms can be suppressed. Real-device tuning uses the scored takes in `src/tests/takes/`.
+The Low/Medium/High thresholds are starting heuristics configured together in `src/lib/audio/note-sensitivity.ts`, not guaranteed-optimal values. Medium uses the baseline above; Low requires larger, longer pitch changes, while High responds to smaller, quicker changes. Every take generates all three variants. A level dip and return on one pitch re-strikes the note (1.8x RMS), but identical notes separated only by near-silence <= 150 ms still merge. Real-device tuning uses the scored takes in `src/tests/takes/`.
 
 ### 8.4 Beat conversion and quantization
 
