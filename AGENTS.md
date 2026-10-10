@@ -80,7 +80,7 @@ export interface Project {
 
 Valid notes satisfy: integer MIDI 0..127; finite startBeat >= 0; finite durationBeats > 0; finite velocity 0..1. Tempo input is constrained to 60..180; the UI defaults to **BPM 120 and quantization `"1/4"`**. Fixed 4/4, 8 bars.
 
-**Multi-track contracts** (`src/lib/tracks.ts`, see `TECHNICAL_SPEC.md` 3.1-3.3): `Instrument`, `Track { instrument, notes, muted, solo, sample }`, `INSTRUMENTS` (Melody, Bass, Keys, Drums, Strings), `HumFrame`, and the generation seam:
+**Multi-track contracts** (`src/lib/tracks.ts`, see `TECHNICAL_SPEC.md` 3.1-3.3): `Instrument`, `Track { instrument, presetId, notes, muted, solo, sample }`, `INSTRUMENTS` (Melody, Bass, Keys, Drums, Strings), `HumFrame`, and the generation seam:
 
 ```ts
 generateTrack(inst: Instrument, frames: HumFrame[], bpm: number, quantize: QuantizeDivision, harmony: Harmony): Promise<Note[]>
@@ -102,6 +102,10 @@ src/lib/generate.ts              # generateTrack() facade / generateNotes() pure
 src/lib/playback.ts              # browser-only playback facade                                 (Person 2)
 src/lib/audio/playback-engine.ts # testable transport/voices/scheduling                          (Person 2)
 src/lib/audio/tone-backend.ts    # Tone.js adapter                                               (Person 2)
+src/lib/audio/instrument-presets.ts # serializable category-specific preset catalog              (Person 2, shared)
+src/lib/audio/preset-manager.ts  # lazy loading, fallback, switching, shared sample lifetimes    (Person 2)
+src/lib/audio/smplr-backend.ts   # sampled instruments on Tone's underlying audio context        (Person 2)
+src/lib/audio/sampled-voice.ts   # per-attack stop handles and MIDI drum mapping boundary        (Person 2)
 src/lib/audio/click-track.ts     # metronome/count-in                                            (Person 2)
 src/lib/midi.ts                  # @tonejs/midi export                                           (Person 4)
 src/lib/audio/segment-notes.ts   # implemented: gated HumFrame -> SegmentedNote[] + rest boundary (Person 1)
@@ -146,10 +150,11 @@ next, react, react-dom, typescript
      + tone
      + pitchy
      + @tonejs/midi
+     + smplr (explicitly authorized per-track sampled presets)
      + scaffold-provided styling/lint tools
 ```
 
-Avoid dependency sprawl, API tokens, hosted inference, sample CDN requirements, and complex UI frameworks. If a new dependency is necessary, explain **why** its impact on reliability/time is worth it. Pin/lock dependencies through the repo's package lock after installation. No hard-coded credentials or `.env` secrets in committed code.
+Avoid dependency sprawl, API tokens, hosted inference, and complex UI frameworks. The user-authorized smplr feature fetches selected sample assets from `gleitz.github.io` and `smpldsnds.github.io`; preserve the synth fallback and `public/sound-credits.txt`. No microphone data is uploaded. Other network dependencies require an explicit scope decision. Pin/lock dependencies through the repo's package lock after installation. No hard-coded credentials or `.env` secrets in committed code.
 
 ## 8. Coding standards and verification
 

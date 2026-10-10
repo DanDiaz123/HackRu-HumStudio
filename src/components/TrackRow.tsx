@@ -2,6 +2,8 @@
 
 import type { CSSProperties } from "react";
 import type { HumFrame } from "@/lib/hum";
+import { presetForTrack, presetsForTrack } from "@/lib/audio/instrument-presets";
+import type { PresetStatus } from "@/lib/audio/preset-manager";
 import { DRUM_ROWS, type Instrument, type Note, type Track, beatX, midiName, noteH, noteY } from "@/lib/tracks";
 import { BackIcon, MicIcon, RecordIcon, StopIcon } from "./icons";
 import Spectrogram from "./Spectrogram";
@@ -27,6 +29,8 @@ interface Props {
   stage: number;
   bpm: number;
   countIn: number | null;
+  presetStatus?: PresetStatus;
+  onPresetChange: (presetId: string) => void;
   onOpen: () => void;
   onBack: () => void;
   onRecord: (demo: boolean) => void;
@@ -85,6 +89,8 @@ export default function TrackRow(p: Props) {
   const { track, zoomed, phase } = p;
   const inst = track.instrument;
   const name = inst.name;
+  const preset = presetForTrack(inst.id, track.presetId);
+  const soundStatus = p.presetStatus?.presetId === preset.id ? p.presetStatus : undefined;
   const hasNotes = track.notes.length > 0;
   const style = { "--flood": inst.color } as CSSProperties;
   const labels = inst.kind === "drums" ? undefined : p.noteLabel;
@@ -143,6 +149,21 @@ export default function TrackRow(p: Props) {
           <BackIcon /> All tracks
         </button>
         <h2 className="big-name">{name}</h2>
+        <div className="sound-field" data-sound-state={soundStatus?.state ?? "idle"}>
+          <label htmlFor={`sound-${inst.id}`}>Sound</label>
+          <select id={`sound-${inst.id}`} aria-label={`${name} sound`} title={preset.name}
+            value={preset.id} disabled={p.busy} onChange={event => p.onPresetChange(event.target.value)}>
+            {presetsForTrack(inst.id).map(option => <option key={option.id} value={option.id}>{option.name}</option>)}
+          </select>
+          {soundStatus?.state === "loading" && <p className="sound-feedback" role="status">Loading {preset.name}…</p>}
+          {soundStatus?.state === "fallback" && (
+            <div className="sound-feedback" role="alert">
+              <p>{soundStatus.message}</p>
+              <button className="sound-retry" disabled={p.busy} onClick={() => p.onPresetChange(preset.id)}>Retry sound</button>
+            </div>
+          )}
+          <a className="sound-credits" href="/sound-credits.txt" target="_blank" rel="noopener noreferrer">Sound credits</a>
+        </div>
         <p className="hint">{inst.hint}</p>
         <div className="rec-controls">
           {working ? null : recording ? (

@@ -35,6 +35,7 @@ Pick an instrument track
 - [x] **Generate:** stable pitch segmentation, harmony fitting, and Off/1/4/1/8/1/16 timing for melodic tracks, with a "Setting the session" loading state.
 - [x] **Reveal:** notes wipe in left to right over a ghost of the hum; skipped under reduced motion.
 - [x] **Play:** Tone.js playback of all tracks with mute/solo and BPM 60–180.
+- [x] **Track sounds:** independent smplr preset dropdowns beneath expanded track titles, with lazy loading, retry, and the original synth fallback.
 - [x] **Playback count-in / metronome:** optional four-beat count-in and beat clicks; listening verification remains open.
 - [x] **Export:** multi-track `.mid` (drums on MIDI channel 10).
 - [x] **Recover:** mic denial, insecure origin, missing device, and silent takes show a message plus a **Demo hum** fallback; failed takes never erase existing notes.
@@ -56,7 +57,8 @@ The demo targets **clear, one-note-at-a-time humming** in a reasonably quiet roo
 | Fundamental pitch estimation | [Pitchy](https://github.com/ianprime0509/pitchy) |
 | Spectrogram | `<canvas>` halftone drawn from 48 log-spaced bins (80–1000 Hz) |
 | Note generation | `generateTrack(...)` in `src/lib/generate.ts`: local DSP segmentation, harmony fitting, then quantization |
-| Synth and transport | [Tone.js](https://tonejs.github.io/) v15 |
+| Sampled sounds | [smplr](https://github.com/danigb/smplr) 1.1.0; selected assets load on demand |
+| Transport / synth fallback | [Tone.js](https://tonejs.github.io/) v15; same underlying audio context as smplr |
 | MIDI export | [`@tonejs/midi`](https://github.com/Tonejs/Midi) |
 | State | React state in `src/components/Studio.tsx` (`Track[]`) |
 | Persistence | Not built yet (planned: local storage + JSON file) |
@@ -88,6 +90,10 @@ Open [http://localhost:3000](http://localhost:3000). Keys and Drums start with l
 
 No microphone handy? Open a track and press **Demo hum**: it feeds a synthetic, clearly labeled hum through the same pipeline.
 
+Open any track and choose **Sound** beneath its title. Each track retains its own choice and MIDI notes. Defaults are Flute, Fingered Electric Bass, Splendid Grand Piano, String Ensemble, and TR-808. Play preloads audible tracks; switching loads only the chosen sound. On a download failure, the previous working sound or original synth keeps playing; Retry sound retries that choice. The installed catalog has no TR-909, so Drums offer TR-808, LinnDrum LM-2, and Casio RZ-1. CP80 is excluded: two upstream OGG files are missing and its M4A files failed to decode in Edge. See [the integration handoff](SMPLR_INTEGRATION.md) for the full verified catalog and checks.
+
+Samples need an initial network download from the upstream hosts. No audio is uploaded, and MIDI exports retain note data rather than sampled audio. See [sound credits and licenses](public/sound-credits.txt).
+
 ### Check your changes
 
 ```bash
@@ -97,7 +103,7 @@ npm run build
 npm test
 ```
 
-`npm test` runs playback, harmony, segmentation, and generation regression suites using TypeScript and Node's built-in test runner, without adding a testing dependency. Fixtures cover held-note wobbles, short dropouts across frame rates and tempos, genuine rests, harmony merging, and Off timing. Real browser listening and microphone tests are still necessary. The production build downloads the existing Archivo font from Google Fonts when it is not cached.
+`npm test` runs playback, preset loading/lifetimes, harmony, segmentation, capture, and generation regression suites using TypeScript and Node's built-in test runner, without adding a testing dependency. Fixtures cover held-note wobbles, short dropouts across frame rates and tempos, genuine rests, harmony merging, Off timing, sample switching, stale loads, fallback/retry, velocity conversion, and independent note stops. Real browser listening and microphone tests are still necessary. The production build downloads the existing Archivo font from Google Fonts when it is not cached. Lint ignores the legacy generated `.test-build/` directory.
 
 ## File structure
 
@@ -119,8 +125,8 @@ src/
     playback.ts          # browser-only playback facade: schedule, play/pause/stop, position, count-in
     midi.ts              # exportMidi(Track[], bpm) -> humstudio.mid
     music/               # shared contracts: types.ts (Note, QuantizeDivision)
-    audio/               # note segmenter, playback engine, Tone adapter, click track
-  tests/                 # playback, harmony, segmentation, generation + synthetic fixtures
+    audio/               # note segmenter, playback engine, Tone/smplr adapters, presets, click track
+  tests/                 # playback, presets, harmony, segmentation, generation + synthetic fixtures
 ```
 
 Planned, not yet created: note editing (`PianoRoll.tsx` or inside `TrackRow.tsx`) and persistence under `src/lib/persistence/`. Exact contracts are in [`TECHNICAL_SPEC.md`](TECHNICAL_SPEC.md).
@@ -132,7 +138,7 @@ Planned, not yet created: note editing (`PianoRoll.tsx` or inside `TrackRow.tsx`
 - **One seam for generation:** the UI only calls `generateTrack(instrument, frames, bpm, quantize, harmony): Promise<Note[]>`. Swap the implementation; keep the signature (or coordinate a change).
 - **Pitch is not an FFT peak:** Pitchy estimates the fundamental; the spectrogram is display only.
 - **Honest samples:** Keys and Drums start with parts labeled **Sample**; the demo hum is labeled **Demo hum**. Never present a preset as live output.
-- **Offline first:** no account, API key, or network inference.
+- **Local processing:** no account, API key, or network inference. Sampled presets fetch upstream assets on demand; the synth fallback works without them.
 
 ## Suggested 90-second judge demo
 
