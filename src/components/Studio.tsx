@@ -1,26 +1,22 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { type GenTrace, generateTrackVariants, snapNotesToGrid, type NoteSensitivityVariants } from "@/lib/generate";
+import { type GenTrace, generateTrackVariants } from "@/lib/generate";
 import { DEFAULT_NOTE_SENSITIVITY, NOTE_SENSITIVITY_LEVELS, NOTE_SENSITIVITY_PRESETS, isNoteSensitivity, type NoteSensitivity } from "@/lib/audio/note-sensitivity";
 import { type HumFrame, micErrorMessage, startDemoHum, startMic } from "@/lib/hum";
 import { exportMidi } from "@/lib/midi";
 import {
   DEFAULT_HARMONY,
-  type Harmony,
   type Key,
   KEYS,
-  type Mode,
   chordName,
   chordsFromVoicing,
-  fitToHarmony,
   harmonyLabel,
   inferHarmony,
   keyName,
   solfege,
-  voiceChords,
-  withKey,
 } from "@/lib/music/harmony";
+import { applyNoteSettings, type RecordedTakes, type SnapSources } from "@/lib/music/arrangement-settings";
 import * as playback from "@/lib/playback";
 import { presetForTrack } from "@/lib/audio/instrument-presets";
 import type { PresetStatus } from "@/lib/audio/preset-manager";
@@ -39,12 +35,15 @@ import TrackRow, { type Phase, REVEAL_SEC, type Reveal } from "./TrackRow";
 
 const COLLAPSED_H = 36;
 
-/** Move a part onto new harmony without deleting notes: the Keys sample is re-voiced, drums stay put. */
-const refit = (t: Track, h: Harmony): Track =>
-  t.instrument.kind === "drums" ? t : { ...t, notes: t.sample ? voiceChords(h) : fitToHarmony(t.notes, t.instrument, h) };
-
-const sameHarmony = (a: Harmony, b: Harmony) => a.tonic === b.tonic && a.mode === b.mode &&
-  a.bars.length === b.bars.length && a.bars.every((bar, index) => bar.length === b.bars[index].length && bar.every((pitch, i) => pitch === b.bars[index][i]));
+/** Cancel reveal timers promptly when a take or the page goes away. */
+function revealDelay(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise(resolve => {
+    const finish = () => { clearTimeout(timer); signal.removeEventListener("abort", finish); resolve(); };
+    const timer = setTimeout(finish, ms);
+    signal.addEventListener("abort", finish, { once: true });
+    if (signal.aborted) finish();
+  });
+}
 
 function readout(beat: number) {
   const bar = Math.floor(beat / 4) + 1;
@@ -60,7 +59,6 @@ export default function Studio() {
   const [bpm, setBpm] = useState(120);
   const [quantize, setQuantize] = useState<QuantizeDivision>("1/4");
   const [sensitivity, setSensitivity] = useState<NoteSensitivity>(DEFAULT_NOTE_SENSITIVITY);
-  const [sensitivityNotes, setSensitivityNotes] = useState<Record<string, NoteSensitivityVariants>>({});
   const [zoomedId, setZoomedId] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState("");
@@ -82,18 +80,27 @@ export default function Studio() {
   const stopRef = useRef<(() => void) | null>(null);
   // Re-record clears the part up front; a failed take puts it back (never lose a part to an empty take).
   const clearedRef = useRef<{ id: string; notes: Note[] } | null>(null);
-  // Keep only analysis frames, never microphone samples, so Snap can regenerate from the take.
-  const sensitivityFramesRef = useRef<Record<string, HumFrame[]>>({});
-  const snapSourceNotesRef = useRef<Record<string, Note[]>>({});
+  // Cache all profiles and capture tempo; these local analysis features contain no microphone samples.
+  const takesRef = useRef<RecordedTakes>({});
+  const snapSourcesRef = useRef<SnapSources>({});
   const harmonyDriverRef = useRef<"melody" | "keys" | null>(null);
-  const keyOverrideRef = useRef<Key | null>(null);
+  // A key the user picked by hand; regeneration keeps it until the next Melody take sets a new one.
+  const pickedKeyRef = useRef<Key | null>(null);
   const playbackRequest = useRef(0);
   const arrangementRef = useRef({ tracks, bpm });
   const stopTake = useRef<() => void>(() => {});
   const unsubscribePresets = useRef<(() => void) | null>(null);
+  const mountedRef = useRef(false);
+  const takeControllerRef = useRef<AbortController | null>(null);
 
   const busy = startingAudio || phase === "requesting" || phase === "recording" || phase === "generating" || phase === "revealing";
   const zoomed = tracks.find((t) => t.instrument.id === zoomedId) ?? null;
+
+  /** Keep event/async snapshots current immediately, including a failed take restored before the next effect. */
+  const commitTracks = useCallback((next: Track[]) => {
+    arrangementRef.current = { ...arrangementRef.current, tracks: next };
+    setTracks(next);
+  }, []);
 
   useLayoutEffect(() => {
     const el = rowsRef.current!;
@@ -135,11 +142,18 @@ export default function Studio() {
   }, [playing]);
 
   // Cancel pending starts and release browser audio resources when the page goes away.
-  useEffect(() => () => {
-    stopRef.current?.();
-    playbackRequest.current++;
-    unsubscribePresets.current?.();
-    playback.dispose();
+  useEffect(() => {
+    mountedRef.current = true;
+    const requests = playbackRequest;
+    return () => {
+      mountedRef.current = false;
+      takeControllerRef.current?.abort();
+      stopRef.current?.();
+      requests.current++;
+      unsubscribePresets.current?.();
+      unsubscribePresets.current = null;
+      playback.dispose();
+    };
   }, []);
 
   function pauseIfPlaying() {
@@ -154,6 +168,7 @@ export default function Studio() {
   /** Connect runtime loading feedback after a user gesture, outside serializable Track[]. */
   async function connectAudio() {
     const engine = await playback.ensureAudio();
+    if (!mountedRef.current) throw new Error("page closed");
     unsubscribePresets.current ??= engine.subscribePresets(status => {
       setPresetStatuses(previous => ({ ...previous, [status.trackId]: status }));
     });
@@ -176,7 +191,7 @@ export default function Studio() {
       engine.schedule(latest.tracks, latest.bpm);
       await engine.prepare([track], true);
     } catch {
-      if (arrangementRef.current.tracks.find(t => t.instrument.id === trackId)?.presetId !== preset.id) return;
+      if (!mountedRef.current || arrangementRef.current.tracks.find(t => t.instrument.id === trackId)?.presetId !== preset.id) return;
       setPresetStatuses(previous => ({ ...previous, [trackId]: { trackId, presetId, state: "fallback",
         message: "Audio could not start. Check your output device and retry this sound." } }));
     }
@@ -184,6 +199,7 @@ export default function Studio() {
 
   /** Put the arrangement and metronome setting back after a click-only recording. */
   function restoreTransport() {
+    if (!mountedRef.current) return;
     const engine = playback.getEngine();
     if (!engine) return;
     engine.stop();
@@ -267,8 +283,14 @@ export default function Studio() {
     return () => window.removeEventListener("keydown", onKey);
   }, [back]);
 
-  const finish = useCallback(
-    async (taken: HumFrame[]) => {
+  const restoreCleared = useCallback(() => {
+    const c = clearedRef.current;
+    clearedRef.current = null;
+    if (c) commitTracks(arrangementRef.current.tracks.map((t) => (t.instrument.id === c.id && !t.notes.length ? { ...t, notes: c.notes } : t)));
+  }, [commitTracks]);
+
+  const finish = useCallback(async (taken: HumFrame[], signal: AbortSignal) => {
+      if (signal.aborted || !mountedRef.current) return;
       stopRef.current?.();
       stopRef.current = null;
       if (!zoomed) return;
@@ -298,68 +320,62 @@ export default function Studio() {
         const after = h ?? harmony;
         // Every step shows what the pipeline actually produced; nothing here is a progress estimate.
         const drums = inst.kind === "drums";
+        // Every Melody profile keeps its confirmed semitones; sensitivity changes detection, not scale correction.
+        const keptPitch = inst.id === "melody";
+        const fitted = keptPitch ? "pitches kept as hummed" : `fitted to ${keyName(after)}`;
         const noun = (k: number, w: string) => `${k} ${w}${k === 1 ? "" : "s"}`;
         const steps = [
           drums
             ? { title: noun(trace.raw.length, "hit"), sub: "Heard in your beatbox" }
             : { title: noun(trace.raw.length, "note"), sub: `Found in ${trace.voicedFrames} pitched frames of your hum` },
           {
-            title: trace.grid ? "On the beat" : drums || inst.id === "melody" ? "As hummed" : "In key",
-            sub: trace.grid
-              ? `Snapped to the ${quantize} grid` + (drums || inst.id === "melody" ? "" : `, fitted to ${keyName(after)}`)
-              : drums || inst.id === "melody" ? "Timing kept; confirmed pitch changes preserved" : `Fitted to ${keyName(after)}, timing kept`,
+            title: trace.grid ? "On the beat" : drums || keptPitch ? "As hummed" : "In key",
+            sub: trace.grid ? `Snapped to the ${quantize} grid` + (drums ? "" : `, ${fitted}`) : drums ? "Timing kept as hummed" : `${fitted[0].toUpperCase()}${fitted.slice(1)}, timing kept`,
           },
           ...(drums ? [] : [{ title: keyName(after), sub: after.bars.map(chordName).join(" ") }]),
         ];
         const stepMs = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 1100;
-        const wait = (ms: number) => new Promise((done) => setTimeout(done, ms));
         setReveal({ step: 0, raw: trace.raw, final: notes, harmony: after, steps });
         setPhase("revealing");
         for (let i = 1; i <= steps.length; i++) {
-          await wait(i === 1 && stepMs ? (REVEAL_SEC + 0.3) * 1000 : stepMs); // step 0 lasts as long as the print-in sweep
+          await revealDelay(i === 1 && stepMs ? (REVEAL_SEC + 0.3) * 1000 : stepMs, signal); // step 0 lasts as long as the print-in sweep
+          if (signal.aborted || !mountedRef.current) return;
           setReveal((r) => r && { ...r, step: i });
         }
-        if (h) {
-          setHarmony(h);
-          snapSourceNotesRef.current = {};
-        }
-        clearedRef.current = null;
-        setSensitivityNotes((previous) => ({ ...previous, [inst.id]: variants }));
-        sensitivityFramesRef.current[inst.id] = taken.map((frame) => ({ ...frame }));
-        delete snapSourceNotesRef.current[inst.id];
+        if (inst.id === "melody") pickedKeyRef.current = null;
         if (inst.id === "melody" || inst.id === "keys") harmonyDriverRef.current = inst.id;
-        if (inst.id === "melody") keyOverrideRef.current = null;
-        setTracks((ts) =>
-          ts.map((t) => {
-            if (t.instrument.id === inst.id) return { ...t, notes, sample: false };
-            return h ? refit(t, h) : t;
-          }),
-        );
+        const takes = { ...takesRef.current, [inst.id]: { frames: taken.map(frame => ({ ...frame })), bpm, variants } };
+        const snapSources = { ...snapSourcesRef.current };
+        delete snapSources[inst.id];
+        const next = applyNoteSettings({ tracks: arrangementRef.current.tracks, harmony, takes, snapSources,
+          sensitivity, quantize, harmonyDriver: harmonyDriverRef.current, keyOverride: pickedKeyRef.current });
+        takesRef.current = next.takes;
+        snapSourcesRef.current = next.snapSources;
+        clearedRef.current = null;
+        setHarmony(next.harmony);
+        commitTracks(next.tracks);
         setReveal(null);
         setPhase("done");
       } catch {
+        if (signal.aborted || !mountedRef.current) return;
         restoreCleared();
         setReveal(null);
         setPhase("error"); // the cleared part comes back
         setError("No notes came out of that take. Try a longer, steadier hum.");
       }
-    },
-    [zoomed, bpm, quantize, harmony, sensitivity],
-  );
-
-  function restoreCleared() {
-    const c = clearedRef.current;
-    clearedRef.current = null;
-    if (c) setTracks((ts) => ts.map((t) => (t.instrument.id === c.id && !t.notes.length ? { ...t, notes: c.notes } : t)));
-  }
+  }, [zoomed, bpm, quantize, harmony, sensitivity, commitTracks, restoreCleared]);
 
   async function record(useDemo: boolean) {
     if (!zoomed || busy) return;
+    takeControllerRef.current?.abort();
+    const controller = new AbortController();
+    takeControllerRef.current = controller;
+    const signal = controller.signal;
     pauseIfPlaying();
     clearedRef.current = null;
     if (!zoomed.sample && zoomed.notes.length) {
       clearedRef.current = { id: zoomed.instrument.id, notes: zoomed.notes };
-      setTracks((ts) => ts.map((t) => (t.instrument.id === zoomed.instrument.id ? { ...t, notes: [] } : t)));
+      commitTracks(arrangementRef.current.tracks.map((t) => (t.instrument.id === zoomed.instrument.id ? { ...t, notes: [] } : t)));
     }
     const taken: HumFrame[] = [];
     setFrames(taken);
@@ -371,12 +387,14 @@ export default function Studio() {
     // Frames before it (the count-in) are dropped.
     let originSec: number | null = useDemo ? 0 : null;
     const onFrame = (raw: HumFrame) => {
-      if (done || originSec === null || raw.tSec < originSec) return;
+      if (done || signal.aborted || originSec === null || raw.tSec < originSec) return;
       const f = originSec ? { ...raw, tSec: raw.tSec - originSec } : raw;
+      // Canvas/readouts observe this runtime analysis stream without React rerenders; canonical Note[] stays immutable.
+      // eslint-disable-next-line react-hooks/immutability
       taken.push(f);
       if (f.tSec >= limitSec) {
         done = true;
-        void finish(taken);
+        void finish(taken, signal);
       }
     };
     stopRef.current = () => {
@@ -384,13 +402,17 @@ export default function Studio() {
     };
     try {
       if (useDemo) {
-        stopRef.current = startDemoHum(onFrame);
+        const stopDemo = startDemoHum(onFrame);
+        stopRef.current = () => { done = true; stopDemo(); };
       } else {
         setPhase("requesting");
         // Audio first: the mic runs on Tone's context, so its frames share the click's clock.
         const engine = await connectAudio();
+        if (signal.aborted) return;
         const mic = await playback.micContext();
+        if (signal.aborted) return;
         const stopMic = await startMic(mic, onFrame);
+        if (signal.aborted) { stopMic(); return; }
         stopRef.current = () => {
           done = true;
           stopMic();
@@ -400,6 +422,7 @@ export default function Studio() {
         engine.schedule([], bpm);
         engine.setMetronome(true);
         const counted = await engine.countIn(bpm, setCountInBeat);
+        if (signal.aborted) return;
         setCountInBeat(null);
         if (!counted || done) throw new Error("count-in cancelled");
         originSec = engine.nowSec() + mic.outputLatencySec;
@@ -407,6 +430,7 @@ export default function Studio() {
       }
       setPhase("recording");
     } catch (e) {
+      if (signal.aborted || !mountedRef.current) return;
       stopRef.current?.();
       stopRef.current = null;
       restoreCleared();
@@ -417,90 +441,41 @@ export default function Studio() {
     stopTake.current = () => {
       if (done) return; // a double-click or the time limit already finished this take
       done = true;
-      void finish(taken);
+      void finish(taken, signal);
     };
   }
 
   /** A wrong key guess is one pick away: chords re-picked from the melody, every pitched part refitted. */
   function changeKey(value: string) {
-    const [tonic, mode] = value.split(" ");
-    const key = { tonic: Number(tonic), mode: mode as Mode };
-    keyOverrideRef.current = key;
-    snapSourceNotesRef.current = {};
-    const h = withKey(key, tracks.find((t) => t.instrument.id === "melody")?.notes ?? []);
-    setHarmony(h);
-    setTracks((ts) => ts.map((t) => refit(t, h)));
+    const key = KEYS.find(option => `${option.tonic} ${option.mode}` === value);
+    if (!key) return;
+    pickedKeyRef.current = key;
+    regenerate(sensitivity, quantize, false, true);
   }
 
   /** A hand edit replaces the part's notes; an edited Sample is the user's part from then on. */
   function editNotes(id: string, notes: Note[]) {
-    delete sensitivityFramesRef.current[id];
-    snapSourceNotesRef.current[id] = notes.map((note) => ({ ...note }));
-    setSensitivityNotes((previous) => {
-      if (!previous[id]) return previous;
-      const next = { ...previous };
-      delete next[id];
-      return next;
-    });
-    setTracks((ts) => ts.map((t) => (t.instrument.id === id ? { ...t, notes, sample: false } : t)));
-  }
-
-  /** Swap a cached profile and refit dependent parts if its inferred song harmony changed. */
-  function updateDisplayedNotes(level: NoteSensitivity, variantsById = sensitivityNotes, snapUncaptured?: QuantizeDivision) {
-    const melodyVariant = variantsById.melody?.[level];
-    const melodyNotes = melodyVariant ?? tracks.find((track) => track.instrument.id === "melody")?.notes ?? [];
-    const keysVariant = variantsById.keys?.[level];
-    const nextHarmony = keyOverrideRef.current
-      ? withKey(keyOverrideRef.current, melodyNotes)
-      : harmonyDriverRef.current === "melody" && melodyVariant
-        ? inferHarmony(melodyVariant)
-        : harmonyDriverRef.current === "keys" && keysVariant
-          ? chordsFromVoicing(keysVariant, harmony)
-          : harmony;
-    const harmonyChanged = !sameHarmony(nextHarmony, harmony);
-    if (harmonyChanged) snapSourceNotesRef.current = {};
-    setHarmony(nextHarmony);
-    setTracks((current) => current.map((track) => {
-      const variant = variantsById[track.instrument.id]?.[level];
-      if (variant) {
-        const nextTrack = { ...track, notes: variant, sample: false };
-        if (track.instrument.id === "melody" || track.instrument.kind === "drums" ||
-          (track.instrument.id === "keys" && harmonyDriverRef.current === "keys" && !keyOverrideRef.current)) return nextTrack;
-        return refit(nextTrack, nextHarmony);
-      }
-      const fitted = harmonyChanged ? refit(track, nextHarmony) : track;
-      if (snapUncaptured) {
-        const source = snapSourceNotesRef.current[track.instrument.id] ?? fitted.notes.map((note) => ({ ...note }));
-        snapSourceNotesRef.current[track.instrument.id] = source;
-        return { ...fitted, notes: snapNotesToGrid(track.instrument, source, snapUncaptured) };
-      }
-      return fitted;
-    }));
-  }
-
-  function selectSensitivity(level: NoteSensitivity) {
-    setSensitivity(level);
-    updateDisplayedNotes(level);
-  }
-
-  /** Rebuild all cached profiles from analysis frames, then commit notes immediately on the new grid. */
-  function selectQuantize(division: QuantizeDivision) {
-    setQuantize(division);
-    const nextVariants = { ...sensitivityNotes };
-    for (const [id, capturedFrames] of Object.entries(sensitivityFramesRef.current)) {
-      const instrument = tracks.find((track) => track.instrument.id === id)?.instrument;
-      if (!instrument) continue;
-      nextVariants[id] = generateTrackVariants(instrument, capturedFrames, bpm, division, harmony, sensitivity);
-    }
-    setSensitivityNotes(nextVariants);
-    updateDisplayedNotes(sensitivity, nextVariants, division);
+    delete takesRef.current[id];
+    snapSourcesRef.current[id] = notes.map(note => ({ ...note }));
+    commitTracks(arrangementRef.current.tracks.map((t) => (t.instrument.id === id ? { ...t, notes, sample: false } : t)));
   }
 
   function toggle(id: string, key: "muted" | "solo") {
-    setTracks((ts) => ts.map((t) => (t.instrument.id === id ? { ...t, [key]: !t[key] } : t)));
+    commitTracks(arrangementRef.current.tracks.map((t) => (t.instrument.id === id ? { ...t, [key]: !t[key] } : t)));
   }
 
   const noteLabel = (m: number) => `${midiName(m).replace(/-?\d+$/, "")} ${solfege(m, harmony) ?? ""}`;
+
+  /** Swap cached profiles; grid changes regenerate at each take's capture tempo, without rounding twice. */
+  function regenerate(level: NoteSensitivity, division: QuantizeDivision, resnap = false, fitEditedMelody = false) {
+    const next = applyNoteSettings({ tracks: arrangementRef.current.tracks, harmony, takes: takesRef.current,
+      snapSources: snapSourcesRef.current, sensitivity: level, quantize: division,
+      harmonyDriver: harmonyDriverRef.current, keyOverride: pickedKeyRef.current, resnap, fitEditedMelody });
+    takesRef.current = next.takes;
+    snapSourcesRef.current = next.snapSources;
+    setHarmony(next.harmony);
+    commitTracks(next.tracks);
+  }
 
   const rowH = (id: string) => {
     if (!zoomedId) return Math.max(56, avail / tracks.length);
@@ -533,48 +508,51 @@ export default function Studio() {
             1.1.1
           </output>
         </div>
-        <label className="field">
-          <span>BPM</span>
-          <input
-            type="number"
-            min={60}
-            max={180}
-            value={bpm}
-            disabled={busy}
-            onChange={(e) => {
-              const v = e.target.valueAsNumber;
-              if (Number.isFinite(v)) setBpm(Math.min(180, Math.max(60, Math.round(v))));
-            }}
-          />
-        </label>
-        <div className="field harmony-field" title={`Song chords, one per bar: ${harmonyLabel(harmony)}. A Melody take sets them; pick a key to override.`}>
-          <span>Key</span>
-          <select aria-label="Song key" value={`${harmony.tonic} ${harmony.mode}`} disabled={busy} onChange={(e) => changeKey(e.target.value)}>
-            {KEYS.map((k) => (
-              <option key={`${k.tonic} ${k.mode}`} value={`${k.tonic} ${k.mode}`}>{keyName(k)}</option>
-            ))}
-          </select>
-          <output className="position harmony-value" aria-label="Song chords" aria-live="polite">{harmony.bars.slice(0, 4).map(chordName).join(" ")}</output>
+        <div className="transport-fields">
+          <label className="field">
+            <span>BPM</span>
+            <input
+              type="number"
+              min={60}
+              max={180}
+              value={bpm}
+              disabled={busy}
+              onChange={(e) => {
+                const v = e.target.valueAsNumber;
+                if (Number.isFinite(v)) setBpm(Math.min(180, Math.max(60, Math.round(v))));
+              }}
+            />
+          </label>
+          <div className="field harmony-field" title={`Song chords, one per bar: ${harmonyLabel(harmony)}. A Melody take sets them; pick a key to override.`}>
+            <span>Key</span>
+            <select aria-label="Song key" value={`${harmony.tonic} ${harmony.mode}`} disabled={busy} onChange={(e) => changeKey(e.target.value)}>
+              {KEYS.map((k) => (
+                <option key={`${k.tonic} ${k.mode}`} value={`${k.tonic} ${k.mode}`}>{keyName(k)}</option>
+              ))}
+            </select>
+            <output className="position harmony-value" aria-label="Song chords" aria-live="polite">{harmony.bars.slice(0, 4).map(chordName).join(" ")}</output>
+          </div>
+          <label className="field">
+            <span>Snap</span>
+            <select aria-label="Snap" value={quantize} onChange={(e) => { const d = e.target.value as QuantizeDivision; setQuantize(d); regenerate(sensitivity, d, true); }} disabled={busy}>
+              <option value="off">Off</option>
+              <option value="1/4">1/4</option>
+              <option value="1/8">1/8</option>
+              <option value="1/16">1/16</option>
+            </select>
+          </label>
+          <label className="field sensitivity-field">
+            <span>Sensitivity</span>
+            <select aria-label="Note sensitivity" value={sensitivity} disabled={busy}
+              title={`${NOTE_SENSITIVITY_PRESETS[sensitivity].description} Every take has three cached profiles; hand-edited parts are kept.`} onChange={event => {
+                if (isNoteSensitivity(event.target.value)) { setSensitivity(event.target.value); regenerate(event.target.value, quantize); }
+              }}>
+              {NOTE_SENSITIVITY_LEVELS.map(level => (
+                <option key={level} value={level}>{NOTE_SENSITIVITY_PRESETS[level].label}</option>
+              ))}
+            </select>
+          </label>
         </div>
-        <label className="field">
-          <span>Snap</span>
-          <select value={quantize} onChange={(e) => selectQuantize(e.target.value as QuantizeDivision)} disabled={busy}>
-            <option value="off">Off</option>
-            <option value="1/4">1/4</option>
-            <option value="1/8">1/8</option>
-            <option value="1/16">1/16</option>
-          </select>
-        </label>
-        <label className="field sensitivity-field" title={`${NOTE_SENSITIVITY_PRESETS[sensitivity].description} Each take generates all three versions for immediate switching.`}>
-          <span>Sensitivity</span>
-          <select aria-label="Note sensitivity" value={sensitivity} disabled={busy} onChange={(event) => {
-            if (isNoteSensitivity(event.target.value)) selectSensitivity(event.target.value);
-          }}>
-            {NOTE_SENSITIVITY_LEVELS.map((level) => (
-              <option key={level} value={level}>{NOTE_SENSITIVITY_PRESETS[level].label}</option>
-            ))}
-          </select>
-        </label>
         <button className="export" aria-label="Export MIDI" onClick={() => exportMidi(tracks, bpm)} disabled={busy || tracks.every((t) => !t.notes.length)}>
           <DownloadIcon /> <span className="lbl">Export MIDI</span>
         </button>

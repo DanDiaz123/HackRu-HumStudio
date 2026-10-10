@@ -7,22 +7,25 @@ import { INSTRUMENTS } from "../tracks.ts";
 import { drumMapForPreset, validatePresetCatalog, type InstrumentPreset } from "./instrument-presets.ts";
 import type { SampledInstrument } from "./sampled-voice";
 
+/** Fetch only fixed sample hosts; manifests cannot redirect requests outside that boundary. */
+export async function fetchSampleAsset(url: string): Promise<Response> {
+  const parsed = new URL(url);
+  if (parsed.protocol !== "https:" || !["gleitz.github.io", "smpldsnds.github.io"].includes(parsed.hostname)
+    || parsed.username || parsed.password || parsed.port) {
+    throw new Error("Unexpected sample asset source.");
+  }
+  const response = await fetch(url, { credentials: "omit", redirect: "error", signal: AbortSignal.timeout(15_000) });
+  if (!response.ok) throw new Error("Sample asset could not be fetched.");
+  return response;
+}
+
 /**
  * Browser-only factory on Tone's underlying context. A shared loader reuses decoded buffers.
  * Load the category's playable range (all velocities), rather than every preset/keyboard note.
  */
 export function createSmplrFactory(context: AudioContext): (preset: InstrumentPreset) => SampledInstrument {
   const catalogs = { soundfont: getSoundfontNames(), electric: getElectricPianoNames(), drums: getDrumMachineNames() };
-  const storage: Storage = {
-    async fetch(url) {
-      const parsed = new URL(url);
-      if (parsed.protocol !== "https:" || !["gleitz.github.io", "smpldsnds.github.io"].includes(parsed.hostname) || parsed.username || parsed.password)
-        throw new Error("Unexpected sample asset source.");
-      const response = await fetch(url, { credentials: "omit", signal: AbortSignal.timeout(15_000) });
-      if (!response.ok) throw new Error("Sample asset could not be fetched.");
-      return response;
-    },
-  };
+  const storage: Storage = { fetch: fetchSampleAsset };
   const loader = SampleLoader(context, { storage });
   // smplr can resolve ready with missing buffers; treat partial downloads as a load failure.
   const checkedLoader: SampleLoader = {

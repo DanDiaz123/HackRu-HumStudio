@@ -7,10 +7,13 @@ class HumTap extends AudioWorkletProcessor {
     this.hop = options.processorOptions.hop;
     this.buf = new Float32Array(this.hop);
     this.n = 0;
+    this.stopped = false;
+    this.port.onmessage = (event) => { if (event.data === "stop") this.stopped = true; };
   }
 
   process(inputs) {
-    const samples = inputs[0][0];
+    if (this.stopped) return false;
+    const samples = inputs[0]?.[0];
     if (!samples) return true; // input not connected yet
     for (let i = 0; i < samples.length; i++) {
       this.buf[this.n++] = samples[i];

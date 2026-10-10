@@ -329,6 +329,7 @@ class PresetBackend extends FakeBackend {
   prepared: string[][] = [];
   readyListeners = new Set<() => void>();
   freed = false;
+  subscribePresets() { return () => {}; }
   createVoice(instrument: string, presetId?: string) {
     this.selected.push({ instrument, presetId });
     return super.createVoice(instrument);
@@ -411,6 +412,89 @@ test("background sample readiness does not cancel a click-only count-in", async 
   const counting = engine.countIn(120);
   const timers = backend.timers.size;
   [...backend.readyListeners][0]();
+  assert.equal(backend.timers.size, timers);
+  engine.stop();
+  assert.equal(await counting, false);
+  engine.dispose();
+});
+
+test("queued callbacks from a replaced arrangement cannot attack or release current notes", () => {
+  const { backend, engine, tracks } = setup();
+  engine.schedule([tracks[0]], 120);
+  const stale = [...backend.events.values()].map(event => event.callback);
+  engine.play();
+  backend.fire(0);
+  backend.tick = backend.ppq / 2;
+  const changed = [{ ...tracks[0], notes: [{ ...tracks[0].notes[0], midi: 62 }] }];
+  engine.schedule(changed, 120);
+  const count = backend.calls.length;
+  stale.forEach(callback => callback(21));
+  assert.equal(backend.calls.length, count);
+  backend.fire(1, 22);
+  assert.equal(backend.calls.at(-1)!.action, "release");
+  assert.equal(backend.calls.at(-1)!.midi, 62);
+  engine.dispose();
+});
+
+test("queued metronome callbacks cannot revive a disabled or replaced click schedule", () => {
+  const { backend, engine } = setup();
+  engine.schedule([], 120);
+  engine.setMetronome(true);
+  const stale = [...backend.events.values()].map(event => event.callback);
+  engine.play();
+  engine.setMetronome(false);
+  stale.forEach(callback => callback(30));
+  assert.equal(backend.calls.length, 0);
+  engine.setMetronome(true);
+  stale.forEach(callback => callback(31));
+  assert.equal(backend.calls.length, 0);
+  backend.fire(0, 32);
+  assert.equal(backend.calls.filter(call => call.action === "attack").length, 1);
+  engine.dispose();
+});
+
+test("disposed engines cannot restart transport, clicks, loads, or subscriptions", async () => {
+  const backend = new PresetBackend();
+  let subscriptions = 0;
+  backend.subscribePresets = () => { subscriptions++; return () => {}; };
+  const engine = createPlaybackEngine(backend);
+  engine.schedule(playbackFixtureTracks(), 120);
+  engine.play();
+  backend.fire(0);
+  engine.dispose();
+  const calls = backend.calls.length;
+  const starts = backend.starts;
+  const prepared = backend.prepared.length;
+  engine.play();
+  engine.pause();
+  engine.stop();
+  engine.rewind();
+  engine.setMetronome(true);
+  engine.schedule(playbackFixtureTracks(), 120);
+  await engine.prepare(playbackFixtureTracks());
+  engine.subscribePresets(() => {})();
+  assert.equal(await engine.countIn(120), false);
+  assert.equal(backend.calls.length, calls);
+  assert.equal(backend.starts, starts);
+  assert.equal(backend.prepared.length, prepared);
+  assert.equal(backend.events.size, 0);
+  assert.equal(backend.timers.size, 0);
+  assert.equal(subscriptions, 0);
+  assert.equal(backend.state, "stopped");
+});
+
+test("invalid count-in BPM preserves playing audio and an already active count-in", async () => {
+  const { backend, engine, tracks } = setup();
+  engine.schedule(tracks, 120);
+  engine.play();
+  backend.fire(0);
+  const calls = backend.calls.length;
+  for (const bpm of [NaN, Infinity, 0, -1, 59, 181]) assert.throws(() => engine.countIn(bpm), RangeError);
+  assert.equal(backend.state, "started");
+  assert.equal(backend.calls.length, calls);
+  const counting = engine.countIn(120);
+  const timers = backend.timers.size;
+  assert.throws(() => engine.countIn(0), RangeError);
   assert.equal(backend.timers.size, timers);
   engine.stop();
   assert.equal(await counting, false);
