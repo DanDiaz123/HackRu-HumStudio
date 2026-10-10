@@ -84,7 +84,7 @@ export function pitchRows(inst: Instrument): number {
   return inst.kind === "drums" ? DRUM_ROWS.length : inst.hi - inst.lo + 1;
 }
 
-export function noteRow(midi: number, inst: Instrument): number {
+function noteRow(midi: number, inst: Instrument): number {
   if (inst.kind === "drums") {
     const i = DRUM_ROWS.findIndex((r) => r.midi === midi);
     return i < 0 ? DRUM_ROWS.length - 1 : i;

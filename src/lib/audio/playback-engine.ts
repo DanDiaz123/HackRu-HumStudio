@@ -76,7 +76,6 @@ export function createPlaybackEngine(backend: PlaybackBackend) {
   let notes: ScheduledNote[] = [];
   let eventIds: number[] = [];
   const voices = new Map<string, PlaybackVoice>();
-  let disposed = false;
   const clicks = createClickTrack(backend);
   let metronome = false;
   let clickEventIds: number[] = [];
@@ -110,7 +109,7 @@ export function createPlaybackEngine(backend: PlaybackBackend) {
     if (!enabled) return;
     for (let beat = 0; beat < TOTAL_BEATS; beat++) {
       clickEventIds.push(backend.schedule((time) => {
-        if (!disposed && backend.state === "started") clicks.click(time, beat % 4 === 0);
+        if (backend.state === "started") clicks.click(time, beat % 4 === 0);
       }, beat * backend.ppq));
     }
   }
@@ -151,13 +150,13 @@ export function createPlaybackEngine(backend: PlaybackBackend) {
       for (const note of notes) {
         if (note.endTick < TOTAL_BEATS * backend.ppq) {
           eventIds.push(backend.schedule((time) => {
-            if (!disposed && backend.state === "started") voices.get(note.voiceKey)?.release(note.midi, time);
+            if (backend.state === "started") voices.get(note.voiceKey)?.release(note.midi, time);
           }, note.endTick));
         }
       }
       for (const note of notes) {
         eventIds.push(backend.schedule((time) => {
-          if (!disposed && backend.state === "started") voice(note).attack(note.midi, time, note.velocity);
+          if (backend.state === "started") voice(note).attack(note.midi, time, note.velocity);
         }, note.startTick));
       }
       if (running) {
@@ -194,12 +193,9 @@ export function createPlaybackEngine(backend: PlaybackBackend) {
       if (running) backend.start();
     },
     /** Enable/disable quarter-note clicks; accent each 4/4 downbeat. */
-    setMetronome(enabled: boolean) {
-      scheduleMetronome(enabled);
-    },
+    setMetronome: scheduleMetronome,
     /** Four audio-clock beats before playback. Resolves false when cancelled. BPM is fixed for the count-in. */
     countIn(bpm: number, onBeat: (remaining: number) => void = () => {}) {
-      if (!Number.isFinite(bpm) || bpm < 60 || bpm > 180) throw new RangeError("Count-in BPM must be between 60 and 180.");
       backend.pause();
       silence();
       return clicks.countIn(bpm, onBeat);
@@ -211,9 +207,8 @@ export function createPlaybackEngine(backend: PlaybackBackend) {
     state(): PlaybackState {
       return backend.state;
     },
-    /** Idempotently stop audio, clear only owned callbacks, and free every synth/listener. */
+    /** Stop audio, clear only owned callbacks, and free every synth/listener. */
     dispose() {
-      if (disposed) return;
       backend.stop();
       clearEvents();
       scheduleMetronome(false);
@@ -221,7 +216,6 @@ export function createPlaybackEngine(backend: PlaybackBackend) {
       silence();
       removeLoopListener();
       notes = [];
-      disposed = true;
     },
   };
 }
