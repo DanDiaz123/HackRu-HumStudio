@@ -38,3 +38,15 @@ export const BackIcon = (p: P) => (
 export const DownloadIcon = (p: P) => (
   <svg {...base} {...p}><path d="M12 3v12M6.5 10l5.5 5.5 5.5-5.5M4 20h16" /></svg>
 );
+export const UndoIcon = (p: P) => (
+  <svg {...base} {...p}><path d="M9 6 4 11l5 5" /><path d="M4 11h10a6 6 0 0 1 0 12h-2" /></svg>
+);
+export const RedoIcon = (p: P) => (
+  <svg {...base} {...p}><path d="m15 6 5 5-5 5" /><path d="M20 11H10a6 6 0 0 0 0 12h2" /></svg>
+);
+export const SaveIcon = (p: P) => (
+  <svg {...base} {...p}><path d="M4 4h13l3 3v13H4z" /><path d="M8 4v5h7V4M8 20v-6h8v6" /></svg>
+);
+export const OpenIcon = (p: P) => (
+  <svg {...base} {...p}><path d="M3 6h7l2 2h9v11H3z" /></svg>
+);
