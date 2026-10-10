@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { generateTrack } from "@/lib/generate";
 import { type HumFrame, micErrorMessage, startDemoHum, startMic } from "@/lib/hum";
 import { exportMidi } from "@/lib/midi";
+import { DEFAULT_HARMONY, fitToHarmony, harmonyLabel, inferHarmony, voiceChords } from "@/lib/music/harmony";
 import * as playback from "@/lib/playback";
 import {
   MAX_RECORD_SEC,
@@ -29,6 +30,7 @@ function readout(beat: number) {
 
 export default function Studio() {
   const [tracks, setTracks] = useState<Track[]>(initialTracks);
+  const [harmony, setHarmony] = useState(DEFAULT_HARMONY);
   const [bpm, setBpm] = useState(120);
   const [quantize, setQuantize] = useState<QuantizeDivision>("1/16");
   const [zoomedId, setZoomedId] = useState<string | null>(null);
@@ -108,6 +110,16 @@ export default function Studio() {
     setPos(live.positionBeats());
     setPlaying(false);
     return true;
+  }
+
+  /** Put the arrangement and metronome setting back after a click-only recording. */
+  function restoreTransport() {
+    const engine = playback.getEngine();
+    if (!engine) return;
+    engine.stop();
+    engine.setMetronome(metronome);
+    engine.schedule(arrangementRef.current.tracks, arrangementRef.current.bpm);
+    setPos(0);
   }
 
   async function togglePlay() {
@@ -194,7 +206,7 @@ export default function Studio() {
       setStage(0);
       const timer = setInterval(() => setStage((s) => Math.min(2, s + 1)), 800);
       try {
-        const notes = await generateTrack(zoomed.instrument, taken, bpm, quantize);
+        const notes = await generateTrack(zoomed.instrument, taken, bpm, quantize, harmony);
         clearInterval(timer);
         if (!notes.length) throw new Error("empty");
         setPending(notes);
@@ -202,7 +214,16 @@ export default function Studio() {
         const ms = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : (REVEAL_SEC + 0.5) * 1000;
         setTimeout(() => {
           const id = zoomed.instrument.id;
-          setTracks((ts) => ts.map((t) => (t.instrument.id === id ? { ...t, notes, sample: false } : t)));
+          // A Melody take sets the song's chords; other pitched parts are re-fitted (moved, never deleted).
+          const h = id === "melody" ? inferHarmony(notes) : null;
+          if (h) setHarmony(h);
+          setTracks((ts) =>
+            ts.map((t) => {
+              if (t.instrument.id === id) return { ...t, notes, sample: false };
+              if (!h || t.instrument.kind === "drums") return t;
+              return { ...t, notes: t.sample ? voiceChords(h) : fitToHarmony(t.notes, t.instrument, h) };
+            }),
+          );
           setPhase("done");
         }, ms);
       } catch {
@@ -211,7 +232,7 @@ export default function Studio() {
         setError("No notes came out of that take. Try a longer, steadier hum.");
       }
     },
-    [zoomed, bpm, quantize],
+    [zoomed, bpm, quantize, harmony],
   );
 
   async function record(useDemo: boolean) {
@@ -224,8 +245,12 @@ export default function Studio() {
     setError("");
     const limitSec = Math.min(MAX_RECORD_SEC, (TOTAL_BEATS * 60) / bpm);
     let done = false;
-    const onFrame = (f: HumFrame) => {
-      if (done) return;
+    let capturing = useDemo; // the mic opens before the count-in; its frames are dropped until counting ends
+    let offsetSec: number | null = useDemo ? 0 : null;
+    const onFrame = (raw: HumFrame) => {
+      if (done || !capturing) return;
+      offsetSec ??= raw.tSec; // first captured frame is t=0
+      const f = offsetSec ? { ...raw, tSec: raw.tSec - offsetSec } : raw;
       taken.push(f);
       if (Math.floor(f.tSec * 10) !== Math.floor((taken.at(-2)?.tSec ?? -1) * 10)) setElapsed(f.tSec);
       if (f.tSec >= limitSec) {
@@ -241,12 +266,28 @@ export default function Studio() {
         stopRef.current = startDemoHum(onFrame);
       } else {
         setPhase("requesting");
-        stopRef.current = await startMic(onFrame);
+        const stopMic = await startMic(onFrame);
+        stopRef.current = () => {
+          done = true;
+          stopMic();
+          restoreTransport();
+        };
+        // Count in, then keep the click going so the hum lands on the beat grid. No backing tracks: the mic would hear them.
+        const engine = await playback.ensureAudio();
+        engine.schedule([], bpm);
+        engine.setMetronome(true);
+        const counted = await engine.countIn(bpm, setCountInBeat);
+        setCountInBeat(null);
+        if (!counted || done) throw new Error("count-in cancelled");
+        capturing = true;
+        engine.play();
       }
       setPhase("recording");
     } catch (e) {
+      stopRef.current?.();
+      stopRef.current = null;
       setPhase("error");
-      setError(micErrorMessage(e));
+      setError(e instanceof Error && e.message === "count-in cancelled" ? "Recording was cancelled." : micErrorMessage(e));
     }
     // Stop button finishes with the live array.
     stopTake.current = () => {
@@ -303,6 +344,10 @@ export default function Studio() {
             }}
           />
         </label>
+        <div className="field" title={`Song chords, one per bar: ${harmonyLabel(harmony)}. A Melody take sets them.`}>
+          <span>Key</span>
+          <output className="position" aria-live="polite">{harmonyLabel(harmony, 4)}</output>
+        </div>
         <label className="field">
           <span>Snap</span>
           <select value={quantize} onChange={(e) => setQuantize(e.target.value as QuantizeDivision)} disabled={busy}>
@@ -351,6 +396,7 @@ export default function Studio() {
             elapsed={elapsed}
             stage={stage}
             bpm={bpm}
+            countIn={t.instrument.id === zoomedId ? countInBeat : null}
             onOpen={() => open(t.instrument.id)}
             onBack={back}
             onRecord={record}

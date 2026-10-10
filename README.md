@@ -127,7 +127,7 @@ Planned, not yet created: note editing (`PianoRoll.tsx` or inside `TrackRow.tsx`
 
 - **One `Note` shape everywhere:** `midi`, `startBeat`, `durationBeats`, `velocity`, timed in **quarter-note beats** so BPM changes don't move notes. Defined in `src/lib/music/types.ts`.
 - **Tracks per instrument:** app state is `Track[]` (`src/lib/tracks.ts`). Each track has an instrument (color, pitch range, synth/drums), its notes, and mute/solo flags.
-- **One seam for generation:** the UI only calls `generateTrack(instrument, frames, bpm, quantize): Promise<Note[]>`. Swap the implementation; keep the signature (or coordinate a change).
+- **One seam for generation:** the UI only calls `generateTrack(instrument, frames, bpm, quantize, harmony): Promise<Note[]>`. Swap the implementation; keep the signature (or coordinate a change).
 - **Pitch is not an FFT peak:** Pitchy estimates the fundamental; the spectrogram is display only.
 - **Honest samples:** Keys and Drums start with parts labeled **Sample**; the demo hum is labeled **Demo hum**. Never present a preset as live output.
 - **Offline first:** no account, API key, or network inference.

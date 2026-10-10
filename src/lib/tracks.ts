@@ -1,3 +1,4 @@
+import { DEFAULT_HARMONY, voiceChords } from "./music/harmony.ts";
 import type { Note, QuantizeDivision } from "./music/types";
 
 export type { Note, QuantizeDivision };
@@ -65,14 +66,9 @@ function sampleDrums(): Note[] {
   return out;
 }
 
-function sampleKeys(): Note[] {
-  const chords = [[57, 60, 64], [53, 57, 60], [48, 52, 55], [55, 59, 62]]; // Am F C G
-  return chords.flatMap((c, i) => [0, 16].flatMap((o) => c.map((m) => n(m, o + i * 4, 3.5, 0.6))));
-}
-
 export function initialTracks(): Track[] {
   return INSTRUMENTS.map((instrument) => {
-    const notes = instrument.id === "drums" ? sampleDrums() : instrument.id === "keys" ? sampleKeys() : [];
+    const notes = instrument.id === "drums" ? sampleDrums() : instrument.id === "keys" ? voiceChords(DEFAULT_HARMONY) : [];
     return { instrument, notes, muted: false, solo: false, sample: notes.length > 0 };
   });
 }
