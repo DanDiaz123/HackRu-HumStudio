@@ -484,49 +484,51 @@ export default function Studio() {
             1.1.1
           </output>
         </div>
-        <label className="field">
-          <span>BPM</span>
-          <input
-            type="number"
-            min={60}
-            max={180}
-            value={bpm}
-            disabled={busy}
-            onChange={(e) => {
-              const v = e.target.valueAsNumber;
-              if (Number.isFinite(v)) setBpm(Math.min(180, Math.max(60, Math.round(v))));
-            }}
-          />
-        </label>
-        <div className="field harmony-field" title={`Song chords, one per bar: ${harmonyLabel(harmony)}. A Melody take sets them; pick a key to override.`}>
-          <span>Key</span>
-          <select aria-label="Song key" value={`${harmony.tonic} ${harmony.mode}`} disabled={busy} onChange={(e) => changeKey(e.target.value)}>
-            {KEYS.map((k) => (
-              <option key={`${k.tonic} ${k.mode}`} value={`${k.tonic} ${k.mode}`}>{keyName(k)}</option>
-            ))}
-          </select>
-          <output className="position harmony-value" aria-label="Song chords" aria-live="polite">{harmony.bars.slice(0, 4).map(chordName).join(" ")}</output>
+        <div className="transport-fields">
+          <label className="field">
+            <span>BPM</span>
+            <input
+              type="number"
+              min={60}
+              max={180}
+              value={bpm}
+              disabled={busy}
+              onChange={(e) => {
+                const v = e.target.valueAsNumber;
+                if (Number.isFinite(v)) setBpm(Math.min(180, Math.max(60, Math.round(v))));
+              }}
+            />
+          </label>
+          <div className="field harmony-field" title={`Song chords, one per bar: ${harmonyLabel(harmony)}. A Melody take sets them; pick a key to override.`}>
+            <span>Key</span>
+            <select aria-label="Song key" value={`${harmony.tonic} ${harmony.mode}`} disabled={busy} onChange={(e) => changeKey(e.target.value)}>
+              {KEYS.map((k) => (
+                <option key={`${k.tonic} ${k.mode}`} value={`${k.tonic} ${k.mode}`}>{keyName(k)}</option>
+              ))}
+            </select>
+            <output className="position harmony-value" aria-label="Song chords" aria-live="polite">{harmony.bars.slice(0, 4).map(chordName).join(" ")}</output>
+          </div>
+          <label className="field">
+            <span>Snap</span>
+            <select value={quantize} onChange={(e) => { const d = e.target.value as QuantizeDivision; setQuantize(d); regenerate(sensitivity, d); }} disabled={busy}>
+              <option value="off">Off</option>
+              <option value="1/4">1/4</option>
+              <option value="1/8">1/8</option>
+              <option value="1/16">1/16</option>
+            </select>
+          </label>
+          <label className="field sensitivity-field">
+            <span>Sensitivity</span>
+            <select aria-label="Note sensitivity" value={sensitivity} disabled={busy}
+              title={`${NOTE_SENSITIVITY_PRESETS[sensitivity].description} Switching re-reads your takes; hand-edited parts are kept.`} onChange={event => {
+                if (isNoteSensitivity(event.target.value)) { setSensitivity(event.target.value); regenerate(event.target.value, quantize); }
+              }}>
+              {NOTE_SENSITIVITY_LEVELS.map(level => (
+                <option key={level} value={level}>{NOTE_SENSITIVITY_PRESETS[level].label}</option>
+              ))}
+            </select>
+          </label>
         </div>
-        <label className="field">
-          <span>Snap</span>
-          <select value={quantize} onChange={(e) => { const d = e.target.value as QuantizeDivision; setQuantize(d); regenerate(sensitivity, d); }} disabled={busy}>
-            <option value="off">Off</option>
-            <option value="1/4">1/4</option>
-            <option value="1/8">1/8</option>
-            <option value="1/16">1/16</option>
-          </select>
-        </label>
-        <label className="field sensitivity-field">
-          <span>Sensitivity</span>
-          <select aria-label="Note sensitivity" value={sensitivity} disabled={busy}
-            title={`${NOTE_SENSITIVITY_PRESETS[sensitivity].description} Switching re-reads your takes; hand-edited parts are kept.`} onChange={event => {
-              if (isNoteSensitivity(event.target.value)) { setSensitivity(event.target.value); regenerate(event.target.value, quantize); }
-            }}>
-            {NOTE_SENSITIVITY_LEVELS.map(level => (
-              <option key={level} value={level}>{NOTE_SENSITIVITY_PRESETS[level].label}</option>
-            ))}
-          </select>
-        </label>
         <button className="export" aria-label="Export MIDI" onClick={() => exportMidi(tracks, bpm)} disabled={busy || tracks.every((t) => !t.notes.length)}>
           <DownloadIcon /> <span className="lbl">Export MIDI</span>
         </button>

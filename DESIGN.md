@@ -173,7 +173,7 @@ Floods are applied through a per-row `--flood` custom property set from the inst
 - **Off-White** (text): primary type on dark, play button fill, playhead, active Record (Stop) fill.
 - **Liner Gray** (muted): field labels, ruler numbers, ruler corner.
 
-Lane grids are drawn with two repeating gradients: bar lines at #2a2a2a and beat lines at #1a1a1a on ground; inside a flood they become black at 30% and 10%.
+Lane grids are drawn with two repeating gradients: bar lines at #2a2a2a and beat lines at #1a1a1a on ground; inside a flood they become black at 30% and 10%. A zoomed lane adds a black-8% rule under every pitch (or drum) row so each note sits on a visible row; note bars keep a 1px flood gap on their right edge only.
 
 ### Named Rules
 **The One Flood Rule.** A row carries exactly one flood. Every colored mark in that row (spine, clip, outline, label, empty prompt, zoomed lane) is that flood or ink on it. Floods never mix within a track and never appear as gradients.
@@ -204,13 +204,13 @@ Lane grids are drawn with two repeating gradients: bar lines at #2a2a2a and beat
 
 ## Layout
 
-A fixed full-viewport studio (100dvh, no page scroll) in three bands: the transport strip (56px minimum), the 28px bar ruler, and the rows region that fills the rest. Transport groups wrap onto additional lines when needed; controls keep their intrinsic widths, and the key/chords readout stays visible. Ruler and every row share one two-column grid: a fixed spine column (232px) and a fluid lane spanning 8 bars of 4/4. All lane geometry is derived in percent from beats and pitch; nothing is positioned in stored pixels.
+A fixed full-viewport studio (100dvh, no page scroll) in three bands: the transport strip (56px minimum), the 28px bar ruler, and the rows region that fills the rest. The transport stays one row and squeezes in steps rather than wrapping freely: below 1680px the chords readout hides (chords stay in the Key tooltip and the Learn lane strip); below 1540px field labels stack above their controls; below 1280px Export is icon-only; below 1180px the wordmark loses its spine width and the position readout hides. Below 860px it becomes two fixed rows (brand, transport and Export / settings), and below 480px three (brand and Export / transport / settings). Selects ellipsize as a last resort; no text clips at the edge or spills outside its box. Ruler and every row share one two-column grid: a fixed spine column (232px) and a fluid lane spanning 8 bars of 4/4. All lane geometry is derived in percent from beats and pitch; nothing is positioned in stored pixels.
 
 In the arrangement, the five rows divide the available height equally with a 56px floor, so the shelf fills a projector. Zooming a row is a grid-template-rows change: the opened row takes all remaining height (240px floor) while the others collapse to 36px slivers, with their labels and empty prompts removed. Collapsed spines keep their full flood so the ink names stay readable; only their lanes dim to 45% (80% on hover).
 
 Spacing rhythm is small and functional: 16px left gutter for spine text, the wordmark and the ruler corner; 6px insets for clips and between transport controls; 20px between transport groups. The playhead track overlays the lane column only, offset by the spine width.
 
-**Compact (max-width 720px):** the spine column narrows to 104px; BPM/Snap field labels, the Export label, the transport position readout, M/S marks and the instrument hint are hidden. The Key label and value remain visible. Spine names drop to 18px; the wordmark is 18px with intrinsic width; Record is 40px/13px with a 12px icon so its contents fit the narrow spine.
+**Compact (max-width 720px):** the spine column narrows to 104px; M/S marks and the instrument hint are hidden, and Learn's Key/Role stack label-over-value. Field labels stay visible (stacked). Spine names drop to 18px; the wordmark is 18px with intrinsic width; Record is 40px/13px with a 12px icon so its contents fit the narrow spine.
 
 Check layout at 320, 390, 720, 800, 1024, and 1280px widths: zoom each of the five tracks and confirm its full name fits, the Key value remains readable, and all toolbar controls stay on screen. Repeat with the fallback font and a longer key/chord label; wrapping must preserve the text.
 
@@ -246,7 +246,7 @@ Blunt, printed blocks; state is shown by inverting fill and ink, not by glow.
 - **Style:** 34px wells on Studio Black, 1px Hairline border, square, 15px/600 tabular values; label to the left in 11px tracked muted caps.
 - **Focus:** global 2px off-white outline.
 - **Track sound:** native select immediately beneath the expanded track title and above its hint, with a visible Sound label. Use flood fill, ink text/border/focus, square corners, and normal-width controls. Loading/error text and Retry sound sit beneath it. Keep the control within the spine at compact widths; its accessible name and title retain the full sound name.
-- **Note sensitivity:** labeled native Low/Medium/High select beside Snap in the top transport menu. Each take generates three note sets; changing the selection immediately swaps the visible version for recorded tracks. Snap immediately re-quantizes their beat positions. Use the existing square field styling; keep its label visible at compact widths, let the menu wrap, and disable changes while recording/generating.
+- **Note sensitivity:** labeled native Low/Medium/High select beside Snap in the top transport menu. Changing it (or Snap) re-generates recorded parts from their kept takes; hand-edited parts are kept. Use the existing square field styling; keep its label visible at compact widths, let the header squeeze as above, and disable changes while recording/generating.
 
 ### Navigation
 The transport strip is the only navigation: wordmark in the spine column (off-white "HUM" block with ink letters, then "STUDIO"), then rewind/play, position, BPM, Snap, and Export pushed right. Zoomed rows return via the "All tracks" back link at the top of the spine.
@@ -260,7 +260,7 @@ The sleeve spine: a full-height flood block in the spine column holding the inst
 - **Empty lane:** "Click to hum" in Title type, flood-colored, at the lane's left; hovering the lane draws a 1px flood inset outline and underlines the prompt.
 
 ### The Flood (signature)
-Opening a track floods its lane with the instrument color over the 520ms grid-row transition (`cubic-bezier(0.16, 1, 0.3, 1)`). Inside the flood: octave pitch labels in ink at the left with black-16% row rules, black note bars on the pitch axis, and the hum.
+Opening a track floods its lane with the instrument color over the 520ms grid-row transition (`cubic-bezier(0.16, 1, 0.3, 1)`). Inside the flood: octave pitch labels in ink at the left with black-16% row rules (on a flood chip that sits above the notes when Learn is off or in Drums, and under them when Learn labels each note), black note bars on the pitch axis, and the hum.
 - **Halftone spectrogram:** a canvas, not a raster: Sleeve Ink dots on a 7px screen rotated 45°, sized by magnitude and mapped onto the lane's own pitch axis so generated notes land on their dots. Melodic lanes weight the print around the detected fundamental, so harmonics don't print an octave above where no note will land; Drums print the full band.Live while recording with a 2px ink cursor; dims to 35% while generating and ghosts to 16% after.
 - **Generating:** a Headline and stage line set low-left in the lane, one per real pipeline step (notes found, snapped and fitted, key and chords), each stamped in. Raw hummed notes print in at 60% ink behind the 2px sweep, then transition (700ms, same ease) to their fitted, snapped places; chord labels stamp onto the bar grid.
 - **Reveal:** a 2px ink sweep travels to the take's last beat over 1.6s while each note sets in with a left-to-right clip-path wipe (380ms, same ease), delayed in proportion to its start beat across the take's extent, like type being set.
