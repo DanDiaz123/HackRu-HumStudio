@@ -4,7 +4,7 @@
 
 HumStudio is a browser-based music sketchpad for **HackRU Fall 2026**. It looks like a familiar multi-track editor: one track per instrument (Melody, Bass, Keys, Drums, Strings). Click a track to zoom into it, hum into your microphone while a live spectrogram prints your voice across the lane, and watch the track fill with generated notes. Then play the arrangement or export it as MIDI.
 
-> **Current repository status:** The Next.js app and **studio UI are built**: arrangement view, track zoom, live hum spectrogram, loading state, animated note reveal, five-instrument Tone.js playback, and multi-track MIDI export. Playback includes separate pause/stop, rewind, mute/solo, a metronome, a four-beat playback count-in, and regression tests. **Melodic generation uses deterministic DSP segmentation** (`src/lib/audio/segment-notes.ts`) with harmony fitting and quantization; Drums still use simple RMS-onset heuristics. Note editing (collision-aware), undo/redo, project autosave and `.humstudio.json` Save/Open, Clear/Repeat, and keyboard shortcuts are built. Real-microphone and audible playback verification remain open. See the [Person 2 handoff](WORKLOAD_SPLIT.md#person-2-implementation-handoff) for verification and limitations, and [`WORKLOAD_SPLIT.md`](WORKLOAD_SPLIT.md) for ownership.
+> **Current repository status (2026-10-10):** The Next.js studio includes arrangement view, track zoom, live hum spectrogram, animated reveal, five-instrument playback, collision-aware note editing, and MIDI export. Low/Medium/High sensitivity profiles are generated and cached per take for immediate switching; Snap rebuilds from capture tempo and updates notes immediately. Undo/redo, Clear/Repeat, keyboard shortcuts, strict ProjectV2 save/open, autosave, and v1 migration are built. The merged branch passes 168 tests, lint, TypeScript, production build, and automated Edge checks. Generation uses deterministic DSP and instrument roles; no trained model is implemented. Physical-microphone tuning, listening, deployment, and demo rehearsal remain open. See [`WORKLOAD_SPLIT.md`](WORKLOAD_SPLIT.md) for ownership.
 
 ## What are we building?
 
@@ -33,9 +33,9 @@ Pick an instrument track
 - [x] **Zoom:** clicking a track floods it with its color and collapses the others; Escape or "All tracks" returns.
 - [x] **Record:** microphone capture (up to 15 s or the end of the timeline) with Pitchy pitch estimation and a live spectrogram.
 - [x] **Generate:** stable pitch segmentation, harmony fitting, and Off/1/4/1/8/1/16 timing for melodic tracks.
-- [x] **Reveal:** shows the pipeline's real stages: the hummed notes print in, slide onto the grid and into the key, then the key and chords stamp in. Skipped under reduced motion.
+- [x] **Reveal:** shows the pipeline's real stages: detected notes print in, timing snaps when enabled, and the key/chords appear. Melody keeps confirmed pitches; other roles fit harmony. Skipped under reduced motion.
 - [x] **Learn:** chord names and roman numerals on the zoomed lane's bar grid (the current chord lights during playback), key and part role in the track panel, do-re-mi on notes, and a live pitch readout (note, degree, cents) while recording.
-- [x] **Note sensitivity:** Low, Medium, and High in the top menu; Medium uses the original thresholds. Switching it (or Snap) re-reads every kept take instantly; hand-edited parts are kept.
+- [x] **Note sensitivity:** Low, Medium, and High in the top menu; all three profiles are generated per take and swap immediately. Snap updates existing notes immediately. Hand edits opt a part out of automatic profile switching.
 - [x] **Play:** Tone.js playback of all tracks with mute/solo and BPM 60–180.
 - [x] **Track sounds:** independent smplr preset dropdowns beneath expanded track titles, with lazy loading, retry, and the original synth fallback.
 - [x] **Playback count-in / metronome:** optional four-beat count-in and beat clicks; listening verification remains open.
@@ -61,7 +61,7 @@ The demo targets **clear, one-note-at-a-time humming** in a reasonably quiet roo
 | Browser microphone | `navigator.mediaDevices.getUserMedia`, Web Audio `AnalyserNode` |
 | Fundamental pitch estimation | [Pitchy](https://github.com/ianprime0509/pitchy) |
 | Spectrogram | `<canvas>` halftone drawn from 48 log-spaced bins (80–1000 Hz) |
-| Note generation | `generateNotes(...)` in `src/lib/generate.ts`: local DSP segmentation, harmony fitting, then quantization |
+| Note generation | `generateTrack(...)` in `src/lib/generate.ts`: local DSP segmentation, harmony fitting, then quantization |
 | Sampled sounds | [smplr](https://github.com/danigb/smplr) 1.1.0; selected assets load on demand |
 | Transport / synth fallback | [Tone.js](https://tonejs.github.io/) v15; same underlying audio context as smplr |
 | MIDI export | [`@tonejs/midi`](https://github.com/Tonejs/Midi) |
@@ -71,7 +71,7 @@ The demo targets **clear, one-note-at-a-time humming** in a reasonably quiet roo
 
 **Important:** Nothing in this repo is a trained AI model. Pitch detection is DSP (Pitchy), and note generation uses deterministic heuristics. Describe it accurately when presenting.
 
-Held notes tolerate short pitch wobbles and unvoiced gaps: defaults are 120 ms of stable pitch before a change, 150 ms of silence hold, and a five-frame median with a 0.7-semitone hold region. Harmony correction happens before merging; confirmed rests still separate notes. Off preserves unsnapped beat timing. Repeated syllables on one pitch split on a level dip, and short octave slips are folded back. These values are the Medium profile; repeated notes separated only by near-silence of 150 ms or less can merge.
+Held notes tolerate short pitch wobbles and unvoiced gaps: Medium uses 120 ms of stable pitch before a change, 150 ms of silence hold, a five-frame median, and a 0.7-semitone hold region. Confirmed rests still separate notes. Off preserves unsnapped timing. Voiced repeated syllables split on a level dip; recovery after a bridged dropout waits through the 100 ms re-attack window so it does not break a continuous note. Short octave slips are folded back. Repeated notes separated only by near-silence of 150 ms or less can still merge.
 
 ### Fine-tuning note sensitivity
 
@@ -83,7 +83,7 @@ Edit the three `config` objects in [`src/lib/audio/note-sensitivity.ts`](src/lib
 | Medium (default) | 0.7 | 120 | 5 | 100 |
 | High | 0.5 | 60 | 3 | 60 |
 
-Smaller `pitchToleranceSemitones` makes smaller changes count; smaller `stableMs`/`medianWindow` reacts faster. Keep `minNoteMs` no larger than `stableMs`. Valid tolerance is 0.5..3 semitones. Silence hold, re-attack ratio and octave hold are shared by all profiles. Studio keeps each part's latest take (analysis frames only, in memory) so **Sensitivity** and **Snap** re-generate recorded parts without another take; a hand edit drops that part's take so edits are never overwritten.
+Smaller `pitchToleranceSemitones` makes smaller changes count; smaller `stableMs`/`medianWindow` reacts faster. Keep `minNoteMs` no larger than `stableMs`. Valid tolerance is 0.5..3 semitones. Silence hold, re-attack ratio and octave hold are shared by all profiles. Melody retains confirmed pitches at every level. Studio caches all three profiles plus analysis frames and the capture BPM in memory. **Sensitivity** swaps profiles; **Snap** rebuilds timing at the original BPM, so later tempo changes do not move notes. Off restores original timing. A selected key survives both settings until a new Melody take. A hand edit drops that part's take; Snap still works on edited/sample notes without discarding deliberate overlaps.
 
 ## Getting started
 
@@ -103,7 +103,7 @@ npm ci
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). Keys and Drums start with labeled sample notes. Press Play to unlock audio; Pause holds the position, Stop resets it, and Rewind returns to the start while preserving playback state. The **M** transport button toggles the metronome; **4** toggles a count-in before playback. Stop also cancels a pending count-in. A default tempo of 120 BPM and 1/16 snapping follow the shared contract.
+Open [http://localhost:3000](http://localhost:3000). Keys and Drums start with labeled sample notes. Press Play to unlock audio; Pause holds the position, Stop resets it, and Rewind returns to the start while preserving playback state. The **M** transport button toggles the metronome; **4** toggles a count-in before playback. Stop also cancels a pending count-in. Studio defaults to 120 BPM, 1/4 snapping, and Medium sensitivity.
 
 No microphone handy? Open a track and press **Demo hum**: it feeds a synthetic, clearly labeled hum through the same pipeline.
 
@@ -120,7 +120,7 @@ npm run build
 npm test
 ```
 
-`npm test` runs playback, preset loading/lifetimes, harmony, segmentation, capture, and generation regression suites using TypeScript and Node's built-in test runner, without adding a testing dependency. Fixtures cover held-note wobbles, short dropouts across frame rates and tempos, genuine rests, harmony merging, Off timing, sample switching, stale loads, fallback/retry, velocity conversion, and independent note stops. Real browser listening and microphone tests are still necessary. The production build downloads the existing Archivo font from Google Fonts when it is not cached. Lint ignores the legacy generated `.test-build/` directory.
+`npm test` runs the 168 playback, preset, harmony, segmentation, capture, generation, persistence, editing, and MIDI regression tests using TypeScript and Node's built-in test runner, without adding a testing dependency. Fixtures cover held-note wobbles, short dropouts across frame rates and tempos, genuine rests, all sensitivity profiles, harmony merging, Off timing, sample switching, stale loads, fallback/retry, strict project validation and v1 migration, collision-aware edits, velocity conversion, and independent note stops. Automated Edge checks cover sensitivity/Snap switching, Save/Open/autosave, undo/redo, invalid-file preservation, responsive controls, and synthetic microphone capture. Real browser listening and physical microphone tests are still necessary. The production build downloads the existing Archivo font from Google Fonts when it is not cached. Lint ignores the legacy generated `.test-build/` directory.
 
 ## File structure
 
@@ -138,7 +138,7 @@ src/
   lib/
     tracks.ts            # Instrument, Track, INSTRUMENTS, sample parts, lane geometry
     hum.ts               # startMic (Pitchy) / startDemoHum -> HumFrame stream; mic error messages
-    generate.ts          # generateNotes(): pure DSP pipeline, the generation seam
+    generate.ts          # generateTrack() async facade / generateNotes() pure DSP pipeline
     playback.ts          # browser-only playback facade: schedule, play/pause/stop, position, count-in
     midi.ts              # exportMidi(Track[], bpm) -> humstudio.mid
     music/               # shared contracts: types.ts (Note, QuantizeDivision)
@@ -146,13 +146,13 @@ src/
   tests/                 # playback, presets, harmony, segmentation, generation + synthetic fixtures
 ```
 
-Note editing lives in `TrackRow.tsx` with its rules in `src/lib/note-edit.ts`; persistence is `src/lib/persistence/project.ts`. Exact contracts are in [`TECHNICAL_SPEC.md`](TECHNICAL_SPEC.md).
+Note editing lives in `TrackRow.tsx` with pure rules in `src/lib/note-edit.ts`; settings updates use `src/lib/music/arrangement-settings.ts`, and persistence is `src/lib/persistence/project.ts`. Exact contracts are in [`TECHNICAL_SPEC.md`](TECHNICAL_SPEC.md).
 
 ## Key design choices
 
 - **One `Note` shape everywhere:** `midi`, `startBeat`, `durationBeats`, `velocity`, timed in **quarter-note beats** so BPM changes don't move notes. Defined in `src/lib/music/types.ts`.
 - **Tracks per instrument:** app state is `Track[]` (`src/lib/tracks.ts`). Each track has an instrument (color, pitch range, synth/drums), its notes, and mute/solo flags.
-- **One seam for generation:** the UI only calls `generateNotes(instrument, frames, bpm, quantize, harmony, sensitivity?, trace?): Note[]`. Swap the implementation; keep the signature (or coordinate a change).
+- **Generation boundary:** `generateTrack(...)` remains the async single-profile facade; `generateTrackVariants(...)` computes all three profiles for the UI. Pure settings helpers preserve capture tempo, manual edits, and harmony decisions.
 - **Pitch is not an FFT peak:** Pitchy estimates the fundamental; the spectrogram is display only.
 - **Honest samples:** Keys and Drums start with parts labeled **Sample**; the demo hum is labeled **Demo hum**. Never present a preset as live output.
 - **Local processing:** no account, API key, or network inference. Sampled presets fetch upstream assets on demand; the synth fallback works without them.
@@ -181,7 +181,7 @@ If the room or mic fails, use **Demo hum** and say it is a demo hum.
 
 ## Privacy and data
 
-Microphone audio is analyzed in the browser and discarded after the take; only note data is kept (in memory, the browser's own storage, and files you Save). Nothing is uploaded. Saved projects store notes and settings, never audio.
+Microphone samples are analyzed locally and discarded. Latest-take analysis features and sensitivity caches remain in memory only; hand edits remove that part's take cache. Saved projects and autosave contain notes and settings, never audio or analysis frames. Nothing is uploaded.
 
 ## Documentation
 

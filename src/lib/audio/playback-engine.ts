@@ -48,6 +48,12 @@ interface ScheduledNote {
   endTick: number;
 }
 
+function validateBpm(bpm: number): void {
+  if (!Number.isFinite(bpm) || bpm < 60 || bpm > 180) {
+    throw new RangeError("BPM must be finite and between 60 and 180.");
+  }
+}
+
 function arrangement(tracks: readonly Track[], ppq: number): ScheduledNote[] {
   const solo = tracks.some((track) => track.solo);
   const notes = tracks.flatMap((track) => {
@@ -92,6 +98,8 @@ export function createPlaybackEngine(backend: PlaybackBackend) {
   let currentTracks: readonly Track[] = [];
   let currentBpm = 120;
   let disposed = false;
+  let scheduleRevision = 0;
+  let metronomeRevision = 0;
 
   function voice(note: ScheduledNote) {
     let value = voices.get(note.voiceKey);
@@ -110,11 +118,13 @@ export function createPlaybackEngine(backend: PlaybackBackend) {
   }
 
   function clearEvents() {
+    scheduleRevision++;
     eventIds.forEach((id) => backend.clear(id));
     eventIds = [];
   }
 
   function scheduleMetronome(enabled: boolean) {
+    const revision = ++metronomeRevision;
     clickEventIds.forEach((id) => backend.clear(id));
     clickEventIds = [];
     clicks.silenceMetronome();
@@ -122,7 +132,7 @@ export function createPlaybackEngine(backend: PlaybackBackend) {
     if (!enabled) return;
     for (let beat = 0; beat < TOTAL_BEATS; beat++) {
       clickEventIds.push(backend.schedule((time) => {
-        if (backend.state === "started") clicks.click(time, beat % 4 === 0);
+        if (!disposed && revision === metronomeRevision && backend.state === "started") clicks.click(time, beat % 4 === 0);
       }, beat * backend.ppq));
     }
   }
@@ -153,13 +163,11 @@ export function createPlaybackEngine(backend: PlaybackBackend) {
     },
     /** Runtime sample status, kept outside canonical track state. */
     subscribePresets(listener: (status: PresetStatus) => void): () => void {
-      return backend.subscribePresets?.(listener) ?? (() => {});
+      return disposed ? () => {} : backend.subscribePresets?.(listener) ?? (() => {});
     },
     /** Replace derived playback atomically. Invalid data preserves the previous arrangement. */
     schedule(tracks: readonly Track[], bpm: number) {
-      if (!Number.isFinite(bpm) || bpm < 60 || bpm > 180) {
-        throw new RangeError("BPM must be finite and between 60 and 180.");
-      }
+      validateBpm(bpm);
       const next = arrangement(tracks, backend.ppq);
       if (disposed) return;
       backend.syncPresets?.(tracks);
@@ -170,6 +178,8 @@ export function createPlaybackEngine(backend: PlaybackBackend) {
       const tick = backend.positionTicks();
       if (running) backend.pause();
       clearEvents();
+      // Clearing an event cannot retract a callback already queued by the audio clock.
+      const revision = scheduleRevision;
       silence();
       notes = next;
       backend.setBpm(bpm);
@@ -180,13 +190,13 @@ export function createPlaybackEngine(backend: PlaybackBackend) {
       for (const note of notes) {
         if (note.endTick < TOTAL_BEATS * backend.ppq) {
           eventIds.push(backend.schedule((time) => {
-            if (backend.state === "started") voices.get(note.voiceKey)?.release(note.midi, time);
+            if (!disposed && revision === scheduleRevision && backend.state === "started") voices.get(note.voiceKey)?.release(note.midi, time);
           }, note.endTick));
         }
       }
       for (const note of notes) {
         eventIds.push(backend.schedule((time) => {
-          if (backend.state === "started") voice(note).attack(note.midi, time, note.velocity);
+          if (!disposed && revision === scheduleRevision && backend.state === "started") voice(note).attack(note.midi, time, note.velocity);
         }, note.startTick));
       }
       if (running) {
@@ -198,18 +208,20 @@ export function createPlaybackEngine(backend: PlaybackBackend) {
     },
     /** Start or resume at the current beat, including any interrupted sustained notes. */
     play() {
-      if (backend.state === "started") return;
+      if (disposed || backend.state === "started") return;
       resumeHeldNotes();
       backend.start();
     },
     /** Pause at the current beat and silence all voices, including pending attacks. */
     pause() {
+      if (disposed) return;
       clicks.cancelCountIn();
       backend.pause();
       silence();
     },
     /** Stop and return to beat zero. */
     stop() {
+      if (disposed) return;
       clicks.cancelCountIn();
       backend.stop();
       backend.seekTicks(0);
@@ -217,6 +229,7 @@ export function createPlaybackEngine(backend: PlaybackBackend) {
     },
     /** Return to beat zero, preserving whether the transport was running. */
     rewind() {
+      if (disposed) return;
       clicks.cancelCountIn();
       const running = backend.state === "started";
       backend.pause();
@@ -225,9 +238,13 @@ export function createPlaybackEngine(backend: PlaybackBackend) {
       if (running) backend.start();
     },
     /** Enable/disable quarter-note clicks; accent each 4/4 downbeat. */
-    setMetronome: scheduleMetronome,
+    setMetronome(enabled: boolean) {
+      if (!disposed) scheduleMetronome(enabled);
+    },
     /** Four audio-clock beats before playback. Resolves false when cancelled. BPM is fixed for the count-in. */
     countIn(bpm: number, onBeat: (remaining: number) => void = () => {}) {
+      if (disposed) return Promise.resolve(false);
+      validateBpm(bpm);
       backend.pause();
       silence();
       return clicks.countIn(bpm, onBeat);

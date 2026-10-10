@@ -1,4 +1,4 @@
-import type { SegmentationConfig } from "./segment-notes";
+import type { SegmentationConfig } from "./segment-notes.ts";
 
 export const NOTE_SENSITIVITY_LEVELS = ["low", "medium", "high"] as const;
 export type NoteSensitivity = typeof NOTE_SENSITIVITY_LEVELS[number];

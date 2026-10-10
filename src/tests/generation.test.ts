@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type GenTrace, generateNotes } from "../lib/generate.ts";
+import { type GenTrace, generateNotes, generateTrack, snapNotesToGrid } from "../lib/generate.ts";
+import type { HumFrame } from "../lib/hum.ts";
 import { DEFAULT_HARMONY } from "../lib/music/harmony.ts";
 import { INSTRUMENTS, type Note, type QuantizeDivision } from "../lib/tracks.ts";
 import { pitchFrames } from "./fixtures/transcription.ts";
@@ -9,6 +10,7 @@ const instrument = (id: string) => INSTRUMENTS.find(i => i.id === id)!;
 /** Highest note at each start beat: the hummed line inside a Keys chord part. */
 const topVoice = (notes: Note[]) =>
   notes.filter(n => !notes.some(o => o.startBeat === n.startBeat && o.midi > n.midi));
+const timing = (notes: Note[]) => notes.map(({ midi, startBeat, durationBeats }) => ({ midi, startBeat, durationBeats }));
 
 test("the reported held-note fragmentation stays one note across tempos and grids", () => {
   const frames = pitchFrames(Array.from({ length: 6 }, () => [
@@ -118,9 +120,62 @@ test("generation never mutates source frames and drum Off onsets are unsnapped",
   assert.ok(drums.some(n => n.midi !== 42 && n.startBeat === 0.26));
 });
 
+test("the existing async recording seam uses the same stable generation path", async () => {
+  const frames = pitchFrames([{ midi: 60, durationSec: 0.6 }]);
+  const expected = generateNotes(instrument("melody"), frames, 120, "off", DEFAULT_HARMONY);
+  const actual = await generateTrack(instrument("melody"), frames, 120, "off", DEFAULT_HARMONY);
+  assert.deepEqual(timing(actual), timing(expected));
+});
+
 test("a silent drum take returns no notes, not fill-in hats", () => {
   const frames = pitchFrames([{ midi: null, durationSec: 2 }]);
   assert.deepEqual(generateNotes(instrument("drums"), frames, 120, "1/8", DEFAULT_HARMONY), []);
+});
+
+test("malformed drum analysis cannot create non-finite notes or crash classification", () => {
+  const frame = pitchFrames([{ midi: 60, durationSec: 0.2 }])[0];
+  for (const rms of [NaN, Infinity, -1])
+    assert.deepEqual(generateNotes(instrument("drums"), [{ ...frame, rms }], 120, "off", DEFAULT_HARMONY), []);
+  for (const tSec of [NaN, Infinity, -1])
+    assert.deepEqual(generateNotes(instrument("drums"), [{ ...frame, tSec }], 120, "off", DEFAULT_HARMONY), []);
+  const malformed = [null, { ...frame, bins: null, zcrHz: NaN }, { ...frame, tSec: -1 }] as unknown as HumFrame[];
+  const notes = generateNotes(instrument("drums"), malformed, 120, "off", DEFAULT_HARMONY);
+  for (const note of notes) {
+    assert.ok(Number.isFinite(note.startBeat) && note.startBeat >= 0);
+    assert.ok(Number.isFinite(note.durationBeats) && note.durationBeats > 0);
+    assert.ok(Number.isFinite(note.velocity) && note.velocity >= 0 && note.velocity <= 1);
+  }
+});
+
+test("drum attacks clip at beat 32 and out-of-song hits cannot create fill-in hats", () => {
+  const frames = pitchFrames([{ midi: 45, durationSec: 0.04 }], 0.02, 15.9);
+  for (const quantize of ["off", "1/4", "1/8", "1/16"] as const) {
+    for (const note of generateNotes(instrument("drums"), frames, 120, quantize, DEFAULT_HARMONY))
+      assert.ok(note.startBeat + note.durationBeats <= 32, quantize);
+    assert.deepEqual(generateNotes(instrument("drums"), frames.map(frame => ({ ...frame, tSec: frame.tSec + 10 })),
+      120, quantize, DEFAULT_HARMONY), []);
+  }
+});
+
+test("Snap preserves hand-edited polyphonic overlaps and ids while bounding the timeline", () => {
+  const notes = Object.freeze([
+    Object.freeze({ id: "a", midi: 60, startBeat: 0.26, durationBeats: 2.5, velocity: 0.8 }),
+    Object.freeze({ id: "b", midi: 64, startBeat: 0.8, durationBeats: 2.1, velocity: 0.6 }),
+  ]);
+  const snapped = snapNotesToGrid(instrument("keys"), notes, "1/4");
+  assert.deepEqual(snapped.map(note => note.id), ["a", "b"]);
+  assert.deepEqual(snapped.map(note => note.midi), [60, 64]);
+  assert.ok(snapped[0].startBeat + snapped[0].durationBeats > snapped[1].startBeat);
+  assert.equal(notes[0].startBeat, 0.26);
+  const off = snapNotesToGrid(instrument("keys"), notes, "off");
+  assert.deepEqual(off, notes);
+  assert.notEqual(off[0], notes[0]);
+  const lastHit = { id: "hit", midi: 36, startBeat: 31.65, durationBeats: 0.35, velocity: 0.8 };
+  for (const quantize of ["1/4", "1/8", "1/16"] as const) {
+    const [hit] = snapNotesToGrid(instrument("drums"), [lastHit], quantize);
+    assert.ok(hit.startBeat + hit.durationBeats <= 32);
+    assert.ok(hit.durationBeats > 0);
+  }
 });
 
 test("the trace records the unsnapped hummed line, and melody ids come from it", () => {
@@ -131,6 +186,7 @@ test("the trace records the unsnapped hummed line, and melody ids come from it",
   const notes = generateNotes(instrument("melody"), frames, 120, "1/4", DEFAULT_HARMONY, undefined, trace);
   assert.ok(trace.voicedFrames > 0);
   assert.equal(trace.grid, 1);
+  assert.deepEqual(trace.key, { tonic: 0, mode: "major" });
   assert.ok(trace.raw.length >= notes.length && notes.length >= 1);
   const rawIds = new Set(trace.raw.map((n) => n.id));
   for (const n of notes) assert.ok(rawIds.has(n.id), n.id);
