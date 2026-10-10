@@ -193,6 +193,7 @@ export interface HumFrame {
   bins: Float32Array;    // 48 log-spaced magnitudes, 80..1000 Hz, 0..1 (spectrogram display)
   hz: number | null;     // Pitchy fundamental, null when unvoiced/rejected
   rms: number;
+  zcrHz?: number;        // zero crossings as a frequency; drums use it for hat vs snare (absent on demo frames)
 }
 ```
 
@@ -210,7 +211,16 @@ export async function generateTrack(
 ): Promise<Note[]>;
 ```
 
-The UI calls only this. It delegates to the pure `generateNotes(inst, frames, bpm, quantize, harmony): Note[]` and retains the existing ~2.4 s presentation delay. Melodic generation segments frames in seconds, octave-fits the instrument, corrects harmony, merges identical pitches within the same phrase, then converts/snaps beat boundaries. Off preserves raw beat timing. A confirmed rest changes the phrase ID so later correction or snapping cannot merge separate attacks. Drums retain RMS-onset kick/snare plus eighth-note-hat heuristics. Tempo outside 60..180, unknown grid values, and more than 10,000 frames throw; unusable melodic input returns `[]` (the UI keeps existing notes). The `generateTrack` and canonical note contracts are unchanged.
+The UI calls only this. It delegates to the pure `generateNotes(inst, frames, bpm, quantize, harmony): Note[]` and retains the existing ~2.4 s presentation delay. Melodic generation segments frames in seconds, octave-fits the instrument, corrects harmony, merges identical pitches within the same phrase, then converts/snaps beat boundaries into one hummed line. Off preserves raw beat timing. A confirmed rest changes the phrase ID so later correction or snapping cannot merge separate attacks. The line is then shaped by instrument role (`src/tests/roles.test.ts`):
+
+- **Melody:** snapped to its own detected scale; a short note 10+ semitones from both neighbours in the same direction is an octave error and folds back; velocity accents beat 1 > beat 3 > other beats > off-beats.
+- **Bass:** root/fifth of each bar's chord; notes are split at barlines so a held note re-strikes on the new root, and a bar's first note within beat 1 is pulled onto the downbeat as the root.
+- **Keys:** the hum is snapped to the song's scale and picks the chords: per bar, `pickChords` takes the diatonic triad covering the hummed notes best (+0.5 toward the current chord; unhummed bars keep theirs). Each hummed note becomes that triad, hummed pitch on top, the other tones within the octave below.
+- **Strings:** a pad. Each note is held into the next (through breaths up to 2 beats, otherwise to its barline), split at barlines and re-fitted to chord tones, and doubled by the next chord tone below.
+- **Drums:** onset = RMS above 0.02 and at least double its recent floor, at most one per 80 ms. In the next 60 ms, low pitch (<160 Hz) or a low spectral centroid is a kick; otherwise a mean `zcrHz` >= 3000 is a hat ("ts" hiss) and lower is a snare. Frames without `zcrHz` fall back to loudness (>= 60% of the take's loudest = snare). Eighth-note hats are added only when no hats were beatboxed.
+- **Timing (all tracks):** before snapping, the take is shifted by the constant offset (within +/-80 ms, 5 ms steps, smallest on ties) that puts its onsets closest to the grid (`alignmentSec`; needs 3+ onsets, skipped for Off). This absorbs unmeasured mic latency and singing consistently ahead of or behind the click. It can only resolve offsets under half a grid step.
+
+ Tempo outside 60..180, unknown grid values, and more than 10,000 frames throw; unusable melodic input returns `[]` (the UI keeps existing notes). The `generateTrack` and canonical note contracts are unchanged.
 
 ### 3.4 Shared harmony (implemented, `src/lib/music/harmony.ts`)
 
@@ -221,9 +231,11 @@ export interface Harmony { tonic: number; mode: "major" | "minor"; bars: number[
 export const DEFAULT_HARMONY: Harmony; // C major, Am F C G x2 (the Keys sample)
 ```
 
-- **Melody sets it.** A Melody take is snapped to its own detected key (Krumhansl-Schmuckler, `detectKey`), then `inferHarmony` picks one diatonic triad per bar (chord tones weighted by duration, x2 on beats 1 and 3, small priors for I/IV/V/vi and a tonic first bar; empty bars repeat the previous chord).
+- **Melody sets it.** A Melody take is snapped to its own detected key (Krumhansl-Schmuckler, `detectKey`), then `inferHarmony` picks one diatonic triad per bar (chord tones weighted by duration, x2 on beats 1 and 3, small priors for I/IV/V/vi and a tonic first bar; empty bars repeat the previous chord). `detectKey` gives a one-beat bonus each to the last and the longest note. Bars are chosen together by Viterbi with small bonuses for progression moves (V-I, IV-V, ii-V and similar), so a bar the melody fits about equally to two chords follows the progression.
+- **The user can override the key.** The transport's Key select calls `withKey`: chords are re-picked from the Melody in that key (or the sample progression moves to it), and every pitched part, Melody included, is refitted.
 - **Everything else fits it.** `fitToHarmony` moves pitches, never deletes notes: Bass to the nearest root/fifth of the bar's chord, Keys and Strings to the nearest chord tone, Melody to the scale, Drums untouched, all kept in the instrument's range.
-- After a Melody take, Studio re-voices a Sample Keys part (`voiceChords`) and re-fits every other generated pitched part to the new harmony.
+- **Keys re-picks the chords.** A Keys take keeps the key but sets each hummed bar's chord to the triad it plays (`chordsFromVoicing` reads it back from the notes).
+- After a Melody or Keys take, Studio re-voices a Sample Keys part (`voiceChords`) and re-fits every other generated pitched part to the new harmony.
 - The multi-track `Project` schema must store `harmony`.
 
 ### Invariant checks
@@ -308,7 +320,7 @@ export function segmentsToNotes(
 type Phase = "idle" | "requesting" | "recording" | "generating" | "revealing" | "done" | "error";
 ```
 
-Path: `idle -> requesting -> recording -> generating -> revealing -> done`. The Demo hum skips `requesting`. Errors can occur at `requesting` (mic), after stop (fewer than 10 voiced frames), or in `generating` (no notes / throw); every error keeps existing notes and offers Try again and Demo hum. Recording auto-stops at `min(15 s, the end of the 8-bar timeline at the current BPM)`. While `requesting`/`recording`/`generating`/`revealing`, zoom changes, BPM, snap, play, and export are disabled. A count-in phase (`counting-in`) is a P1 target. Only one session exists at a time.
+Path: `idle -> requesting -> recording -> generating -> revealing -> done`. The Demo hum skips `requesting`. Errors can occur at `requesting` (mic), after stop (fewer than 10 voiced frames), or in `generating` (no notes / throw); every error keeps existing notes and offers Try again and Demo hum. Recording auto-stops at `min(15 s, the end of the 8-bar timeline at the current BPM)`. While `requesting`/`recording`/`generating`/`revealing`, zoom changes, BPM, snap, play, and export are disabled. A recording count-in (four clicks, then the click continues) runs between `requesting` and `recording`; the Demo hum skips it. Only one session exists at a time.
 
 ### 5.2 Acquisition and analysis (implemented in `startMic`, `src/lib/hum.ts`)
 
@@ -333,8 +345,8 @@ Implementation steps:
 
 1. Check secure context and `navigator.mediaDevices` availability before requesting mic.
 2. Request the stream from a click handler. A denied request sets an actionable error state, preserving existing notes.
-3. **(implemented)** After permission, play a four-beat count-in, then keep the metronome clicking (no backing tracks; the mic has echo cancellation off) while capturing. Frames during the count-in are dropped and `tSec` is rebased so the first captured frame is 0. Demo hum skips the count-in. The arrangement and metronome setting are restored on finish/error/unmount.
-4. Every roughly 20 ms (using `requestAnimationFrame` with gating), fill `samples` from the analyser and pass the current buffer and actual sample rate to Pitchy.
+3. **(implemented)** After permission, play a four-beat count-in, then keep the metronome clicking (no backing tracks; the mic has echo cancellation off) while capturing. The mic runs on Tone's AudioContext (`playback.micContext()`), so frames are stamped on the click's clock; `tSec` is rebased to the moment the first post-count-in click is heard (`engine.nowSec()` at `play()` plus output latency) and earlier frames are dropped. Demo hum skips the count-in. The arrangement and metronome setting are restored on finish/error/unmount.
+4. **(implemented)** An `AudioWorkletNode` (`public/hum-worklet.js`, no outputs) forwards every mic sample to the main thread in 20 ms hops (`HOPS_PER_SEC = 50` at the actual sample rate). `hum.ts` keeps a 4096-sample sliding window, runs Pitchy on it each hop (`analyzeWindow`), and stamps the frame with the window centre on the audio clock (`windowCenterSec`). Hops queue rather than drop while the page is busy, and capture continues in a background tab. The AnalyserNode remains only for the spectrogram bins.
 5. Append **compact** `PitchFrame` objects, not copied PCM waveforms, to the recording session. Up to 15 seconds of frames is sufficient for demo.
 6. On Stop (or 15-second maximum), stop the loop, close/cleanup the analysis graph and tracks, run segmentation + quantization, then dispatch `ADD_NOTES`/`REPLACE_NOTES` as intentionally chosen by UI policy.
 7. On unmount/error/permission change, always run cleanup in `finally`. Never leave the browser mic active after Stop.
@@ -393,6 +405,8 @@ export interface SegmentationConfig {
   minNoteMs: number;
   medianWindow: number;
   pitchToleranceSemitones: number;
+  reattackRatio: number; // default 1.8
+  octaveHoldMs: number;  // default 250
 }
 export function segmentPitchFrames(
   frames: readonly SegmentationFrame[],
@@ -405,18 +419,20 @@ export function segmentPitchFrames(
 1. Treat rejected or invalid pitch frames as unvoiced.
 2. Map valid `hz` to *continuous* MIDI (`69 + 12 log2(hz/440)`), then apply a rolling median over recent valid frames; avoid prematurely rounding each noisy observation.
 3. Retain the active/candidate pitch while the smoothed value stays within 0.7 semitones; otherwise round to a new integer MIDI pitch. This hysteresis suppresses boundary-crossing vibrato.
-4. Start a **candidate** when a pitch appears; confirm only after it stays within the same note region for `stableMs` (default 120 ms). On confirmation, use the candidate's first timestamp as onset.
+4. Start a **candidate** when a pitch appears; confirm only after it stays within the same note region for `stableMs` (default 120 ms). On confirmation, the onset is the earliest frame in the median window already within tolerance of the new pitch (the median notices a change about two frames late). The first note of a phrase starts at the phrase's first voiced frame when the unconfirmed lead-in (a scoop) is at most `stableMs`.
 5. A candidate that changes before confirmation is replaced, not emitted.
 6. During an active note, treat a short change as pitch jitter. If a different MIDI pitch remains stable for `stableMs`, close the prior segment and start another at the new candidate's first timestamp.
 7. Keep the active note and median history across unvoiced gaps of at most `silenceHoldMs` (default 150 ms), measured from the first unvoiced frame. Longer silence or a missing-frame gap closes the note at the **last voiced timestamp**, clears history, and advances `phraseId`. All timing thresholds use seconds independently of BPM.
 8. After instrument/harmony fitting, generation merges adjacent identical pitches only within the same phrase and a gap <= 150 ms. Quantization follows merging and caps overlaps; a confirmed rest cannot be undone by either step.
-9. Drop segments below `minNoteMs` (default 100 ms), skip invalid/non-increasing timestamps, and limit input to 10,000 frames. Configuration timing must be finite and >0..1000 ms, medianWindow an integer 1..31, and pitchToleranceSemitones finite >=0.5 and <1. Generation clips notes at beat 32. Neither function mutates input frames.
+9. **Re-attack:** on the same pitch, a frame whose RMS is at least `reattackRatio` (1.8) times the quietest frame of the last 100 ms (itself >= 0.01, so dropouts are still bridged by step 7) closes the note at the dip and starts a new one at this frame with a new `phraseId`, once the held note is at least `minNoteMs` old. This separates "da-da-da".
+10. **Octave slips:** a frame about an octave (+/-2 semitones) off the active note is folded back for up to `octaveHoldMs` (250 ms); a jump that lasts longer is a sung leap and becomes a note starting where the jump began. Octave leaps held for less than 250 ms are folded.
+11. Drop segments below `minNoteMs` (default 100 ms), skip invalid/non-increasing timestamps, and limit input to 10,000 frames. Configuration timing must be finite and >0..1000 ms, medianWindow an integer 1..31, and pitchToleranceSemitones finite >=0.5 and <1. Generation clips notes at beat 32. Neither function mutates input frames.
 
 ### Known limitations
 
 - Fast trills, slides, vibrato across semitone boundaries, breathy tones and very low notes may require tuning.
-- Identical notes without a gap, or with gaps of 150 ms or less, may merge into one sustained note. Stable pitch changes shorter than 120 ms can be suppressed. Solving fast repeated attacks robustly requires onset/envelope detection beyond P0.
-- AnalyserNode plus animation-frame polling is approximate; moving to an AudioWorklet is a later performance improvement.
+- Repeated same-pitch syllables split on a level dip (step 9), but a near-silent gap of 150 ms or less is still bridged as a dropout, and a dip shallower than the 1.8 ratio merges. Stable pitch changes shorter than 120 ms can be suppressed.
+- Mic input latency is not measurable in the browser; the grid alignment absorbs it when it is under half a grid step.
 - Noise gating may reject quiet singing; thresholds are configurable, not universal.
 
 ### Expected example
@@ -448,10 +464,10 @@ Do **not** label a DSP pitch detector as a trained neural model unless a model i
 
 ### 8.2 Transport and recording controls
 
-- **Transport bar (implemented):** wordmark, Rewind, Play/Pause toggle (pause preserves position), separate Stop (resets to zero), metronome toggle, four-beat playback count-in toggle, position readout `bar.beat.sixteenth`, BPM number input (60-180), Snap select (Off, 1/4, 1/8, 1/16), Export MIDI. *Target:* Save Project, Open Project.
+- **Transport bar (implemented):** wordmark, Rewind, Play/Pause toggle (pause preserves position), separate Stop (resets to zero), metronome toggle, four-beat playback count-in toggle, position readout `bar.beat.sixteenth`, BPM number input (60-180), Key select (24 keys) with the first four bars' chords, Snap select (Off, 1/4, 1/8, 1/16), Export MIDI. *Target:* Save Project, Open Project.
 - **Zoomed header (implemented):** All tracks (back), instrument name, hint, Record / Stop / Re-record, Demo hum, and a status line with a filled-or-hollow mark plus text (e.g. "Demo hum 0:05.2", "Generating", "8 notes").
 - A first Play click awaits `Tone.start()` before audio. Recording uses its own `AudioContext` and does not need Tone.
-- **Defaults (implemented):** BPM = 120, quantization = 1/16, matching `Studio.tsx` and the shared defaults.
+- **Defaults (implemented):** BPM = 120, quantization = 1/4, matching `Studio.tsx` and the shared defaults.
 - **Replace rule (implemented):** a successful take **replaces that track's notes** after the reveal; a failed or empty take changes nothing. The button reads "Re-record" when the track already holds a generated part. *P1:* confirm before overwriting a non-sample part.
 
 ### 8.3 Keyboard/accessibility
@@ -500,7 +516,7 @@ Contract and lifecycle:
 - Validate BPM 60..180 before replacing the existing schedule. `Track[]` is typed app state and is not re-validated here; untrusted note data is validated once at JSON import (section 10). Playback covers the visible 32-beat loop; later onsets are silent and note ends are clipped at its boundary.
 - Muted tracks are silent even when soloed. Multiple solo tracks play together. Independent synth lanes preserve durations of overlapping notes at the same pitch. Synthesized drums support MIDI 36, 38, 42, 46, and 49 with fixed percussive envelopes rather than sustained pitched-note durations.
 - `positionBeats` reads transport ticks at the current audible AudioContext time, excluding Tone's lookahead. Before initialization `getEngine()` returns `null`.
-- The optional metronome accents every four beats. `countIn` schedules four clicks on the audio clock without advancing the arrangement, and resolves `false` on pause/stop/rewind/reschedule/disposal. Count-in currently precedes playback; recording count-in remains a Person 1/4 integration decision, and must start microphone-relative timestamps only after counting completes.
+- The optional metronome accents every four beats. `countIn` schedules four clicks on the audio clock without advancing the arrangement, and resolves `false` on pause/stop/rewind/reschedule/disposal. Count-in precedes playback when toggled, and always precedes a mic recording; microphone-relative timestamps start only after counting completes (§5).
 - MIDI pitch is numeric in state. At synth boundary convert to note name/frequency with Tone helpers or verified pitch conversion; never change canonical note format.
 - The editor is the canonical state. Tone.js scheduling is a **derived side effect**, never the only copy of the arrangement.
 
@@ -605,7 +621,7 @@ type ProjectAction =
 
 ### Unit tests (use synthetic fixtures)
 
-`npm test` runs 46 tests: 17 playback, 6 harmony, 12 segmentation, and 11 generation tests. Transcription fixtures cover 100 ms pitch wobbles, vibrato, 120 ms dropouts at 10/20/40 ms frame hops, the 150 ms silence boundary, genuine pitch changes/rests, harmony merging, all grids across 60/120/180 BPM, Off timing, instrument ranges, invalid input, immutability, and the async UI seam. Playback covers repeated scheduling, five-track timing, tempo changes, mute/solo, overlapping notes, transport lifecycle, invalid inputs, teardown, and metronome/count-in cancellation. Persistence, MIDI, and real-microphone checks below remain targets.
+`npm test` runs 65 tests: 17 playback, 9 harmony, 16 segmentation, 11 generation, 7 per-instrument role, 3 capture (sliding window, window-centre timestamps, synthetic mic path), and 2 scoring tests, plus one test per real take in `src/tests/takes/*.json`. Real takes are captured in `npm run dev` with `copy(__humTake)` in the console (analysis frames only, no audio), given hand-written `expected` notes, and scored by note F1 (pitch equal, onset within 50 ms); an optional `minF1` makes a take a regression gate. Transcription fixtures cover 100 ms pitch wobbles, vibrato, 120 ms dropouts at 10/20/40 ms frame hops, the 150 ms silence boundary, genuine pitch changes/rests, harmony merging, all grids across 60/120/180 BPM, Off timing, instrument ranges, invalid input, immutability, and the async UI seam. Playback covers repeated scheduling, five-track timing, tempo changes, mute/solo, overlapping notes, transport lifecycle, invalid inputs, teardown, and metronome/count-in cancellation. Persistence, MIDI, and real-microphone checks below remain targets.
 
 | ID | Input | Expected result |
 |---|---|---|

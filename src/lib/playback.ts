@@ -25,6 +25,12 @@ export async function ensureAudio(): Promise<PlaybackEngine> {
   }
 }
 
+/** Tone's audio context for the mic, so hum frames and the click share a clock. Call after ensureAudio(). */
+export async function micContext() {
+  const { micContext } = await import("./audio/tone-backend");
+  return micContext();
+}
+
 /** Release this studio's audio resources and cancel any pending initialization. */
 export function dispose(): void {
   lifecycle++;

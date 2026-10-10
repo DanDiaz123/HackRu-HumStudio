@@ -4,7 +4,20 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { generateTrack } from "@/lib/generate";
 import { type HumFrame, micErrorMessage, startDemoHum, startMic } from "@/lib/hum";
 import { exportMidi } from "@/lib/midi";
-import { DEFAULT_HARMONY, fitToHarmony, harmonyLabel, inferHarmony, voiceChords } from "@/lib/music/harmony";
+import {
+  DEFAULT_HARMONY,
+  type Harmony,
+  KEYS,
+  type Mode,
+  chordName,
+  chordsFromVoicing,
+  fitToHarmony,
+  harmonyLabel,
+  inferHarmony,
+  keyName,
+  voiceChords,
+  withKey,
+} from "@/lib/music/harmony";
 import * as playback from "@/lib/playback";
 import {
   MAX_RECORD_SEC,
@@ -21,6 +34,10 @@ import TrackRow, { type Phase, REVEAL_SEC } from "./TrackRow";
 
 const COLLAPSED_H = 36;
 
+/** Move a part onto new harmony without deleting notes: the Keys sample is re-voiced, drums stay put. */
+const refit = (t: Track, h: Harmony): Track =>
+  t.instrument.kind === "drums" ? t : { ...t, notes: t.sample ? voiceChords(h) : fitToHarmony(t.notes, t.instrument, h) };
+
 function readout(beat: number) {
   const bar = Math.floor(beat / 4) + 1;
   const b = Math.floor(beat % 4) + 1;
@@ -32,7 +49,7 @@ export default function Studio() {
   const [tracks, setTracks] = useState<Track[]>(initialTracks);
   const [harmony, setHarmony] = useState(DEFAULT_HARMONY);
   const [bpm, setBpm] = useState(120);
-  const [quantize, setQuantize] = useState<QuantizeDivision>("1/16");
+  const [quantize, setQuantize] = useState<QuantizeDivision>("1/4");
   const [zoomedId, setZoomedId] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState("");
@@ -202,6 +219,11 @@ export default function Studio() {
         setError("We didn't catch a hum. Get closer to the mic and try again.");
         return;
       }
+      if (process.env.NODE_ENV === "development") {
+        // Dev only: `copy(__humTake)` in the console saves this take for src/tests/takes (analysis frames, no audio).
+        const frames = taken.map((f) => ({ ...f, bins: Array.from(f.bins) }));
+        Object.assign(window, { __humTake: { instrument: zoomed.instrument.id, bpm, quantize, harmony, frames } });
+      }
       setPhase("generating");
       setStage(0);
       const timer = setInterval(() => setStage((s) => Math.min(2, s + 1)), 800);
@@ -214,14 +236,14 @@ export default function Studio() {
         const ms = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : (REVEAL_SEC + 0.5) * 1000;
         setTimeout(() => {
           const id = zoomed.instrument.id;
-          // A Melody take sets the song's chords; other pitched parts are re-fitted (moved, never deleted).
-          const h = id === "melody" ? inferHarmony(notes) : null;
+          // A Melody take sets the key and chords, a Keys take re-picks the chords; other pitched parts
+          // are re-fitted (moved, never deleted).
+          const h = id === "melody" ? inferHarmony(notes) : id === "keys" ? chordsFromVoicing(notes, harmony) : null;
           if (h) setHarmony(h);
           setTracks((ts) =>
             ts.map((t) => {
               if (t.instrument.id === id) return { ...t, notes, sample: false };
-              if (!h || t.instrument.kind === "drums") return t;
-              return { ...t, notes: t.sample ? voiceChords(h) : fitToHarmony(t.notes, t.instrument, h) };
+              return h ? refit(t, h) : t;
             }),
           );
           setPhase("done");
@@ -245,12 +267,12 @@ export default function Studio() {
     setError("");
     const limitSec = Math.min(MAX_RECORD_SEC, (TOTAL_BEATS * 60) / bpm);
     let done = false;
-    let capturing = useDemo; // the mic opens before the count-in; its frames are dropped until counting ends
-    let offsetSec: number | null = useDemo ? 0 : null;
+    // Mic frames carry audio-clock time; t=0 is the first click after the count-in, as the singer hears it.
+    // Frames before it (the count-in) are dropped.
+    let originSec: number | null = useDemo ? 0 : null;
     const onFrame = (raw: HumFrame) => {
-      if (done || !capturing) return;
-      offsetSec ??= raw.tSec; // first captured frame is t=0
-      const f = offsetSec ? { ...raw, tSec: raw.tSec - offsetSec } : raw;
+      if (done || originSec === null || raw.tSec < originSec) return;
+      const f = originSec ? { ...raw, tSec: raw.tSec - originSec } : raw;
       taken.push(f);
       if (Math.floor(f.tSec * 10) !== Math.floor((taken.at(-2)?.tSec ?? -1) * 10)) setElapsed(f.tSec);
       if (f.tSec >= limitSec) {
@@ -266,20 +288,22 @@ export default function Studio() {
         stopRef.current = startDemoHum(onFrame);
       } else {
         setPhase("requesting");
-        const stopMic = await startMic(onFrame);
+        // Audio first: the mic runs on Tone's context, so its frames share the click's clock.
+        const engine = await playback.ensureAudio();
+        const mic = await playback.micContext();
+        const stopMic = await startMic(mic, onFrame);
         stopRef.current = () => {
           done = true;
           stopMic();
           restoreTransport();
         };
         // Count in, then keep the click going so the hum lands on the beat grid. No backing tracks: the mic would hear them.
-        const engine = await playback.ensureAudio();
         engine.schedule([], bpm);
         engine.setMetronome(true);
         const counted = await engine.countIn(bpm, setCountInBeat);
         setCountInBeat(null);
         if (!counted || done) throw new Error("count-in cancelled");
-        capturing = true;
+        originSec = engine.nowSec() + mic.outputLatencySec;
         engine.play();
       }
       setPhase("recording");
@@ -294,6 +318,14 @@ export default function Studio() {
       done = true;
       void finish(taken);
     };
+  }
+
+  /** A wrong key guess is one pick away: chords re-picked from the melody, every pitched part refitted. */
+  function changeKey(value: string) {
+    const [tonic, mode] = value.split(" ");
+    const h = withKey({ tonic: Number(tonic), mode: mode as Mode }, tracks.find((t) => t.instrument.id === "melody")?.notes ?? []);
+    setHarmony(h);
+    setTracks((ts) => ts.map((t) => refit(t, h)));
   }
 
   function toggle(id: string, key: "muted" | "solo") {
@@ -344,9 +376,14 @@ export default function Studio() {
             }}
           />
         </label>
-        <div className="field harmony-field" title={`Song chords, one per bar: ${harmonyLabel(harmony)}. A Melody take sets them.`}>
+        <div className="field harmony-field" title={`Song chords, one per bar: ${harmonyLabel(harmony)}. A Melody take sets them; pick a key to override.`}>
           <span>Key</span>
-          <output className="position harmony-value" aria-label="Song key and chords" aria-live="polite">{harmonyLabel(harmony, 4)}</output>
+          <select aria-label="Song key" value={`${harmony.tonic} ${harmony.mode}`} disabled={busy} onChange={(e) => changeKey(e.target.value)}>
+            {KEYS.map((k) => (
+              <option key={`${k.tonic} ${k.mode}`} value={`${k.tonic} ${k.mode}`}>{keyName(k)}</option>
+            ))}
+          </select>
+          <output className="position harmony-value" aria-label="Song chords" aria-live="polite">{harmony.bars.slice(0, 4).map(chordName).join(" ")}</output>
         </div>
         <label className="field">
           <span>Snap</span>

@@ -64,7 +64,7 @@ The demo targets **clear, one-note-at-a-time humming** in a reasonably quiet roo
 
 **Important:** Nothing in this repo is a trained AI model. Pitch detection is DSP (Pitchy), and note generation uses deterministic heuristics. Describe it accurately when presenting.
 
-Held notes tolerate short pitch wobbles and unvoiced gaps: defaults are 120 ms of stable pitch before a change, 150 ms of silence hold, and a five-frame median with a 0.7-semitone hold region. Harmony correction happens before merging; confirmed rests still separate notes. Off preserves unsnapped beat timing. These values are tunable in `SEGMENTATION_DEFAULTS`; very fast repeated notes or rests of 150 ms or less can merge.
+Held notes tolerate short pitch wobbles and unvoiced gaps: defaults are 120 ms of stable pitch before a change, 150 ms of silence hold, and a five-frame median with a 0.7-semitone hold region. Harmony correction happens before merging; confirmed rests still separate notes. Off preserves unsnapped beat timing. Repeated syllables on one pitch split on a level dip, and short octave slips are folded back. These values are tunable in `SEGMENTATION_DEFAULTS`; repeated notes separated only by near-silence of 150 ms or less can merge.
 
 ## Getting started
 

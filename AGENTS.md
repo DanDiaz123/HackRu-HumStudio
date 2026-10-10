@@ -78,7 +78,7 @@ export interface Project {
 
 **Never rename fields** (`midi`, `startBeat`, `durationBeats`) in a single module without updating all importers, serializers, tests, and the spec. Do not introduce `startTime`/`duration` in seconds into project state. **Quarter-note beats are the canonical musical time unit.**
 
-Valid notes satisfy: integer MIDI 0..127; finite startBeat >= 0; finite durationBeats > 0; finite velocity 0..1. Tempo input is constrained to 60..180; the UI defaults to **BPM 120 and quantization `"1/16"`**. Fixed 4/4, 8 bars.
+Valid notes satisfy: integer MIDI 0..127; finite startBeat >= 0; finite durationBeats > 0; finite velocity 0..1. Tempo input is constrained to 60..180; the UI defaults to **BPM 120 and quantization `"1/4"`**. Fixed 4/4, 8 bars.
 
 **Multi-track contracts** (`src/lib/tracks.ts`, see `TECHNICAL_SPEC.md` 3.1-3.3): `Instrument`, `Track { instrument, notes, muted, solo, sample }`, `INSTRUMENTS` (Melody, Bass, Keys, Drums, Strings), `HumFrame`, and the generation seam:
 
@@ -86,7 +86,7 @@ Valid notes satisfy: integer MIDI 0..127; finite startBeat >= 0; finite duration
 generateTrack(inst: Instrument, frames: HumFrame[], bpm: number, quantize: QuantizeDivision, harmony: Harmony): Promise<Note[]>
 ```
 
-The song has one shared `Harmony` (`src/lib/music/harmony.ts`, `TECHNICAL_SPEC.md` 3.4): a Melody take sets the key and chords, and other pitched tracks are fitted to them so separately hummed parts never clash. App state is `Track[]` plus `Harmony`; never flatten tracks when playing, exporting, or saving. `Project` v1 is single-track; the multi-track save format must be a **new schema version**, not an edit to v1.
+The song has one shared `Harmony` (`src/lib/music/harmony.ts`, `TECHNICAL_SPEC.md` 3.4): a Melody take sets the key and chords, a Keys take re-picks the chords, and other pitched tracks are fitted to them so separately hummed parts never clash. App state is `Track[]` plus `Harmony`; never flatten tracks when playing, exporting, or saving. `Project` v1 is single-track; the multi-track save format must be a **new schema version**, not an edit to v1.
 
 ## 4. Module boundaries
 
@@ -123,7 +123,7 @@ Extract smaller modules when it helps parallel work, but **keep separation of co
 - **Rhythm:** calculate seconds relative to **recording start**, then convert to beats at `Project.bpm` and quantize. Do not count permission prompt or count-in as recorded time.
 - **Claims:** This MVP uses DSP and deterministic generation heuristics. Do not claim a trained AI model or a backend is implemented when it is not.
 
-Initial detector tuning values: 4096-sample frames, approximately 20 ms hop, min clarity 0.85, min RMS 0.01, fundamental 80..1000 Hz. Implemented segmentation defaults: 120 ms pitch stability, 150 ms silence hold, 100 ms min note, five-frame median, and 0.7-semitone pitch hold region. These are configurable estimates, not universal truths; short repeated attacks can merge.
+Initial detector tuning values: 4096-sample frames, approximately 20 ms hop, min clarity 0.85, min RMS 0.01, fundamental 80..1000 Hz. Implemented segmentation defaults: 120 ms pitch stability, 150 ms silence hold, 100 ms min note, five-frame median, 0.7-semitone pitch hold region, 1.8x level re-attack, and 250 ms octave-slip hold. These are configurable estimates, not universal truths; repeated attacks separated only by a near-silent gap of 150 ms or less still merge. Tune against real takes in `src/tests/takes/` (see `takes.test.ts`).
 
 ## 6. UI and data policy
 

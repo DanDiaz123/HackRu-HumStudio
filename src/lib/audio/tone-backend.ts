@@ -1,5 +1,6 @@
 import * as Tone from "tone";
 import type { PlaybackBackend, PlaybackVoice } from "./playback-engine";
+import type { MicContext } from "../hum";
 
 /** Resume the shared AudioContext only after a user gesture. */
 export const unlockAudio = () => Tone.start();
@@ -42,6 +43,24 @@ function drumKit(): PlaybackVoice {
     release: () => {},
     releaseAll: (time) => { all.forEach((instrument) => instrument.triggerRelease(time)); },
     dispose: () => { all.forEach((instrument) => instrument.dispose()); },
+  };
+}
+
+/** Tone's context for mic capture, so hum frames are stamped on the same clock as the click. */
+export function micContext(): MicContext {
+  const ctx = Tone.getContext();
+  const raw = ctx.rawContext as AudioContext;
+  return {
+    sampleRate: ctx.sampleRate,
+    outputLatencySec: raw.outputLatency || raw.baseLatency || 0,
+    addModule: (url) => {
+      // Tone's addAudioWorkletModule only ever loads its first URL, so load ours on the raw context.
+      if (!raw.audioWorklet) throw new DOMException("AudioWorklet needs a secure page", "SecurityError");
+      return raw.audioWorklet.addModule(url);
+    },
+    createMediaStreamSource: (stream) => ctx.createMediaStreamSource(stream),
+    createAnalyser: () => ctx.createAnalyser(),
+    createWorklet: (name, options) => ctx.createAudioWorkletNode(name, options),
   };
 }
 

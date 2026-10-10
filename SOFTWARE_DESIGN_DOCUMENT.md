@@ -77,7 +77,7 @@ Music software expects users to translate ideas into piano-roll clicks, keyboard
 | FR-03 | Play, Pause (preserves position), Stop (resets to zero), and Rewind work; synthesis begins only after a click unlocks audio. **Built.** | Sample Keys + Drums play in time. |
 | FR-04 | User can open a track, request microphone access, start and stop capture, and see permission/errors. **Built.** | Test allow, deny, insecure origin, and missing-device paths. |
 | FR-05 | A single-voice hum becomes timed notes for the selected instrument. *Mock generator today.* | Clean 4-8-note phrase produces mostly correct pitches in the instrument's range. |
-| FR-06 | Quantization can be Off, 1/4, 1/8, or 1/16 notes. **Built** (default 1/16). | Note onsets/ends snap to the selected grid. |
+| FR-06 | Quantization can be Off, 1/4, 1/8, or 1/16 notes. **Built** (default 1/4). | Note onsets/ends snap to the selected grid. |
 | FR-07 | Notes are editable in the zoomed track; minimum pitch/time edits are available. *Planned.* | Drag C4 to D4 and move a note one grid step. |
 | FR-08 | The project (all tracks) autosaves locally, and users can export/import project JSON. *Planned.* | Refresh and file round-trip preserve every track, BPM, and mute/solo. |
 | FR-09 | User can export standard MIDI with one track per instrument at the project tempo. **Built.** | Open the `.mid` in a MIDI-capable app; drums on channel 10. |
@@ -214,9 +214,9 @@ interface Track { instrument: Instrument; notes: Note[]; muted: boolean; solo: b
 
 - Use `navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } })` where the browser permits; these are preferences, not promises.
 - Create a browser `AudioContext`, a `MediaStreamAudioSourceNode`, and an `AnalyserNode` with `fftSize = 4096`.
-- Read time-domain and frequency data every animation frame while recording (`src/lib/hum.ts`; a ~20 ms elapsed-time gate or an AudioWorklet are later refinements). Frequency data feeds the 48-bin spectrogram display only.
+- An AudioWorklet (`public/hum-worklet.js`) delivers every mic sample in 20 ms hops; `src/lib/hum.ts` runs Pitchy on a 4096-sample sliding window per hop. Unlike animation-frame polling, no readings are lost when the page is busy or hidden, and the rate is the same on every display. The AnalyserNode's frequency data feeds the 48-bin spectrogram display only.
 - Use the **actual** `audioContext.sampleRate` (not a guessed 44.1/48 kHz value).
-- Timestamp each frame relative to recording start (`hum.ts` currently uses `performance.now()`; `audioContext.currentTime` is the more accurate option). Timestamps reflect approximate analysis-window timing.
+- Timestamp each frame relative to recording start (`hum.ts` uses the audio clock: the worklet's sample index at the centre of each analysis window).
 - Disconnect graph nodes, stop all `MediaStreamTrack`s, cancel the frame loop, and release the analysis context after recording.
 
 ### 8.2 Pitch estimation
@@ -235,7 +235,7 @@ interface Track { instrument: Instrument; notes: Note[]; muted: boolean; solo: b
 5. After harmony fitting, merge identical pitches within the same phrase before snapping. Confirmed rests still separate notes. Reject fragments shorter than 100 ms.
 6. Preserve the first and last observed voiced timestamps within the recording window.
 
-These constants are **starting heuristics**, configured in `SEGMENTATION_DEFAULTS`, not guaranteed-optimal thresholds. Two identical-pitch notes with no gap or a gap <= 150 ms can merge; fast pitch changes shorter than 120 ms can be suppressed. Real-device tuning and future onset detection are needed for those cases.
+These constants are **starting heuristics**, configured in `SEGMENTATION_DEFAULTS`, not guaranteed-optimal thresholds. A level dip and return on one pitch re-strikes the note (1.8x RMS), but identical notes separated only by near-silence <= 150 ms still merge; fast pitch changes shorter than 120 ms can be suppressed. Real-device tuning uses the scored takes in `src/tests/takes/`.
 
 ### 8.4 Beat conversion and quantization
 
