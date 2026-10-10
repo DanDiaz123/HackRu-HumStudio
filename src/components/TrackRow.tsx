@@ -5,6 +5,7 @@ import { hzToMidi } from "@/lib/generate";
 import type { HumFrame } from "@/lib/hum";
 import { type Harmony, chordName, keyName, romanNumeral, scaleDegree, solfege } from "@/lib/music/harmony";
 import { presetForTrack, presetsForTrack } from "@/lib/audio/instrument-presets";
+import { addNote, moveNote, resizeNote } from "@/lib/note-edit";
 import type { PresetStatus } from "@/lib/audio/preset-manager";
 import {
   DRUM_ROWS,
@@ -63,6 +64,8 @@ interface Props {
   harmony: Harmony;
   quantize: QuantizeDivision;
   onEditNotes: (notes: Note[]) => void;
+  onClear: () => void;
+  onRepeat: () => void;
   demo: boolean;
   bpm: number;
   countIn: number | null;
@@ -185,10 +188,12 @@ function LivePitch({ frames, harmony }: { frames: HumFrame[]; harmony: Harmony }
   );
 }
 
-type Drag = { id: string; mode: "move" | "resize"; x0: number; y0: number; grab: number; orig: Note; draft: Note; moved: boolean };
+type Drag = { id: string; mode: "move" | "start" | "end"; x0: number; y0: number; grab: number; orig: Note; draft: Note; moved: boolean };
 
-/** The zoomed lane's notes, editable: drag to move, drag the right edge to resize, click empty space to add,
- * double-click or Delete to remove, arrows to nudge (Shift resizes). Drag state stays here; Studio gets one commit per edit. */
+/** The zoomed lane's notes, editable: drag to move, drag either edge to stretch, click empty space to add,
+ * double-click or Delete to remove, arrows to nudge (Shift stretches). Notes on one pitch never overlap:
+ * a move onto another note slides to the nearest free spot (or stays put), a stretch stops at the neighbour.
+ * Drag state stays here; Studio gets one commit per edit. */
 function EditableNotes(p: {
   notes: Note[];
   inst: Instrument;
@@ -207,7 +212,6 @@ function EditableNotes(p: {
     const r = area.current!.getBoundingClientRect();
     return { beat: ((e.clientX - r.left) / r.width) * TOTAL_BEATS, row: ((e.clientY - r.top) / r.height) * pitchRows(inst) };
   };
-  const place = (n: Note, start: number) => Math.min(TOTAL_BEATS - n.durationBeats, Math.max(0, start));
   const replace = (n: Note) => p.onEdit(notes.map((x) => (x.id === n.id ? n : x)));
   const remove = (n: Note) => p.onEdit(notes.filter((x) => x.id !== n.id));
 
@@ -223,9 +227,8 @@ function EditableNotes(p: {
     const { beat, row } = at(e);
     const o = drag.orig;
     const draft =
-      drag.mode === "resize"
-        ? { ...o, durationBeats: Math.min(TOTAL_BEATS - o.startBeat, Math.max(minLen, snap(beat - o.startBeat))) }
-        : { ...o, startBeat: place(o, snap(beat - drag.grab)), midi: rowMidi(row, inst) };
+      drag.mode === "move" ? moveNote(o, { startBeat: snap(beat - drag.grab), midi: rowMidi(row, inst) }, notes, step) ?? drag.draft
+      : resizeNote(o, drag.mode, snap(beat), notes, minLen);
     setDrag({ ...drag, moved, draft });
   }
   function drop() {
@@ -235,8 +238,8 @@ function EditableNotes(p: {
   function add(e: PointerEvent) {
     if (p.disabled || e.button || e.target !== e.currentTarget) return;
     const { beat, row } = at(e);
-    const n: Note = { id: noteId(), midi: rowMidi(row, inst), startBeat: 0, durationBeats: minLen, velocity: 0.8 };
-    p.onEdit([...notes, { ...n, startBeat: place(n, Math.floor(beat / step) * step) }]);
+    const n = addNote({ id: noteId(), midi: rowMidi(row, inst), startBeat: Math.min(TOTAL_BEATS - minLen, Math.floor(beat / step) * step), durationBeats: minLen, velocity: 0.8 }, notes, minLen);
+    if (n) p.onEdit([...notes, n]);
   }
   function key(e: KeyboardEvent, n: Note) {
     if (p.disabled) return;
@@ -246,13 +249,13 @@ function EditableNotes(p: {
       area.current?.focus();
     } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
       const d = e.key === "ArrowLeft" ? -nudge : nudge;
-      replace(
-        e.shiftKey
-          ? { ...n, durationBeats: Math.min(TOTAL_BEATS - n.startBeat, Math.max(minLen, n.durationBeats + d)) }
-          : { ...n, startBeat: place(n, n.startBeat + d) },
-      );
+      const next = e.shiftKey
+        ? resizeNote(n, "end", n.startBeat + n.durationBeats + d, notes, minLen)
+        : moveNote(n, { startBeat: n.startBeat + d, midi: n.midi }, notes, nudge, 0);
+      if (next) replace(next);
     } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
-      replace({ ...n, midi: rowMidi(noteRow(n.midi, inst) + (e.key === "ArrowUp" ? -1 : 1), inst) });
+      const next = moveNote(n, { startBeat: n.startBeat, midi: rowMidi(noteRow(n.midi, inst) + (e.key === "ArrowUp" ? -1 : 1), inst) }, notes, nudge, 0);
+      if (next) replace(next);
     } else if (e.key === "Escape" && drag) {
       setDrag(null);
       e.stopPropagation();
@@ -288,7 +291,12 @@ function EditableNotes(p: {
             onKeyDown={(e) => key(e, stored)}
           >
             {p.label && <span className="note-label">{p.label(n.midi)}</span>}
-            {!p.disabled && <span className="note-edge" onPointerDown={(e) => grab(e, stored, "resize")} />}
+            {!p.disabled && (
+              <>
+                <span className="note-edge start" onPointerDown={(e) => grab(e, stored, "start")} />
+                <span className="note-edge" onPointerDown={(e) => grab(e, stored, "end")} />
+              </>
+            )}
           </span>
         );
       })}
@@ -435,6 +443,13 @@ export default function TrackRow(p: Props) {
             <button className="ghost-btn" onClick={() => p.onRecord(true)} disabled={phase === "requesting"}>
               Demo hum
             </button>
+          )}
+          {!recording && !working && (
+            <div className="part-actions">
+              <button className="ghost-btn" onClick={p.onRepeat} disabled={p.busy || !track.notes.some((n) => n.startBeat < TOTAL_BEATS / 2)}
+                title="Copy bars 1-4 over bars 5-8">Repeat 1–4</button>
+              <button className="ghost-btn" onClick={p.onClear} disabled={p.busy || !hasNotes} title="Remove every note in this part (undoable)">Clear</button>
+            </div>
           )}
           <p className="status" aria-live="polite">
             <span className={`mark${recording ? " live" : ""}`} aria-hidden />

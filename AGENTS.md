@@ -12,7 +12,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 This file is for **AI coding agents and human contributors** working in the HumStudio repository. Read it **before** writing or changing implementation code.
 
-**Project status:** The Next.js app is scaffolded and the multi-track studio UI is built (`src/components/Studio.tsx`, `TrackRow.tsx`, `Spectrogram.tsx`). Playback has a regression suite, metronome, and four-beat playback count-in. Melodic generation uses tested deterministic segmentation in `src/lib/audio/segment-notes.ts`, followed by instrument/harmony fitting, merging, and quantization in `src/lib/generate.ts`; Drums retain RMS heuristics. Note editing is built in the zoomed lane; persistence is not built. Real-microphone and audible playback verification remain open. Still inspect the repository before assuming a feature works.
+**Project status:** The Next.js app is scaffolded and the multi-track studio UI is built (`src/components/Studio.tsx`, `TrackRow.tsx`, `Spectrogram.tsx`). Playback has a regression suite, metronome, and four-beat playback count-in. Melodic generation uses tested deterministic segmentation in `src/lib/audio/segment-notes.ts`, followed by instrument/harmony fitting, merging, and quantization in `src/lib/generate.ts`; Drums retain RMS heuristics. Note editing (collision-aware, `src/lib/note-edit.ts`), undo/redo, Clear/Repeat, keyboard shortcuts, and persistence (autosave + `.humstudio.json` schema v2, `src/lib/persistence/project.ts`) are built. Real-microphone and audible playback verification remain open. Still inspect the repository before assuming a feature works.
 **Project aim:** Browser-based **multi-track hum-to-music sketchpad** for HackRU: pick an instrument track, hum, see a live spectrogram, get notes for that instrument, play the arrangement, export MIDI.
 **Working product name:** HumStudio.
 **Documentation precedence:** `PRODUCT.md` (product scope) > `TECHNICAL_SPEC.md` (shared interfaces, algorithms, acceptance) > `SOFTWARE_DESIGN_DOCUMENT.md` (rationale) > `README.md` (onboarding). Visual decisions follow `DESIGN.md`; file ownership follows `WORKLOAD_SPLIT.md`. If documents conflict, correct the documentation as part of the change and tell the team.
@@ -110,7 +110,8 @@ src/lib/audio/click-track.ts     # metronome/count-in                           
 src/lib/midi.ts                  # @tonejs/midi export                                           (Person 4)
 src/lib/audio/segment-notes.ts   # implemented: gated HumFrame -> SegmentedNote[] + rest boundary (Person 1)
 src/lib/audio/note-sensitivity.ts # Low/Medium/High tuning profiles and validated selection      (Person 1, shared)
-src/lib/persistence/             # target: multi-track JSON validation/save/import/export       (Person 4)
+src/lib/persistence/project.ts   # ProjectV2: validate/parse/serialize, v1 import, autosave key    (Person 4)
+src/lib/note-edit.ts             # pure editing rules: no same-pitch overlap, stretch, repeat      (Person 3)
 src/tests/                       # playback, harmony, segmentation, generation regression suites
 ```
 

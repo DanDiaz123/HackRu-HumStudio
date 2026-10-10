@@ -10,7 +10,7 @@ This file tells implementers **what to build, which interfaces to share, what ed
 
 ## 0. Implementation priorities
 
-- **P0:** Five instrument tracks over 8 bars of 4/4 **(implemented)**; click-to-zoom **(implemented)**; BPM/play/pause/stop/rewind, mute/solo **(implemented)**; microphone acquisition, live spectrogram, loading state, animated reveal **(implemented)**; multi-track MIDI export **(implemented)**; clear errors and Demo hum fallback **(implemented)**; monophonic hum-to-notes for the selected instrument with Off/1/4/1/8/1/16 quantization **(implemented; real-microphone tuning pending)**; note editing in the zoomed track *(target)*; local autosave and JSON import/export of all tracks *(target)*.
+- **P0:** Five instrument tracks over 8 bars of 4/4 **(implemented)**; click-to-zoom **(implemented)**; BPM/play/pause/stop/rewind, mute/solo **(implemented)**; microphone acquisition, live spectrogram, loading state, animated reveal **(implemented)**; multi-track MIDI export **(implemented)**; clear errors and Demo hum fallback **(implemented)**; monophonic hum-to-notes for the selected instrument with Off/1/4/1/8/1/16 quantization **(implemented; real-microphone tuning pending)**; note editing in the zoomed track **(implemented)**; local autosave and JSON import/export of all tracks **(implemented)**; undo/redo and keyboard shortcuts **(implemented)**.
 - **P1:** Four-beat playback count-in and metronome **(implemented; listening pending)**; recording count-in with click **(implemented; listening pending)**; manual note creation/deletion; undo/redo; instrument sound polish; confirm before overwriting a generated part.
 - **P2:** Generation backend or ML model, Supabase, imported audio, effects, user-created tracks, collaboration.
 
@@ -29,7 +29,7 @@ This file tells implementers **what to build, which interfaces to share, what ed
 | Pitch | `pitchy` | `PitchDetector.forFloat32Array(4096)`. |
 | MIDI | `@tonejs/midi` | Encode a Standard MIDI File in browser. |
 | State | React state in `Studio.tsx` (implemented); `useReducer` when editing/persistence land | Canonical `Track[]`; no Zustand/Redux. |
-| Persistence | `localStorage` + browser file download/upload | *Target.* No auth/backend in MVP. |
+| Persistence | `localStorage` + browser file download/upload | Implemented (`src/lib/persistence/project.ts`). No auth/backend in MVP. |
 | Testing | TypeScript + Node's built-in test runner | Playback, harmony, segmentation, and generation fixtures implemented. Manual browser checks remain required. |
 
 Recommended: Node.js >= 20.9, npm, Chrome or Edge on desktop. Verify chosen package versions against the lockfile; do not rely on unverified snippets from a different Tone.js major version.
@@ -179,18 +179,20 @@ export const MAX_RECORD_SEC = 15;
 
 Lane geometry is derived in percent: `beatX(beat) = beat / 32 * 100`, `noteY(midi, inst) = (hi - midi) / rows * 100`. Never store pixel coordinates.
 
-**Saved format (target).** `Project` v1 cannot hold tracks. The multi-track save format must be a new version, for example:
+**Saved format (implemented, `src/lib/persistence/project.ts`).** `Project` v1 cannot hold tracks, so files are schema v2:
 
 ```ts
 interface ProjectV2 {
   schemaVersion: 2;
   id: string; name: string; bpm: number; quantize: QuantizeDivision;
-  tracks: { instrumentId: string; presetId: string; notes: Note[]; muted: boolean; solo: boolean }[];
+  sensitivity: NoteSensitivity; // optional on read; defaults to Medium
+  harmony: Harmony;             // key + 8 triads
+  tracks: { instrumentId: string; presetId: string; notes: Note[]; muted: boolean; solo: boolean; sample: boolean }[];
   createdAt: string; updatedAt: string;
 }
 ```
 
-Person 4 decides the final shape; add it to `types.ts` and notify the team rather than changing `Project` v1 in place. A v1 file should load as the Melody track.
+A v1 file loads as the Melody track (other tracks empty, harmony inferred from it). Missing tracks load empty; a missing `presetId` gets the default sound.
 
 ### 3.2 Capture frame (implemented, `src/lib/hum.ts`)
 
@@ -486,7 +488,7 @@ Do **not** label a DSP pitch detector as a trained neural model unless a model i
 
 ### 8.2 Transport and recording controls
 
-- **Transport bar (implemented):** wordmark, Rewind, Play/Pause toggle (pause preserves position), separate Stop (resets to zero), metronome toggle, four-beat playback count-in toggle, position readout `bar.beat.sixteenth`, BPM number input (60-180), Key select (24 keys) with the first four bars' chords, Snap select (Off, 1/4, 1/8, 1/16), Export MIDI. *Target:* Save Project, Open Project.
+- **Transport bar (implemented):** wordmark, Rewind, Play/Pause toggle (pause preserves position), separate Stop (resets to zero), metronome toggle, four-beat playback count-in toggle, position readout `bar.beat.sixteenth`, BPM number input (60-180), Key select (24 keys) with the first four bars' chords, Snap select (Off, 1/4, 1/8, 1/16), Export MIDI. Undo, Redo, Open project, Save project, Keyboard shortcuts (?), then Export MIDI.
 - **Zoomed header (implemented):** All tracks (back), instrument name, hint, Record / Stop / Re-record, Demo hum, and a status line with a filled-or-hollow mark plus text (e.g. "Demo hum 0:05.2", "Generating", "8 notes").
 - A first Play click awaits `Tone.start()` before audio. Recording uses its own `AudioContext` and does not need Tone.
 - **Defaults (implemented):** BPM = 120, quantization = 1/4, matching `Studio.tsx` and the shared defaults.
@@ -562,7 +564,7 @@ Sample resources are leased by independent voices and disposed only after their 
 
 ## 10. Project persistence
 
-**Status: target (Person 4).** Must save **every track** (instrument id, preset id, notes, mute/solo) plus BPM and quantize, using the versioned format from 3.1. Missing legacy preset IDs receive defaults; unknown/cross-category IDs reject. The v1 contract below remains the baseline and must stay loadable.
+**Status: implemented.** `parseProject(text)` validates the whole file or throws a user-facing message, and the studio only changes after it succeeds: size <= 2,000,000 chars, BPM 60..180, known Snap/Sensitivity, harmony shape, known instruments (no duplicates), known sounds per category, <= 10,000 notes, unique note IDs, `isValidNote` plus `startBeat < 32` and `durationBeats <= 32`, strings <= 200 chars, parseable timestamps. Only known fields are copied into state. `serializeProject` writes v2. Studio autosaves to `localStorage["humstudio:project:v2"]` 400 ms after a change (skipped mid-take, when the part being re-recorded is briefly empty), restores it once after mount (a bad save is ignored), shows a notice if storage is blocked, and offers Save (download) and Open (file picker; undoable). The earlier single-track contract below is kept for reference; v1 files still load.
 
 ### Storage contract
 
@@ -661,7 +663,7 @@ type ProjectAction =
 
 ### Unit tests (use synthetic fixtures)
 
-`npm test` runs 100 tests: playback (incl. duplicate metronome ticks), 11 sensitivity, 10 harmony, 16 segmentation, 11 generation, 7 per-instrument role, 3 capture (sliding window, window-centre timestamps, synthetic mic path), 2 scoring tests, and the preset loading/voice suite, plus one test per real take in `src/tests/takes/*.json`. Real takes are captured in `npm run dev` with `copy(__humTake)` in the console (analysis frames only, no audio), given hand-written `expected` notes, and scored by note F1 (pitch equal, onset within 50 ms); an optional `minF1` makes a take a regression gate. Transcription fixtures cover 100 ms pitch wobbles, vibrato, 120 ms dropouts at 10/20/40 ms frame hops, the 150 ms silence boundary, genuine pitch changes/rests, harmony merging, all grids across 60/120/180 BPM, Off timing, instrument ranges, invalid input, immutability, and the async UI seam. Playback covers repeated scheduling, five-track timing, tempo changes, mute/solo, overlapping notes, transport lifecycle, invalid inputs, teardown, metronome/count-in cancellation, and preset selection. Preset fixtures cover catalog/defaults, GM aliases, stale loads, failure/timeout/retry, shared leases, velocity conversion, and individual stop handles. Persistence, MIDI, and real-microphone checks below remain targets; browser MIDI byte preservation is documented in [`SMPLR_INTEGRATION.md`](SMPLR_INTEGRATION.md).
+`npm test` runs 110 tests: 5 persistence/MIDI (round trip, 13 rejected files, defaults, v1 import, beat-to-seconds and drum channel), 5 note-editing rules, playback (incl. duplicate metronome ticks), 11 sensitivity, 10 harmony, 16 segmentation, 11 generation, 7 per-instrument role, 3 capture (sliding window, window-centre timestamps, synthetic mic path), 2 scoring tests, and the preset loading/voice suite, plus one test per real take in `src/tests/takes/*.json`. Real takes are captured in `npm run dev` with `copy(__humTake)` in the console (analysis frames only, no audio), given hand-written `expected` notes, and scored by note F1 (pitch equal, onset within 50 ms); an optional `minF1` makes a take a regression gate. Transcription fixtures cover 100 ms pitch wobbles, vibrato, 120 ms dropouts at 10/20/40 ms frame hops, the 150 ms silence boundary, genuine pitch changes/rests, harmony merging, all grids across 60/120/180 BPM, Off timing, instrument ranges, invalid input, immutability, and the async UI seam. Playback covers repeated scheduling, five-track timing, tempo changes, mute/solo, overlapping notes, transport lifecycle, invalid inputs, teardown, metronome/count-in cancellation, and preset selection. Preset fixtures cover catalog/defaults, GM aliases, stale loads, failure/timeout/retry, shared leases, velocity conversion, and individual stop handles. Real-microphone checks below remain targets; browser MIDI byte preservation is documented in [`SMPLR_INTEGRATION.md`](SMPLR_INTEGRATION.md).
 
 | ID | Input | Expected result |
 |---|---|---|
@@ -721,9 +723,9 @@ For a clean 5-10 second single-voice melody, target >= 80% correct stable-note p
 | Silence/no voiced pitch | "We didn't catch a hum. Get closer to the mic and try again." Existing notes kept. **(implemented)** |
 | Generator returns nothing | "No notes came out of that take. Try a longer, steadier hum." Existing notes kept. **(implemented)** |
 | Recording too long | Auto-stop at 15 s or the end of the timeline; process accumulated frames. **(implemented)** |
-| Bad JSON | "This is not a valid HumStudio v1 project." Preserve previous project. |
+| Bad JSON | "This is not a valid HumStudio project: <reason>." Preserve previous project. **(implemented)** |
 | Audio context suspended | Prompt user to click Play/Enable Audio and retry `Tone.start()`. |
-| Storage blocked | Warn that autosave is unavailable and offer Download Project. |
+| Storage blocked | "Autosave isn't available in this browser. Use Save to keep your project." **(implemented)** |
 
 The app ships labeled **Sample** parts (Keys, Drums) and a labeled **Demo hum**. Present them honestly as samples, never as live transcription.
 

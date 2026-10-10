@@ -4,7 +4,10 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { type GenTrace, generateNotes } from "@/lib/generate";
 import { DEFAULT_NOTE_SENSITIVITY, NOTE_SENSITIVITY_LEVELS, NOTE_SENSITIVITY_PRESETS, isNoteSensitivity, type NoteSensitivity } from "@/lib/audio/note-sensitivity";
 import { type HumFrame, micErrorMessage, startDemoHum, startMic } from "@/lib/hum";
+import { download } from "@/lib/download";
 import { exportMidi } from "@/lib/midi";
+import { repeatFirstHalf } from "@/lib/note-edit";
+import { type LoadedProject, MAX_PROJECT_CHARS, STORAGE_KEY, newProjectMeta, parseProject, serializeProject } from "@/lib/persistence/project";
 import {
   DEFAULT_HARMONY,
   type Harmony,
@@ -33,11 +36,35 @@ import {
   beatX,
   initialTracks,
   midiName,
+  noteId,
 } from "@/lib/tracks";
-import { DownloadIcon, PauseIcon, PlayIcon, RewindIcon, StopIcon } from "./icons";
+import { DownloadIcon, OpenIcon, PauseIcon, PlayIcon, RedoIcon, RewindIcon, SaveIcon, StopIcon, UndoIcon } from "./icons";
 import TrackRow, { type Phase, REVEAL_SEC, type Reveal } from "./TrackRow";
 
 const COLLAPSED_H = 36;
+const MAX_UNDO = 100;
+
+/** Everything an undo step puts back. Takes ride along so Sensitivity/Snap re-read the right audio analysis. */
+interface Snapshot {
+  tracks: Track[];
+  harmony: Harmony;
+  takes: Record<string, HumFrame[]>;
+  pickedKey: Key | null;
+}
+
+/** Keys that work anywhere except while typing in a field. */
+const SHORTCUTS: [string, string][] = [
+  ["Space", "Play / pause"],
+  ["R", "Record or stop (open track)"],
+  ["1 – 5", "Open a track"],
+  ["Esc", "Back to all tracks"],
+  ["M / S", "Mute / solo the open track"],
+  ["K", "Metronome"],
+  ["L", "Learn"],
+  ["Ctrl Z / Ctrl Shift Z", "Undo / redo"],
+  ["Ctrl S", "Save project"],
+  ["?", "This list"],
+];
 
 /**
  * Move a part onto new harmony without deleting notes: the Keys sample is re-voiced, drums stay put.
@@ -75,6 +102,11 @@ export default function Studio() {
   const [countIn, setCountIn] = useState(false);
   const [countInBeat, setCountInBeat] = useState<number | null>(null);
   const [avail, setAvail] = useState(0);
+  const [history, setHistory] = useState({ undo: 0, redo: 0 });
+  const [fileError, setFileError] = useState("");
+  const [storageError, setStorageError] = useState("");
+  const [restored, setRestored] = useState(false);
+  const [help, setHelp] = useState(false);
 
   const rowsRef = useRef<HTMLDivElement>(null);
   const headRef = useRef<HTMLDivElement>(null);
@@ -90,6 +122,12 @@ export default function Studio() {
   const arrangementRef = useRef({ tracks, bpm });
   const stopTake = useRef<() => void>(() => {});
   const unsubscribePresets = useRef<(() => void) | null>(null);
+  const historyRef = useRef<{ past: Snapshot[]; future: Snapshot[] }>({ past: [], future: [] });
+  // The state before the take in progress, so a whole take is one undo step.
+  const takeUndoRef = useRef<Snapshot | null>(null);
+  const metaRef = useRef(newProjectMeta());
+  const fileRef = useRef<HTMLInputElement>(null);
+  const helpRef = useRef<HTMLDialogElement>(null);
 
   const busy = startingAudio || phase === "requesting" || phase === "recording" || phase === "generating" || phase === "revealing";
   const zoomed = tracks.find((t) => t.instrument.id === zoomedId) ?? null;
@@ -260,11 +298,13 @@ export default function Studio() {
     setFrames([]);
   }, [busy]);
 
+  // One window listener; it always calls the latest handler (shortcuts read current state).
+  const keyRef = useRef<(e: KeyboardEvent) => void>(() => {});
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && back();
+    const onKey = (e: KeyboardEvent) => keyRef.current(e);
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [back]);
+  }, []);
 
   const finish = useCallback(
     async (taken: HumFrame[]) => {
@@ -318,6 +358,8 @@ export default function Studio() {
           await wait(i === 1 && stepMs ? (REVEAL_SEC + 0.3) * 1000 : stepMs); // step 0 lasts as long as the print-in sweep
           setReveal((r) => r && { ...r, step: i });
         }
+        if (takeUndoRef.current) pushHistory(takeUndoRef.current);
+        takeUndoRef.current = null;
         if (h) setHarmony(h);
         if (inst.id === "melody") pickedKeyRef.current = null;
         takesRef.current[inst.id] = taken;
@@ -348,6 +390,9 @@ export default function Studio() {
 
   async function record(useDemo: boolean) {
     if (!zoomed || busy) return;
+    if (!zoomed.sample && zoomed.notes.length &&
+      !window.confirm(`Record over your ${zoomed.instrument.name} part? Undo (Ctrl+Z) brings it back.`)) return;
+    takeUndoRef.current = snapshot();
     pauseIfPlaying();
     clearedRef.current = null;
     if (!zoomed.sample && zoomed.notes.length) {
@@ -418,6 +463,7 @@ export default function Studio() {
   function changeKey(value: string) {
     const [tonic, mode] = value.split(" ");
     const key: Key = { tonic: Number(tonic), mode: mode as Mode };
+    remember();
     pickedKeyRef.current = key;
     const h = withKey(key, tracks.find((t) => t.instrument.id === "melody")?.notes ?? []);
     setHarmony(h);
@@ -426,6 +472,7 @@ export default function Studio() {
 
   /** A hand edit replaces the part's notes; an edited Sample is the user's part from then on. */
   function editNotes(id: string, notes: Note[]) {
+    remember();
     delete takesRef.current[id];
     setTracks((ts) => ts.map((t) => (t.instrument.id === id ? { ...t, notes, sample: false } : t)));
   }
@@ -433,6 +480,149 @@ export default function Studio() {
   function toggle(id: string, key: "muted" | "solo") {
     setTracks((ts) => ts.map((t) => (t.instrument.id === id ? { ...t, [key]: !t[key] } : t)));
   }
+
+  // Undo / redo
+  const snapshot = (): Snapshot => ({ tracks, harmony, takes: { ...takesRef.current }, pickedKey: pickedKeyRef.current });
+  function pushHistory(s: Snapshot) {
+    const h = historyRef.current;
+    h.past = [...h.past, s].slice(-MAX_UNDO);
+    h.future = [];
+    setHistory({ undo: h.past.length, redo: 0 });
+  }
+  /** Call before any change worth undoing (edits, takes, key, regeneration, clear/repeat, open). */
+  const remember = () => pushHistory(snapshot());
+  function restore(s: Snapshot) {
+    setTracks(s.tracks);
+    setHarmony(s.harmony);
+    takesRef.current = { ...s.takes };
+    pickedKeyRef.current = s.pickedKey;
+  }
+  function step(from: "past" | "future") {
+    const h = historyRef.current;
+    const s = h[from].at(-1);
+    if (!s || busy) return;
+    h[from] = h[from].slice(0, -1);
+    const to = from === "past" ? "future" : "past";
+    h[to] = [...h[to], snapshot()];
+    restore(s);
+    setHistory({ undo: h.past.length, redo: h.future.length });
+  }
+
+  function clearPart(id: string) {
+    remember();
+    delete takesRef.current[id];
+    setTracks((ts) => ts.map((t) => (t.instrument.id === id ? { ...t, notes: [], sample: false } : t)));
+  }
+  function repeatPart(id: string) {
+    const t = tracks.find((x) => x.instrument.id === id);
+    if (t) editNotes(id, repeatFirstHalf(t.notes, noteId));
+  }
+
+  // Project files: autosave to this browser, Save/Open as .humstudio.json
+  const current = (): LoadedProject => ({ meta: metaRef.current, bpm, quantize, sensitivity, harmony, tracks });
+  function applyProject(p: LoadedProject) {
+    stopPlayback();
+    metaRef.current = p.meta;
+    takesRef.current = {};
+    pickedKeyRef.current = null;
+    setTracks(p.tracks);
+    setHarmony(p.harmony);
+    setBpm(p.bpm);
+    setQuantize(p.quantize);
+    setSensitivity(p.sensitivity);
+    setZoomedId(null);
+    setPhase("idle");
+  }
+  // Restore the autosave once, after mount (localStorage is browser-only). A bad save is ignored, not loaded.
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- browser storage is only readable after hydration
+      if (saved) applyProject(parseProject(saved));
+    } catch {}
+    setRestored(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount only
+  }, []);
+  // Debounced autosave. Skipped mid-take: the part being re-recorded is temporarily empty.
+  useEffect(() => {
+    if (!restored || busy) return;
+    const id = setTimeout(() => {
+      try {
+        localStorage.setItem(STORAGE_KEY, serializeProject(current()));
+        setStorageError("");
+      } catch {
+        setStorageError("Autosave isn't available in this browser. Use Save to keep your project.");
+      }
+    }, 400);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- current() reads exactly these
+  }, [restored, busy, tracks, harmony, bpm, quantize, sensitivity]);
+
+  function saveProject() {
+    download(serializeProject(current()), "application/json", "humstudio-project.humstudio.json");
+  }
+  async function openProject(file: File | undefined) {
+    if (!file) return;
+    try {
+      if (file.size > MAX_PROJECT_CHARS) throw new Error("This is not a valid HumStudio project: file is too large.");
+      const p = parseProject(await file.text());
+      remember();
+      applyProject(p);
+      setFileError("");
+    } catch (e) {
+      setFileError(e instanceof Error && e.message.startsWith("This is not") ? e.message : "That file couldn't be opened.");
+    }
+  }
+
+  // Help is a native modal dialog: focus trap and Esc come free.
+  useEffect(() => {
+    const d = helpRef.current;
+    if (help && d && !d.open) d.showModal();
+    if (!help && d?.open) d.close();
+  }, [help]);
+
+  useEffect(() => {
+    keyRef.current = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el && (el.isContentEditable || ["INPUT", "SELECT", "TEXTAREA"].includes(el.tagName))) return;
+      const mod = e.ctrlKey || e.metaKey;
+      const k = e.key.toLowerCase();
+      if (mod && k === "z") {
+        e.preventDefault();
+        step(e.shiftKey ? "future" : "past");
+      } else if (mod && k === "y") {
+        e.preventDefault();
+        step("future");
+      } else if (mod && k === "s") {
+        e.preventDefault();
+        saveProject();
+      } else if (mod || e.altKey) {
+        return;
+      } else if (e.key === "?") {
+        setHelp((v) => !v);
+      } else if (e.key === "Escape") {
+        if (!help) back();
+      } else if (k === "r" && zoomed) {
+        if (phase === "recording") stopTake.current();
+        else if (!busy) void record(false);
+      } else if (busy) {
+        return;
+      } else if (e.key === " ") {
+        if (el?.tagName === "BUTTON" || el?.tagName === "A") return; // Space already presses those
+        e.preventDefault();
+        void togglePlay();
+      } else if (/^[1-5]$/.test(e.key)) {
+        open(tracks[Number(e.key) - 1].instrument.id);
+      } else if ((k === "m" || k === "s") && zoomed) {
+        toggle(zoomed.instrument.id, k === "m" ? "muted" : "solo");
+      } else if (k === "k") {
+        playback.getEngine()?.setMetronome(!metronome);
+        setMetronome(!metronome);
+      } else if (k === "l") {
+        setLearn((v) => !v);
+      }
+    };
+  });
 
   const noteLabel = (m: number) => `${midiName(m).replace(/-?\d+$/, "")} ${solfege(m, harmony) ?? ""}`;
 
@@ -443,6 +633,7 @@ export default function Studio() {
   function regenerate(level: NoteSensitivity, division: QuantizeDivision) {
     const takes = takesRef.current;
     if (!Object.keys(takes).length) return;
+    remember();
     const order = (id: string) => (id === "melody" ? 0 : id === "keys" ? 1 : 2);
     let h = harmony;
     const fresh: Record<string, Note[]> = {};
@@ -535,12 +726,33 @@ export default function Studio() {
             </select>
           </label>
         </div>
-        <button className="export" aria-label="Export MIDI" onClick={() => exportMidi(tracks, bpm)} disabled={busy || tracks.every((t) => !t.notes.length)}>
-          <DownloadIcon /> <span className="lbl">Export MIDI</span>
-        </button>
+        <div className="file-group">
+          <button className="t-btn" aria-label="Undo" title="Undo (Ctrl+Z)" disabled={busy || !history.undo} onClick={() => step("past")}>
+            <UndoIcon />
+          </button>
+          <button className="t-btn" aria-label="Redo" title="Redo (Ctrl+Shift+Z)" disabled={busy || !history.redo} onClick={() => step("future")}>
+            <RedoIcon />
+          </button>
+          <button className="t-btn" aria-label="Open project" title="Open a .humstudio.json project" disabled={busy} onClick={() => fileRef.current?.click()}>
+            <OpenIcon />
+          </button>
+          <input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={(e) => {
+            void openProject(e.target.files?.[0]);
+            e.target.value = ""; // the same file can be opened again
+          }} />
+          <button className="t-btn" aria-label="Save project" title="Save project (Ctrl+S)" disabled={busy} onClick={saveProject}>
+            <SaveIcon />
+          </button>
+          <button className="t-btn" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)" onClick={() => setHelp(true)}>?</button>
+          <button className="export" aria-label="Export MIDI" onClick={() => exportMidi(tracks, bpm)} disabled={busy || tracks.every((t) => !t.notes.length)}>
+            <DownloadIcon /> <span className="lbl">Export MIDI</span>
+          </button>
+        </div>
       </header>
 
       {playbackError && <p role="alert">{playbackError}</p>}
+      {fileError && <p className="sound-notice" role="alert">{fileError}</p>}
+      {storageError && <p className="sound-notice" role="status">{storageError}</p>}
       {Object.values(presetStatuses).some(status => status.state === "loading") && (
         <p className="sound-notice" role="status">Loading selected sounds…</p>
       )}
@@ -581,6 +793,8 @@ export default function Studio() {
             harmony={harmony}
             quantize={quantize}
             onEditNotes={(notes) => editNotes(t.instrument.id, notes)}
+            onClear={() => clearPart(t.instrument.id)}
+            onRepeat={() => repeatPart(t.instrument.id)}
             demo={demo}
             bpm={bpm}
             countIn={t.instrument.id === zoomedId ? countInBeat : null}
@@ -597,6 +811,20 @@ export default function Studio() {
           <div className="playhead" ref={headRef} />
         </div>
       </div>
+
+      <dialog ref={helpRef} className="help" aria-labelledby="help-title" onClose={() => setHelp(false)}>
+        <h2 id="help-title">Keyboard shortcuts</h2>
+        <dl>
+          {SHORTCUTS.map(([keys, what]) => (
+            <div key={keys}>
+              <dt><kbd>{keys}</kbd></dt>
+              <dd>{what}</dd>
+            </div>
+          ))}
+        </dl>
+        <p>In an open track: click to add a note, drag to move, drag either edge to stretch, double-click or Delete to remove, arrows to nudge (Shift+arrows stretch).</p>
+        <button className="ghost-btn" onClick={() => setHelp(false)}>Close</button>
+      </dialog>
     </div>
   );
 }

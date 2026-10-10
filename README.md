@@ -4,7 +4,7 @@
 
 HumStudio is a browser-based music sketchpad for **HackRU Fall 2026**. It looks like a familiar multi-track editor: one track per instrument (Melody, Bass, Keys, Drums, Strings). Click a track to zoom into it, hum into your microphone while a live spectrogram prints your voice across the lane, and watch the track fill with generated notes. Then play the arrangement or export it as MIDI.
 
-> **Current repository status:** The Next.js app and **studio UI are built**: arrangement view, track zoom, live hum spectrogram, loading state, animated note reveal, five-instrument Tone.js playback, and multi-track MIDI export. Playback includes separate pause/stop, rewind, mute/solo, a metronome, a four-beat playback count-in, and regression tests. **Melodic generation uses deterministic DSP segmentation** (`src/lib/audio/segment-notes.ts`) with harmony fitting and quantization; Drums still use simple RMS-onset heuristics. Note editing and project save/load remain separate workstreams. Real-microphone and audible playback verification remain open. See the [Person 2 handoff](WORKLOAD_SPLIT.md#person-2-implementation-handoff) for verification and limitations, and [`WORKLOAD_SPLIT.md`](WORKLOAD_SPLIT.md) for ownership.
+> **Current repository status:** The Next.js app and **studio UI are built**: arrangement view, track zoom, live hum spectrogram, loading state, animated note reveal, five-instrument Tone.js playback, and multi-track MIDI export. Playback includes separate pause/stop, rewind, mute/solo, a metronome, a four-beat playback count-in, and regression tests. **Melodic generation uses deterministic DSP segmentation** (`src/lib/audio/segment-notes.ts`) with harmony fitting and quantization; Drums still use simple RMS-onset heuristics. Note editing (collision-aware), undo/redo, project autosave and `.humstudio.json` Save/Open, Clear/Repeat, and keyboard shortcuts are built. Real-microphone and audible playback verification remain open. See the [Person 2 handoff](WORKLOAD_SPLIT.md#person-2-implementation-handoff) for verification and limitations, and [`WORKLOAD_SPLIT.md`](WORKLOAD_SPLIT.md) for ownership.
 
 ## What are we building?
 
@@ -42,9 +42,12 @@ Pick an instrument track
 - [x] **Export:** multi-track `.mid` (drums on MIDI channel 10).
 - [x] **Recover:** mic denial, insecure origin, missing device, and silent takes show a message plus a **Demo hum** fallback; failed takes never erase existing notes.
 - [ ] **Real-device tuning:** validate the DSP generation with human humming on the demo microphone (Person 1).
-- [x] **Edit:** in the zoomed track, drag to move, drag the right edge to resize, click empty space to add, double-click or Delete to remove, arrows to nudge (Shift+arrows resize). Edits snap to the Snap grid.
-- [ ] **Save/reopen:** local autosave and project file import/export for all tracks (Person 4).
-- [ ] **Recording count-in**, undo/redo, instrument polish (if time remains).
+- [x] **Edit:** in the zoomed track, drag to move, drag either edge to stretch, click empty space to add, double-click or Delete to remove, arrows to nudge (Shift+arrows stretch). Edits snap to the Snap grid. Notes on one pitch never overlap: a move onto another note slides to the nearest free spot (or stays put), a stretch stops at the neighbour, and a new note fits the gap.
+- [x] **Undo / redo:** buttons and Ctrl+Z / Ctrl+Shift+Z (Ctrl+Y) for edits, takes, key changes, Sensitivity/Snap regeneration, Clear/Repeat, and Open (100 steps, this session).
+- [x] **Part actions:** Clear a part, or Repeat bars 1–4 onto 5–8. Re-recording a part you recorded or edited asks first.
+- [x] **Save/reopen:** autosaves to this browser and restores on reload; Save downloads a `.humstudio.json` (all tracks, sounds, key/chords, BPM, Snap, Sensitivity); Open validates the whole file before replacing anything. v1 files load as the Melody track.
+- [x] **Keyboard:** Space play/pause, R record/stop, 1–5 open a track, Esc back, M/S mute/solo, K metronome, L Learn, Ctrl+S save, ? for the list.
+- [x] **Recording count-in** (four clicks, then the click continues under the take).
 
 The demo targets **clear, one-note-at-a-time humming** in a reasonably quiet room. It is **not** a full DAW and does not promise transcription of chords or complex singing.
 
@@ -63,7 +66,7 @@ The demo targets **clear, one-note-at-a-time humming** in a reasonably quiet roo
 | Transport / synth fallback | [Tone.js](https://tonejs.github.io/) v15; same underlying audio context as smplr |
 | MIDI export | [`@tonejs/midi`](https://github.com/Tonejs/Midi) |
 | State | React state in `src/components/Studio.tsx` (`Track[]`) |
-| Persistence | Not built yet (planned: local storage + JSON file) |
+| Persistence | `localStorage` autosave + `.humstudio.json` files, schema v2 (`src/lib/persistence/project.ts`) |
 | Cloud / accounts | **None.** Audio never leaves the browser. |
 
 **Important:** Nothing in this repo is a trained AI model. Pitch detection is DSP (Pitchy), and note generation uses deterministic heuristics. Describe it accurately when presenting.
@@ -143,7 +146,7 @@ src/
   tests/                 # playback, presets, harmony, segmentation, generation + synthetic fixtures
 ```
 
-Planned, not yet created: note editing (`PianoRoll.tsx` or inside `TrackRow.tsx`) and persistence under `src/lib/persistence/`. Exact contracts are in [`TECHNICAL_SPEC.md`](TECHNICAL_SPEC.md).
+Note editing lives in `TrackRow.tsx` with its rules in `src/lib/note-edit.ts`; persistence is `src/lib/persistence/project.ts`. Exact contracts are in [`TECHNICAL_SPEC.md`](TECHNICAL_SPEC.md).
 
 ## Key design choices
 
@@ -178,7 +181,7 @@ If the room or mic fails, use **Demo hum** and say it is a demo hum.
 
 ## Privacy and data
 
-Microphone audio is analyzed in the browser and discarded after the take; only note data is kept, and only in memory today. Nothing is uploaded. Saved projects (once built) will store notes, never audio.
+Microphone audio is analyzed in the browser and discarded after the take; only note data is kept (in memory, the browser's own storage, and files you Save). Nothing is uploaded. Saved projects store notes and settings, never audio.
 
 ## Documentation
 
