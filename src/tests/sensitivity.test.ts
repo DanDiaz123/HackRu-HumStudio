@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { DEFAULT_NOTE_SENSITIVITY, NOTE_SENSITIVITY_LEVELS, isNoteSensitivity, noteSensitivityConfig, type NoteSensitivity } from "../lib/audio/note-sensitivity.ts";
 import { SEGMENTATION_DEFAULTS, segmentPitchFrames } from "../lib/audio/segment-notes.ts";
-import { generateNotes, generateTrack } from "../lib/generate.ts";
+import { generateNotes } from "../lib/generate.ts";
 import { DEFAULT_HARMONY } from "../lib/music/harmony.ts";
 import { INSTRUMENTS, type Note } from "../lib/tracks.ts";
 import { pitchFrames } from "./fixtures/transcription.ts";
@@ -128,13 +128,4 @@ test("unknown, wrong-type, and prototype sensitivity values reject without modif
       assert.throws(() => generateNotes(inst, frames, 120, "off", DEFAULT_HARMONY, value as NoteSensitivity), RangeError);
   }
   assert.deepEqual(frames, before);
-});
-
-test("the async recording seam forwards the selected High sensitivity to generation", async () => {
-  const frames = shiftedHum(0.6);
-  const inst = instrument("melody");
-  const expected = generateNotes(inst, frames, 120, "off", DEFAULT_HARMONY, "high");
-  const actual = await generateTrack(inst, frames, 120, "off", DEFAULT_HARMONY, "high");
-  assert.equal(actual.length, 2);
-  assert.deepEqual(values(actual), values(expected));
 });

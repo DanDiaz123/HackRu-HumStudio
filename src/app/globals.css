@@ -703,14 +703,6 @@ button.lane:focus-visible {
   pointer-events: none;
   z-index: 2;
 }
-.scan {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 3px;
-  background: var(--ink);
-  animation: scan 1.6s linear infinite;
-}
 .gen-title {
   margin: 0;
   font-size: clamp(28px, 8cqw, 6rem);
@@ -1001,10 +993,6 @@ button.lane:focus-visible {
   from { clip-path: inset(0 100% 0 0); }
   to { clip-path: inset(0); }
 }
-@keyframes scan {
-  from { left: 0; }
-  to { left: 100%; }
-}
 @keyframes sweep {
   from { left: 0; }
   to { left: var(--end, 100%); }
@@ -1192,7 +1180,6 @@ button.lane:focus-visible {
     animation: none !important;
     transition: none !important;
   }
-  .scan,
   .sweep,
   .needle {
     display: none;

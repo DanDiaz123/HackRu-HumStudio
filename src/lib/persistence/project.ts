@@ -4,15 +4,15 @@ import { DEFAULT_NOTE_SENSITIVITY, type NoteSensitivity, isNoteSensitivity } fro
 import { presetForTrack } from "../audio/instrument-presets.ts";
 import { DEFAULT_HARMONY, type Harmony, inferHarmony } from "../music/harmony.ts";
 import type { Note, QuantizeDivision } from "../music/types.ts";
-import { INSTRUMENTS, QUANT_BEATS, TOTAL_BEATS, type Track } from "../tracks.ts";
+import { INSTRUMENTS, QUANT_BEATS, TOTAL_BEATS, type Track, noteId } from "../tracks.ts";
 
 export const STORAGE_KEY = "humstudio:project:v2";
 export const MAX_PROJECT_CHARS = 2_000_000;
-export const MAX_PROJECT_NOTES = 10_000;
+const MAX_PROJECT_NOTES = 10_000;
 const MAX_TEXT = 200;
 
 /** Saved multi-track project (TECHNICAL_SPEC 3.1). v1 files (one melody note list) still load. */
-export interface ProjectV2 {
+interface ProjectV2 {
   schemaVersion: 2;
   id: string;
   name: string;
@@ -35,8 +35,8 @@ export interface LoadedProject {
   tracks: Track[];
 }
 
-export function toProject(p: LoadedProject, now = new Date()): ProjectV2 {
-  return {
+export function serializeProject(p: LoadedProject, now = new Date()): string {
+  const project: ProjectV2 = {
     schemaVersion: 2,
     ...p.meta,
     bpm: p.bpm,
@@ -46,9 +46,8 @@ export function toProject(p: LoadedProject, now = new Date()): ProjectV2 {
     tracks: p.tracks.map((t) => ({ instrumentId: t.instrument.id, presetId: t.presetId, notes: t.notes, muted: t.muted, solo: t.solo, sample: t.sample })),
     updatedAt: now.toISOString(),
   };
+  return JSON.stringify(project);
 }
-
-export const serializeProject = (p: LoadedProject, now?: Date) => JSON.stringify(toProject(p, now));
 
 class ProjectError extends Error {}
 const fail = (why: string): never => {
@@ -64,7 +63,7 @@ const time = (v: unknown, field: string) => {
 const bool = (v: unknown, field: string) => (v === undefined ? false : typeof v === "boolean" ? v : fail(`bad ${field}`));
 const pcInt = (v: unknown) => Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 11;
 
-export function isValidNote(n: unknown): n is Note {
+function isValidNote(n: unknown): n is Note {
   if (!isObj(n)) return false;
   const { id, midi, startBeat, durationBeats, velocity } = n;
   return typeof id === "string" && id.length > 0 && id.length <= MAX_TEXT &&
@@ -156,7 +155,7 @@ export function parseProject(input: string): LoadedProject {
 }
 
 export const newProjectMeta = (now = new Date()) => ({
-  id: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `p${now.getTime()}`,
+  id: noteId(),
   name: "HumStudio project",
   createdAt: now.toISOString(),
 });
