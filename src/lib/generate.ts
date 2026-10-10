@@ -1,4 +1,5 @@
 import type { HumFrame } from "./hum";
+import { type Harmony, detectKey, fitToHarmony } from "./music/harmony";
 import { DRUM_ROWS, type Instrument, type Note, type QuantizeDivision, QUANT_BEATS, TOTAL_BEATS, noteId } from "./tracks";
 
 // ponytail: mock; backend replaces this function. Same signature, return Note[] in beats.
@@ -7,12 +8,16 @@ export async function generateTrack(
   frames: HumFrame[],
   bpm: number,
   quantize: QuantizeDivision,
+  harmony: Harmony,
 ): Promise<Note[]> {
   await new Promise((r) => setTimeout(r, 2400));
   const grid = QUANT_BEATS[quantize] || 0.25;
   const beatOf = (tSec: number) => (tSec * bpm) / 60;
   const snap = (b: number) => Math.round(b / grid) * grid;
-  return inst.kind === "drums" ? drums(frames, beatOf, snap) : melodic(inst, frames, beatOf, snap, grid);
+  if (inst.kind === "drums") return drums(frames, beatOf, snap);
+  const notes = melodic(inst, frames, beatOf, snap, grid);
+  // Melody sets the key (Studio infers chords from it); every other part fits the current harmony.
+  return fitToHarmony(notes, inst, inst.id === "melody" ? { ...harmony, ...detectKey(notes) } : harmony);
 }
 
 export const hzToMidi = (hz: number) => 69 + 12 * Math.log2(hz / 440);
@@ -31,17 +36,22 @@ function melodic(
   snap: (b: number) => number,
   grid: number,
 ): Note[] {
-  // Collapse voiced frames into runs of the same semitone.
+  // Median-smooth continuous pitch over the last 5 voiced frames, then collapse into runs of one semitone.
   const runs: { midi: number; start: number; end: number }[] = [];
+  let recent: number[] = [];
   for (const f of frames) {
-    if (!f.hz) continue;
-    const midi = Math.round(hzToMidi(f.hz));
+    if (!f.hz) {
+      recent = [];
+      continue;
+    }
+    recent = [...recent.slice(-4), hzToMidi(f.hz)];
+    const midi = Math.round([...recent].sort((a, b) => a - b)[recent.length >> 1]);
     const b = beatOf(f.tSec);
     const last = runs[runs.length - 1];
     if (last && last.midi === midi && b - last.end < 0.3) last.end = b;
     else runs.push({ midi, start: b, end: b });
   }
-  const kept = runs.filter((r) => r.end - r.start >= 0.15);
+  const kept = runs.filter((r) => r.end - r.start >= Math.max(0.15, grid / 2)); // shorter runs are slides
   if (!kept.length) return [];
 
   const shift = octaveShift(inst, kept.map((r) => r.midi));

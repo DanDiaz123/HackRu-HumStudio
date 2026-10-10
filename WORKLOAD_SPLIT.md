@@ -44,7 +44,7 @@ This split reflects the **existing repository**, not a blank project. At the tim
 - [ ] Stabilize Pitchy output: minimum RMS, confidence/clarity gating, octave-error handling where reasonable, and pitch smoothing.
 - [ ] Convert continuous `HumFrame[]` readings into discrete note onsets/offsets; suppress short pitch jitter, reject invalid notes, and handle pauses between notes.
 - [ ] Convert start/end seconds into **quarter-note beats** using current BPM; apply Off, 1/4, 1/8, and 1/16 snapping correctly.
-- [ ] Improve/replace the prototype logic in `generateTrack(inst, frames, bpm, quantize): Promise<Note[]>` while preserving that public integration point or coordinating an API change.
+- [ ] Improve/replace the prototype logic in `generateTrack(inst, frames, bpm, quantize, harmony): Promise<Note[]>` while preserving that public integration point or coordinating an API change.
 - [ ] Return notes appropriate for the selected instrument's range; document the limitations of drum/beatbox mapping separately from monophonic melodic pitch.
 - [ ] Ensure empty/failed recordings leave existing notes untouched.
 - [ ] Add deterministic tests using synthetic voiced/unvoiced frames; then verify live pitch-to-note output.

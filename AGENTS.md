@@ -24,7 +24,7 @@ This file is for **AI coding agents and human contributors** working in the HumS
 1. ~~Sample `Note[]` -> track lanes -> Tone.js playback.~~ Done.
 2. ~~Mic permission and capture -> Pitchy frames -> spectrogram -> loading -> reveal.~~ Done with a mock generator; needs real-mic testing.
 3. Now: real `generateTrack(...)` (deterministic segmentation/quantization fitted to the instrument), editable notes in the zoomed track, multi-track JSON save/load.
-4. Last: recording count-in, manual note authoring, polish. Metronome and playback count-in are implemented; listening verification remains open. Add cloud, auth, a generation backend, and ML models only on explicit team decision after the loop works.
+4. Last: manual note authoring, polish. Metronome, playback count-in, and recording count-in + click are implemented; listening verification remains open. Add cloud, auth, a generation backend, and ML models only on explicit team decision after the loop works.
 
 **Do not** build a mixer, audio tracks, user-created tracks, Supabase login, neural model, audio uploader, effects chain, or new animation to "help" the MVP. The five instrument tracks, zoom, spectrogram, and reveal are the agreed scope (`PRODUCT.md`); polish them rather than adding more.
 
@@ -83,10 +83,10 @@ Valid notes satisfy: integer MIDI 0..127; finite startBeat >= 0; finite duration
 **Multi-track contracts** (`src/lib/tracks.ts`, see `TECHNICAL_SPEC.md` 3.1-3.3): `Instrument`, `Track { instrument, notes, muted, solo, sample }`, `INSTRUMENTS` (Melody, Bass, Keys, Drums, Strings), `HumFrame`, and the generation seam:
 
 ```ts
-generateTrack(inst: Instrument, frames: HumFrame[], bpm: number, quantize: QuantizeDivision): Promise<Note[]>
+generateTrack(inst: Instrument, frames: HumFrame[], bpm: number, quantize: QuantizeDivision, harmony: Harmony): Promise<Note[]>
 ```
 
-App state is `Track[]`; never flatten tracks when playing, exporting, or saving. `Project` v1 is single-track; the multi-track save format must be a **new schema version**, not an edit to v1.
+The song has one shared `Harmony` (`src/lib/music/harmony.ts`, `TECHNICAL_SPEC.md` 3.4): a Melody take sets the key and chords, and other pitched tracks are fitted to them so separately hummed parts never clash. App state is `Track[]` plus `Harmony`; never flatten tracks when playing, exporting, or saving. `Project` v1 is single-track; the multi-track save format must be a **new schema version**, not an edit to v1.
 
 ## 4. Module boundaries
 
@@ -96,6 +96,7 @@ src/components/TrackRow.tsx      # one track: arrangement row / zoomed lane / no
 src/components/Spectrogram.tsx   # halftone display of HumFrame[]                               (Person 1 + 3)
 src/lib/tracks.ts                # Instrument, Track, INSTRUMENTS, lane geometry                 (shared)
 src/lib/music/types.ts           # Note, QuantizeDivision; add PitchFrame/NoteSegment/DetectorConfig with segmentation (shared)
+src/lib/music/harmony.ts         # shared key/chords: detectKey, inferHarmony, fitToHarmony   (Person 1, shared)
 src/lib/hum.ts                   # mic lifecycle, Pitchy gating, demo hum -> HumFrame            (Person 1)
 src/lib/generate.ts              # generateTrack(): MOCK, replace the body                       (Person 1)
 src/lib/playback.ts              # browser-only playback facade                                 (Person 2)
@@ -173,6 +174,7 @@ JSON export/import preserves notes + BPM
 MIDI export at 120 BPM maps beat 2 to 1.0 second
 Repeated Tone scheduling does not create duplicated playback
 generateTrack returns notes inside the instrument's range, and [] for silence
+detectKey: C-E-G-C melody -> C major; inferHarmony: C|F|G|C melody -> C F G C chords
 ```
 
 ## 9. Team coordination / parallel work

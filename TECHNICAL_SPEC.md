@@ -11,7 +11,7 @@ This file tells implementers **what to build, which interfaces to share, what ed
 ## 0. Implementation priorities
 
 - **P0:** Five instrument tracks over 8 bars of 4/4 **(implemented)**; click-to-zoom **(implemented)**; BPM/play/pause/stop/rewind, mute/solo **(implemented)**; microphone acquisition, live spectrogram, loading state, animated reveal **(implemented)**; multi-track MIDI export **(implemented)**; clear errors and Demo hum fallback **(implemented)**; monophonic hum-to-notes for the selected instrument with Off/1/4/1/8/1/16 quantization *(mock; target in sections 6-7)*; note editing in the zoomed track *(target)*; local autosave and JSON import/export of all tracks *(target)*.
-- **P1:** Four-beat playback count-in and metronome **(implemented; listening pending)**; recording count-in *(target)*; manual note creation/deletion; undo/redo; instrument sound polish; confirm before overwriting a generated part. Implement recording count-in early if live recording is hard to align to tempo.
+- **P1:** Four-beat playback count-in and metronome **(implemented; listening pending)**; recording count-in with click **(implemented; listening pending)**; manual note creation/deletion; undo/redo; instrument sound polish; confirm before overwriting a generated part.
 - **P2:** Generation backend or ML model, Supabase, imported audio, effects, user-created tracks, collaboration.
 
 **Integration milestone (implemented; listening pending):** sample `Note[]` (Keys, Drums) -> visible track clips -> Tone.js playback, with scheduling covered by regression fixtures. Next milestone: real hum -> `generateTrack` -> notes on the selected track.
@@ -206,10 +206,25 @@ export async function generateTrack(
   frames: HumFrame[],
   bpm: number,
   quantize: QuantizeDivision,
+  harmony: Harmony,
 ): Promise<Note[]>;
 ```
 
-The UI calls only this. The current mock waits ~2.4 s, groups voiced frames into same-semitone runs, octave-shifts the median into the instrument's range, snaps to the grid, and for Drums turns RMS onsets into kick/snare plus eighth-note hats. A real implementation (sections 6-7, or a backend) replaces the body and must: return valid notes (see invariants) inside the instrument's range, return `[]` or throw for unusable input (the UI shows an error and keeps existing notes), and keep the signature or coordinate a change.
+The UI calls only this. The current mock waits ~2.4 s, groups voiced frames into same-semitone runs, octave-shifts the median into the instrument's range, snaps to the grid, and for Drums turns RMS onsets into kick/snare plus eighth-note hats. A real implementation (sections 6-7, or a backend) replaces the body and must: return valid notes (see invariants) inside the instrument's range, return `[]` or throw for unusable input (the UI shows an error and keeps existing notes), and keep the signature or coordinate a change. Since 1.2 the mock also median-smooths pitch over 5 voiced frames, drops runs shorter than half a grid step (slides), and ends with `fitToHarmony` (3.4).
+
+### 3.4 Shared harmony (implemented, `src/lib/music/harmony.ts`)
+
+Tracks are hummed separately, so they must agree on a key and chords or they clash. The song has one `Harmony`, owned by `Studio.tsx` next to `Track[]`:
+
+```ts
+export interface Harmony { tonic: number; mode: "major" | "minor"; bars: number[][] } // 8 triads, pitch classes, root first
+export const DEFAULT_HARMONY: Harmony; // C major, Am F C G x2 (the Keys sample)
+```
+
+- **Melody sets it.** A Melody take is snapped to its own detected key (Krumhansl-Schmuckler, `detectKey`), then `inferHarmony` picks one diatonic triad per bar (chord tones weighted by duration, x2 on beats 1 and 3, small priors for I/IV/V/vi and a tonic first bar; empty bars repeat the previous chord).
+- **Everything else fits it.** `fitToHarmony` moves pitches, never deletes notes: Bass to the nearest root/fifth of the bar's chord, Keys and Strings to the nearest chord tone, Melody to the scale, Drums untouched, all kept in the instrument's range.
+- After a Melody take, Studio re-voices a Sample Keys part (`voiceChords`) and re-fits every other generated pitched part to the new harmony.
+- The multi-track `Project` schema must store `harmony`.
 
 ### Invariant checks
 
@@ -318,7 +333,7 @@ Implementation steps:
 
 1. Check secure context and `navigator.mediaDevices` availability before requesting mic.
 2. Request the stream from a click handler. A denied request sets an actionable error state, preserving existing notes.
-3. If enabled, play a four-beat count-in **after** permission; set `recordingStartAudioTime` only at the beginning of active capture.
+3. **(implemented)** After permission, play a four-beat count-in, then keep the metronome clicking (no backing tracks; the mic has echo cancellation off) while capturing. Frames during the count-in are dropped and `tSec` is rebased so the first captured frame is 0. Demo hum skips the count-in. The arrangement and metronome setting are restored on finish/error/unmount.
 4. Every roughly 20 ms (using `requestAnimationFrame` with gating), fill `samples` from the analyser and pass the current buffer and actual sample rate to Pitchy.
 5. Append **compact** `PitchFrame` objects, not copied PCM waveforms, to the recording session. Up to 15 seconds of frames is sufficient for demo.
 6. On Stop (or 15-second maximum), stop the loop, close/cleanup the analysis graph and tracks, run segmentation + quantization, then dispatch `ADD_NOTES`/`REPLACE_NOTES` as intentionally chosen by UI policy.
@@ -576,7 +591,7 @@ type ProjectAction =
 
 ### Unit tests (use synthetic fixtures)
 
-`npm test` runs 19 playback regression tests in `src/tests/playback.test.ts`, including repeated scheduling, five-track timing, tempo changes, mute/solo, overlapping notes, transport lifecycle, invalid inputs, teardown, and metronome/count-in timing and cancellation. The remaining algorithm, persistence, MIDI, and microphone fixtures below are targets.
+`npm test` runs 17 playback regression tests in `src/tests/playback.test.ts` and 6 harmony tests in `src/tests/harmony.test.ts` (T-16..T-19 plus id preservation and the Keys sample voicing). Playback covers repeated scheduling, five-track timing, tempo changes, mute/solo, overlapping notes, transport lifecycle, invalid inputs, teardown, and metronome/count-in timing and cancellation. The remaining algorithm, persistence, MIDI, and microphone fixtures below are targets.
 
 | ID | Input | Expected result |
 |---|---|---|
@@ -592,9 +607,13 @@ type ProjectAction =
 | T-10 | MIDI C4 at beat 2, duration 1, 120 BPM | Note start=1.0 s, duration=0.5 s |
 | T-11 | Consecutive `schedule()` calls | No duplicated playback events |
 | T-12 | Start/stop mic twice | No orphaned media tracks or loops |
-| T-13 | `generateTrack` with synthetic C4-E4-G4 frames for Bass | Notes inside 28..52, same contour |
+| T-13 | `generateTrack` with synthetic C4-E4-G4 frames for Bass | Notes inside 28..52, each a root or fifth of its bar's chord |
 | T-14 | `generateTrack` with all-unvoiced frames | `[]` (UI keeps existing notes) |
 | T-15 | `exportMidi` bytes for Keys + Drums | Two MIDI tracks; drums on channel index 9 |
+| T-16 | `detectKey` on C-E-G-C... / A-C-E-A... | C major / A minor **(implemented)** |
+| T-17 | `snapToScale(61)` in C major | 60 (ties go down) **(implemented)** |
+| T-18 | `inferHarmony` on a melody outlining C, F, G, C | C F G C, then C repeated into empty bars **(implemented)** |
+| T-19 | `fitToHarmony` Bass over Am; Drums | Only A/E inside 28..52; Drums unchanged **(implemented)** |
 
 ### Manual browser acceptance
 

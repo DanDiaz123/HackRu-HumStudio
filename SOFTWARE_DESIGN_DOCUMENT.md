@@ -63,7 +63,7 @@ Music software expects users to translate ideas into piano-roll clicks, keyboard
 | Tier | Deliverables | Rationale |
 |---|---|---|
 | **P0 - demo-critical** | Five-instrument arrangement view **(built)**; click-to-zoom track **(built)**; mic permission and capture with live spectrogram **(built)**; loading state and animated note reveal **(built)**; Tone.js playback of all tracks with mute/solo, BPM, play/pause/stop/rewind **(built)**; multi-track MIDI export **(built)**; demo-hum fallback and error states **(built)**; real note generation for the selected instrument (pitch, segmentation, quantization) *(mock today)*; drag notes to change pitch/time and basic length edit *(planned)*; local autosave and JSON project export/import for all tracks *(planned)* | Completes the end-to-end promise and makes the output reusable. |
-| **P1 - polish** | Four-beat playback count-in and metronome **(built; listening pending)**; recording count-in *(planned)*; manual add/delete; undo/redo; instrument sound polish; confirm before overwriting a generated part | Increases demo clarity and resilience. Recording count-in may be pulled into P0 if live recording is hard to align to tempo. |
+| **P1 - polish** | Four-beat playback count-in and metronome **(built; listening pending)**; recording count-in with click **(built; listening pending)**; manual add/delete; undo/redo; instrument sound polish; confirm before overwriting a generated part | Increases demo clarity and resilience. |
 | **P2 - stretch** | Generation backend or ML arrangement model; Supabase login/cloud saves; uploaded audio; MIDI import; chord estimation; user-created tracks; collaboration | Valuable later, but not required to demonstrate the core product. |
 
 **Scope cut rule:** If the transcription, editing, and playback loop is unstable, cut P1/P2 before attempting new features. When time is tight, allow note duration editing through a numeric control rather than sophisticated edge dragging.
@@ -256,7 +256,7 @@ A 1/16-note grid is `0.25` quarter-note beats; 1/8 is `0.5`, 1/4 is `1.0`. Snap 
 - Schedule synth triggers with the **precise audio time argument** provided by the transport callback.
 - On project updates, stop or safely reschedule the old events. Track the scheduled event IDs and clear them; do not accumulate duplicated notes.
 - Pause preserves the playhead position while releasing active voices; Stop halts playback, releases voices, and resets to zero. Rewind returns the playhead to beat zero while preserving running/paused state. Also release voices when changing projects or unmounting.
-- Optional metronome and four-beat count-in use the audio clock. Count-in currently precedes playback; recording count-in remains an integration task.
+- Optional metronome and four-beat count-in use the audio clock. Count-in precedes playback and recording; while recording, only the click plays.
 - Fixed 4/4 timeline. The transport loops the 8-bar arrangement; no mixed time signatures.
 
 ## 10. Track lanes and interaction design

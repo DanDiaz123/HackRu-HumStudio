@@ -24,6 +24,7 @@ interface Props {
   elapsed: number;
   stage: number;
   bpm: number;
+  countIn: number | null;
   onOpen: () => void;
   onBack: () => void;
   onRecord: (demo: boolean) => void;
@@ -120,7 +121,8 @@ export default function TrackRow(p: Props) {
   const working = phase === "generating" || phase === "revealing";
   const showSpec = p.frames.length > 0 && phase !== "idle" && phase !== "error" && phase !== "requesting";
   const status =
-    phase === "requesting" ? "Waiting for the microphone"
+    p.countIn !== null ? `Count-in ${p.countIn}`
+    : phase === "requesting" ? "Waiting for the microphone"
     : recording ? `${p.demo ? "Demo hum" : "Recording"} ${fmt(p.elapsed)}`
     : phase === "generating" ? "Generating"
     : phase === "revealing" ? "Setting notes"
@@ -189,8 +191,8 @@ export default function TrackRow(p: Props) {
         )}
         {phase === "requesting" && (
           <div className="prompt">
-            <p>Allow the microphone</p>
-            <span>Your audio stays in this tab.</span>
+            <p>{p.countIn !== null ? `Hum on the click · ${p.countIn}` : "Allow the microphone"}</p>
+            <span>Headphones keep the click out of your take. Your audio stays in this tab.</span>
           </div>
         )}
         {phase === "error" && (

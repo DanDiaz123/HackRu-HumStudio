@@ -21,7 +21,7 @@ Live hackathon demo: unknown laptop microphone, browser permission prompts, room
 ## Capabilities and Constraints
 - Multi-track is core (overrides the SDD's single-track P0): tracks per instrument in a DAW-style arrangement view.
 - Flow: click a track to zoom into it, record a hum, a live spectrogram draws over the track while recording, a loading state covers generation, then the music data is revealed with an animation.
-- The hum feeds a generated arrangement for that track, not necessarily a 1:1 transcription. The UI is built; generation is a mock behind `generateTrack(...)` in `src/lib/generate.ts`. How real generation works (DSP transcription, arrangement, or a backend) is undecided.
+- The hum feeds a generated arrangement for that track, not necessarily a 1:1 transcription. The UI is built; generation is a DSP heuristic behind `generateTrack(...)` in `src/lib/generate.ts` plus rule-based harmony: the Melody take sets the song's key and chords, and every other pitched track is fitted to them so parts recorded separately still sound good together. A backend is undecided.
 - Five fixed instrument tracks: Melody, Bass, Keys, Drums, Strings.
 - Notes are stored in beats (`Note`: midi, startBeat, durationBeats, velocity), per TECHNICAL_SPEC.md.
 - Raw audio stays on device in the MVP.
