@@ -1,7 +1,7 @@
 import { generateTrackVariants, snapNotesToGrid, type NoteSensitivityVariants } from "../generate.ts";
 import type { HumFrame } from "../hum.ts";
 import type { NoteSensitivity } from "../audio/note-sensitivity.ts";
-import type { Note, QuantizeDivision, Track } from "../tracks.ts";
+import { drumPart, type DrumPart, type Note, type QuantizeDivision, type Track } from "../tracks.ts";
 import type { LoadedProject } from "../persistence/project.ts";
 import { MAX_PROJECT_NOTES } from "../persistence/project.ts";
 import { chordsFromVoicing, fitToHarmony, inferHarmony, voiceChords, withKey, type Harmony, type Key } from "./harmony.ts";
@@ -11,6 +11,8 @@ export interface RecordedTake {
   frames: HumFrame[];
   bpm: number;
   variants: NoteSensitivityVariants;
+  /** Drum recordings use onset rhythm for this selected lane only. */
+  drumPart?: DrumPart;
 }
 
 export type RecordedTakes = Record<string, RecordedTake>;
@@ -75,8 +77,15 @@ export function applyNoteSettings(input: NoteSettingsInput): {
   const snapSources = { ...input.snapSources };
   const rebuild = (track: Track, harmony: Harmony) => {
     const take = takes[track.instrument.id];
-    takes[track.instrument.id] = { ...take,
-      variants: generateTrackVariants(track.instrument, take.frames, take.bpm, quantize, harmony, sensitivity) };
+    const variants = generateTrackVariants(track.instrument, take.frames, take.bpm, quantize, harmony, sensitivity, undefined, take.drumPart);
+    if (take.drumPart && track.instrument.kind === "drums") {
+      const selectedMidi = drumPart(take.drumPart).midi;
+      const otherParts = track.notes.filter(note => note.midi !== selectedMidi);
+      for (const level of Object.keys(variants) as NoteSensitivity[]) {
+        variants[level] = [...otherParts, ...variants[level]].sort((a, b) => a.startBeat - b.startBeat || a.midi - b.midi || a.id.localeCompare(b.id));
+      }
+    }
+    takes[track.instrument.id] = { ...take, variants };
   };
   if (input.resnap) {
     for (const track of input.tracks) if (takes[track.instrument.id]) rebuild(track, input.harmony);

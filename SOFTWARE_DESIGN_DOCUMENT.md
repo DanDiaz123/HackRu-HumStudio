@@ -262,7 +262,7 @@ A 1/16-note grid is `0.25` quarter-note beats; 1/8 is `0.5`, 1/4 is `1.0`. Snap 
 ## 10. Track lanes and interaction design
 
 - **Arrangement view:** five rows share the viewport height; each row is a flood-colored header (name, M/S) plus a lane with a bar/beat grid. Generated parts render as solid flood clips with ink note bars; sample parts render outlined.
-- **Zoomed view:** clicking a row zooms it; the others collapse to 36 px strips. The zoomed lane fills with the instrument color, labels C rows (or drum names), and hosts recording, spectrogram, loading, and reveal.
+- **Zoomed view:** clicking a row zooms it; the others collapse to 36 px strips. The zoomed lane fills with the instrument color, labels C rows (or drum names), and hosts recording, spectrogram, loading, and reveal. Drums expose a Kick/Snare/Closed hat/Open hat/Crash selector; recording and editing use the selected rhythm lane while the full kit remains playable.
 - Geometry is derived, never stored: x = `startBeat / 32` of lane width; y = `(instrument.hi - midi) / rows` of lane height (`src/lib/tracks.ts`).
 - 8 bars x 4 beats = 32 beats, fitted to the viewport width (no horizontal scroll yet).
 - Grid lines for bars/beats and labels for C notes.

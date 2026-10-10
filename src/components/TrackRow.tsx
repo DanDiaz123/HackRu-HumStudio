@@ -9,6 +9,9 @@ import { addNote, moveNote, resizeNote } from "@/lib/note-edit";
 import type { PresetStatus } from "@/lib/audio/preset-manager";
 import {
   DRUM_ROWS,
+  DRUM_PARTS,
+  drumPart,
+  type DrumPart,
   type Instrument,
   type Note,
   QUANT_BEATS,
@@ -76,6 +79,7 @@ interface Props {
   onRecord: (demo: boolean) => void;
   onStop: () => void;
   onToggle: (key: "muted" | "solo") => void;
+  onDrumPartChange: (part: DrumPart) => void;
 }
 
 const lastBeat = (notes: Note[]) => Math.max(1, ...notes.map((n) => n.startBeat + n.durationBeats));
@@ -338,7 +342,11 @@ export default function TrackRow(p: Props) {
   const name = inst.name;
   const preset = presetForTrack(inst.id, track.presetId);
   const soundStatus = p.presetStatus?.presetId === preset.id ? p.presetStatus : undefined;
-  const hasNotes = track.notes.length > 0;
+  const selectedDrumPart = inst.kind === "drums" ? drumPart(track.drumPart) : null;
+  const visibleNotes = zoomed && selectedDrumPart
+    ? track.notes.filter((note) => note.midi === selectedDrumPart.midi)
+    : track.notes;
+  const hasNotes = visibleNotes.length > 0;
   const style = { "--flood": inst.color } as CSSProperties;
   const labels = inst.kind === "drums" ? undefined : p.noteLabel;
   const pitched = inst.kind !== "drums";
@@ -405,6 +413,15 @@ export default function TrackRow(p: Props) {
             value={preset.id} disabled={p.busy} onChange={event => p.onPresetChange(event.target.value)}>
             {presetsForTrack(inst.id).map(option => <option key={option.id} value={option.id}>{option.name}</option>)}
           </select>
+          {selectedDrumPart && (
+            <label className="drum-part-field">
+              <span>Drum part</span>
+              <select aria-label="Drum part" value={selectedDrumPart.id} disabled={p.busy}
+                onChange={event => p.onDrumPartChange(event.target.value as DrumPart)}>
+                {DRUM_PARTS.map(part => <option key={part.id} value={part.id}>{part.name}</option>)}
+              </select>
+            </label>
+          )}
           {soundStatus?.state === "loading" && <p className="sound-feedback" role="status">Loading {preset.name}…</p>}
           {soundStatus?.state === "fallback" && (
             <div className="sound-feedback" role="alert">
@@ -446,7 +463,7 @@ export default function TrackRow(p: Props) {
           )}
           {!recording && !working && (
             <div className="part-actions">
-              <button className="ghost-btn" onClick={p.onRepeat} disabled={p.busy || !track.notes.some((n) => n.startBeat < TOTAL_BEATS / 2)}
+              <button className="ghost-btn" onClick={p.onRepeat} disabled={p.busy || !visibleNotes.some((n) => n.startBeat < TOTAL_BEATS / 2)}
                 title="Copy bars 1-4 over bars 5-8">Repeat 1–4</button>
               <button className="ghost-btn" onClick={p.onClear} disabled={p.busy || !hasNotes} title="Remove every note in this part (undoable)">Clear</button>
             </div>
@@ -467,11 +484,15 @@ export default function TrackRow(p: Props) {
         {pitched && (r ? r.step >= 2 && <LaneChords harmony={r.harmony} stamp /> : p.learn && <LaneChords harmony={p.harmony} />)}
         {r ? (
           <div className="notes-area">
-            <RevealNotes r={r} inst={inst} />
+            <RevealNotes r={selectedDrumPart ? {
+              ...r,
+              raw: r.raw.filter(note => note.midi === selectedDrumPart.midi),
+              final: r.final.filter(note => note.midi === selectedDrumPart.midi),
+            } : r} inst={inst} />
           </div>
         ) : (
           !working && (
-            <EditableNotes notes={track.notes} inst={inst} quantize={p.quantize} label={labels} disabled={p.busy} onEdit={p.onEditNotes} />
+            <EditableNotes notes={visibleNotes} inst={inst} quantize={p.quantize} label={labels} disabled={p.busy} onEdit={p.onEditNotes} />
           )
         )}
         {recording && p.learn && pitched && <LivePitch frames={p.frames} harmony={p.harmony} />}

@@ -18,6 +18,8 @@ export interface Track {
   instrument: Instrument;
   /** Serializable playback sound; category identity and MIDI notes stay unchanged. */
   presetId: string;
+  /** Selected rhythmic lane inside the Drums track; omitted for pitched tracks. */
+  drumPart?: DrumPart;
   notes: Note[];
   muted: boolean;
   solo: boolean;
@@ -34,6 +36,18 @@ export const DRUM_ROWS = [
   { midi: 38, name: "Snare" },
   { midi: 36, name: "Kick" },
 ];
+
+export const DRUM_PARTS = [
+  { id: "kick", name: "Kick", midi: 36 },
+  { id: "snare", name: "Snare", midi: 38 },
+  { id: "hat", name: "Closed hat", midi: 42 },
+  { id: "openHat", name: "Open hat", midi: 46 },
+  { id: "crash", name: "Crash", midi: 49 },
+] as const;
+
+export type DrumPart = (typeof DRUM_PARTS)[number]["id"];
+export const drumPart = (id: string | undefined): (typeof DRUM_PARTS)[number] =>
+  DRUM_PARTS.find((part) => part.id === id) ?? DRUM_PARTS[0];
 
 export const INSTRUMENTS: Instrument[] = [
   { id: "melody", name: "Melody", color: "#f26b1d", lo: 60, hi: 84, kind: "synth", hint: "Hum the tune you can't get out of your head" },
@@ -72,7 +86,7 @@ function sampleDrums(): Note[] {
 export function initialTracks(): Track[] {
   return INSTRUMENTS.map((instrument) => {
     const notes = instrument.id === "drums" ? sampleDrums() : instrument.id === "keys" ? voiceChords(DEFAULT_HARMONY) : [];
-    return { instrument, presetId: presetForTrack(instrument.id).id, notes, muted: false, solo: false, sample: notes.length > 0 };
+    return { instrument, presetId: presetForTrack(instrument.id).id, ...(instrument.kind === "drums" ? { drumPart: "kick" as DrumPart } : {}), notes, muted: false, solo: false, sample: notes.length > 0 };
   });
 }
 

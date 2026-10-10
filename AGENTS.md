@@ -12,7 +12,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 This file is for **AI coding agents and human contributors** working in the HumStudio repository. Read it **before** writing or changing implementation code.
 
-**Project status:** The Next.js app is scaffolded and the multi-track studio UI is built (`src/components/Studio.tsx`, `TrackRow.tsx`, `Spectrogram.tsx`). Playback has a regression suite, metronome, and four-beat playback count-in. Melodic generation uses tested deterministic segmentation in `src/lib/audio/segment-notes.ts`, followed by instrument/harmony fitting, merging, and quantization in `src/lib/generate.ts`; Drums retain RMS heuristics. Note editing (collision-aware, `src/lib/note-edit.ts`), undo/redo, Clear/Repeat, keyboard shortcuts, and persistence (autosave + `.humstudio.json` schema v2, `src/lib/persistence/project.ts`) are built. Real-microphone and audible playback verification remain open. Still inspect the repository before assuming a feature works.
+**Project status:** The Next.js app is scaffolded and the multi-track studio UI is built (`src/components/Studio.tsx`, `TrackRow.tsx`, `Spectrogram.tsx`). Playback has a regression suite, metronome, and four-beat playback count-in. Melodic generation uses tested deterministic segmentation in `src/lib/audio/segment-notes.ts`, followed by instrument/harmony fitting, merging, and quantization in `src/lib/generate.ts`; Drums support five rhythm-only selectable lanes. Note editing (collision-aware, `src/lib/note-edit.ts`), undo/redo, Clear/Repeat, keyboard shortcuts, and persistence (autosave + `.humstudio.json` schema v2, `src/lib/persistence/project.ts`) are built. Real-microphone and audible playback verification remain open. Still inspect the repository before assuming a feature works.
 **Project aim:** Browser-based **multi-track hum-to-music sketchpad** for HackRU: pick an instrument track, hum, see a live spectrogram, get notes for that instrument, play the arrangement, export MIDI.
 **Working product name:** HumStudio.
 **Documentation precedence:** `PRODUCT.md` (product scope) > `TECHNICAL_SPEC.md` (shared interfaces, algorithms, acceptance) > `SOFTWARE_DESIGN_DOCUMENT.md` (rationale) > `README.md` (onboarding). Visual decisions follow `DESIGN.md`; file ownership follows `WORKLOAD_SPLIT.md`. If documents conflict, correct the documentation as part of the change and tell the team.
@@ -82,7 +82,7 @@ export interface Project {
 
 Valid notes satisfy: integer MIDI 0..127; finite startBeat >= 0; finite durationBeats > 0; finite velocity 0..1. Tempo input is constrained to 60..180; the UI defaults to **BPM 120 and quantization `"1/4"`**. Fixed 4/4, 8 bars.
 
-**Multi-track contracts** (`src/lib/tracks.ts`, see `TECHNICAL_SPEC.md` 3.1-3.3): `Instrument`, `Track { instrument, presetId, notes, muted, solo, sample }`, `INSTRUMENTS` (Melody, Bass, Keys, Drums, Strings), `HumFrame`, and the generation seam:
+**Multi-track contracts** (`src/lib/tracks.ts`, see `TECHNICAL_SPEC.md` 3.1-3.3): `Instrument`, `Track { instrument, presetId, drumPart?, notes, muted, solo, sample }`, `INSTRUMENTS` (Melody, Bass, Keys, Drums, Strings), `HumFrame`, and the generation seam. `drumPart` is one of `kick`, `snare`, `hat`, `openHat`, or `crash`; it selects the rhythm lane shown in the zoomed Drums tab while all lanes stay in the Track notes for playback/export.
 
 ```ts
 generateTrack(inst: Instrument, frames: HumFrame[], bpm: number, quantize: QuantizeDivision, harmony: Harmony, sensitivity?: NoteSensitivity): Promise<Note[]>
@@ -185,6 +185,7 @@ Repeated Tone scheduling does not create duplicated playback
 generateTrack returns notes inside the instrument's range, and [] for silence
 detectKey: C-E-G-C melody -> C major; inferHarmony: C|F|G|C melody -> C F G C chords
 ProjectV2 rejects unknown fields, invalid notes, duplicate IDs, and oversized input
+Drum part selection maps onset rhythm to one of five saved MIDI lanes
 MIDI encoding separates melodic channels and uses channel 10 for drums
 ```
 

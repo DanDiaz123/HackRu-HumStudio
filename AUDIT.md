@@ -33,12 +33,13 @@ The Note/Track/HumFrame field contracts remain unchanged. `generateNotes` suppor
 
 ## Verification actually completed
 
-- `npm.cmd test`: **168 passed, zero failures**.
+- `npm.cmd test`: **170 passed, zero failures**.
 - `npm.cmd run lint`, `npx.cmd tsc --noEmit`, `npm.cmd run build`: passed.
 - Local headless Edge: Demo hum/reveal, Low/Medium/High swaps, busy-state controls, capture-tempo Snap/Off, persistent key choice, edited-note preservation, empty re-record recovery, and MIDI download header passed without page errors.
 - Menu labels remained visible with no horizontal overflow at 1920, 1280, 860, 480, 390, and 320 px. Screenshots confirmed the compact Re-record label fits.
 - Synthetic microphone WAV through Edge → worklet → Pitchy → generation: held G4 with 100 ms semitone wobbles and 120 ms dropouts remained one note. Stop ended the acquired media track; reload during a second recording returned to a usable studio without page errors.
 - Final browser integration also verified settings/edit undo/redo, project Save/Open, rejection of unexpected file fields without changing notes, autosave restoration, and the additional project controls at 320..1920 px.
+- The Drums tab browser check verified five selectable rhythm parts, lane filtering for Kick/Snare, and no page errors or desktop overflow.
 - Source review found no unsafe code evaluation, HTML injection sinks, tracked credentials, microphone uploads, or sensitive logging in reviewed paths. The app has no authentication or server API. The new local project-file input validates before applying; analysis features and audio are excluded from files/autosave.
 - `npm.cmd audit --omit=dev --json`: zero known production dependency vulnerabilities.
 

@@ -33,6 +33,7 @@ test("T-08: a project round-trips every track, setting and the harmony", () => {
   assert.equal(after.sensitivity, "high");
   assert.deepEqual(after.harmony, before.harmony);
   assert.deepEqual(after.tracks, before.tracks);
+  assert.equal(after.tracks.find(track => track.instrument.id === "drums")?.drumPart, "kick");
 });
 
 test("T-09: invalid files throw instead of loading part of them", () => {
@@ -50,6 +51,8 @@ test("T-09: invalid files throw instead of loading part of them", () => {
     json((p) => { (p.tracks as { notes: { durationBeats: number }[] }[])[0].notes[0].durationBeats = -1; }),
     json((p) => { (p.tracks as { notes: { midi: number }[] }[])[0].notes[0].midi = 60.5; }),
     json((p) => { const t = p.tracks as { notes: unknown[] }[]; t[1].notes.push(t[0].notes[0]); }),
+    json((p) => { (p.tracks as Record<string, unknown>[]).find(t => t.instrumentId === "drums")!.drumPart = "piano"; }),
+    json((p) => { (p.tracks as Record<string, unknown>[])[0].drumPart = "kick"; }),
   ];
   for (const text of bad) assert.throws(() => parseProject(text), /not a valid HumStudio project/, text.slice(0, 80));
 });

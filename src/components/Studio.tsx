@@ -33,6 +33,8 @@ import {
   initialTracks,
   midiName,
   noteId,
+  drumPart,
+  type DrumPart,
 } from "@/lib/tracks";
 import { DownloadIcon, OpenIcon, PauseIcon, PlayIcon, RedoIcon, RewindIcon, SaveIcon, StopIcon, UndoIcon } from "./icons";
 import TrackRow, { type Phase, REVEAL_SEC, type Reveal } from "./TrackRow";
@@ -331,7 +333,7 @@ export default function Studio() {
     const c = clearedRef.current;
     clearedRef.current = null;
     takeUndoRef.current = null;
-    if (c) commitTracks(arrangementRef.current.tracks.map((t) => (t.instrument.id === c.id && !t.notes.length ? { ...t, notes: c.notes } : t)));
+    if (c) commitTracks(arrangementRef.current.tracks.map((t) => (t.instrument.id === c.id ? { ...t, notes: c.notes } : t)));
   }, [commitTracks]);
 
   const finish = useCallback(async (taken: HumFrame[], signal: AbortSignal) => {
@@ -356,7 +358,16 @@ export default function Studio() {
       try {
         const inst = zoomed.instrument;
         const trace = {} as GenTrace;
-        const variants = generateTrackVariants(inst, taken, bpm, quantize, harmony, sensitivity, trace);
+        const selectedDrumPart = inst.kind === "drums" ? drumPart(zoomed.drumPart).id : undefined;
+        const variants = generateTrackVariants(inst, taken, bpm, quantize, harmony, sensitivity, trace, selectedDrumPart);
+        if (selectedDrumPart) {
+          const selectedMidi = drumPart(selectedDrumPart).midi;
+          const existing = arrangementRef.current.tracks.find(track => track.instrument.id === inst.id)?.notes ?? [];
+          const otherParts = existing.filter(note => note.midi !== selectedMidi);
+          for (const level of NOTE_SENSITIVITY_LEVELS) {
+            variants[level] = [...otherParts, ...variants[level]].sort((a, b) => a.startBeat - b.startBeat || a.midi - b.midi || a.id.localeCompare(b.id));
+          }
+        }
         const notes = variants[sensitivity];
         if (!notes.length) throw new Error("empty");
         // A Melody take sets the key and chords, a Keys take re-picks the chords; other pitched parts
@@ -389,7 +400,8 @@ export default function Studio() {
         }
         const pickedKey = inst.id === "melody" ? null : pickedKeyRef.current;
         const driver = inst.id === "melody" || inst.id === "keys" ? inst.id : harmonyDriverRef.current;
-        const takes = { ...takesRef.current, [inst.id]: { frames: taken.map(frame => ({ ...frame })), bpm, variants } };
+        const takes = { ...takesRef.current, [inst.id]: { frames: taken.map(frame => ({ ...frame })), bpm, variants,
+          ...(selectedDrumPart ? { drumPart: selectedDrumPart } : {}) } };
         const snapSources = { ...snapSourcesRef.current };
         delete snapSources[inst.id];
         const next = applyNoteSettings({ tracks: arrangementRef.current.tracks, harmony, takes, snapSources,
@@ -425,9 +437,12 @@ export default function Studio() {
     const signal = controller.signal;
     pauseIfPlaying();
     clearedRef.current = null;
-    if (!zoomed.sample && zoomed.notes.length) {
+    if (zoomed.notes.length && (zoomed.instrument.kind === "drums" || !zoomed.sample)) {
       clearedRef.current = { id: zoomed.instrument.id, notes: zoomed.notes };
-      commitTracks(arrangementRef.current.tracks.map((t) => (t.instrument.id === zoomed.instrument.id ? { ...t, notes: [] } : t)));
+      const selectedMidi = zoomed.instrument.kind === "drums" ? drumPart(zoomed.drumPart).midi : null;
+      commitTracks(arrangementRef.current.tracks.map((t) => (t.instrument.id === zoomed.instrument.id
+        ? { ...t, notes: selectedMidi === null ? [] : t.notes.filter(note => note.midi !== selectedMidi) }
+        : t)));
     }
     const taken: HumFrame[] = [];
     setFrames(taken);
@@ -509,7 +524,13 @@ export default function Studio() {
   }
 
   /** A hand edit replaces the part's notes; an edited Sample is the user's part from then on. */
-  function editNotes(id: string, notes: Note[]) {
+  function editNotes(id: string, notes: Note[], selectedPart?: DrumPart) {
+    const track = arrangementRef.current.tracks.find(t => t.instrument.id === id);
+    if (selectedPart && track?.instrument.kind === "drums") {
+      const midi = drumPart(selectedPart).midi;
+      notes = [...track.notes.filter(note => note.midi !== midi), ...notes]
+        .sort((a, b) => a.startBeat - b.startBeat || a.midi - b.midi || a.id.localeCompare(b.id));
+    }
     const total = notes.length + arrangementRef.current.tracks.reduce((count, track) => count + (track.instrument.id === id ? 0 : track.notes.length), 0);
     if (total > MAX_PROJECT_NOTES) { setFileError(`This project can hold at most ${MAX_PROJECT_NOTES.toLocaleString()} notes. Remove notes before adding or repeating a part.`); return; }
     remember();
@@ -564,15 +585,31 @@ export default function Studio() {
     setHistory({ undo: h.past.length, redo: h.future.length });
   }
 
-  function clearPart(id: string) {
+  function clearPart(id: string, selectedPart?: DrumPart) {
     remember();
     delete takesRef.current[id];
     delete snapSourcesRef.current[id];
-    commitTracks(arrangementRef.current.tracks.map((t) => (t.instrument.id === id ? { ...t, notes: [], sample: false } : t)));
+    commitTracks(arrangementRef.current.tracks.map((t) => {
+      if (t.instrument.id !== id) return t;
+      const midi = selectedPart && t.instrument.kind === "drums" ? drumPart(selectedPart).midi : null;
+      return { ...t, notes: midi === null ? [] : t.notes.filter(note => note.midi !== midi), sample: false };
+    }));
   }
-  function repeatPart(id: string) {
+  function repeatPart(id: string, selectedPart?: DrumPart) {
     const t = tracks.find((x) => x.instrument.id === id);
-    if (t) editNotes(id, repeatFirstHalf(t.notes, noteId));
+    if (t) {
+      const source = selectedPart && t.instrument.kind === "drums"
+        ? t.notes.filter(note => note.midi === drumPart(selectedPart).midi)
+        : t.notes;
+      editNotes(id, repeatFirstHalf(source, noteId), selectedPart);
+    }
+  }
+
+  function changeDrumPart(id: string, selectedPart: DrumPart) {
+    const current = arrangementRef.current.tracks.find(track => track.instrument.id === id);
+    if (!current || current.instrument.kind !== "drums" || current.drumPart === selectedPart) return;
+    remember();
+    commitTracks(arrangementRef.current.tracks.map(track => track.instrument.id === id ? { ...track, drumPart: selectedPart } : track));
   }
 
   // Project files: autosave to this browser, Save/Open as .humstudio.json
@@ -819,7 +856,7 @@ export default function Studio() {
         <div className="ruler-corner">{!zoomed
             ? `${tracks.length} tracks`
             : zoomed.instrument.kind === "drums"
-              ? "Kit"
+              ? `Rhythm · ${drumPart(zoomed.drumPart).name}`
               : `${midiName(zoomed.instrument.lo)}–${midiName(zoomed.instrument.hi)}`}</div>
         <div className="ruler" aria-hidden>
           {Array.from({ length: TOTAL_BEATS / 4 }, (_, i) => (
@@ -846,9 +883,9 @@ export default function Studio() {
             learn={learn}
             harmony={harmony}
             quantize={quantize}
-            onEditNotes={(notes) => editNotes(t.instrument.id, notes)}
-            onClear={() => clearPart(t.instrument.id)}
-            onRepeat={() => repeatPart(t.instrument.id)}
+            onEditNotes={(notes) => editNotes(t.instrument.id, notes, t.drumPart)}
+            onClear={() => clearPart(t.instrument.id, t.drumPart)}
+            onRepeat={() => repeatPart(t.instrument.id, t.drumPart)}
             demo={demo}
             bpm={bpm}
             countIn={t.instrument.id === zoomedId ? countInBeat : null}
@@ -859,6 +896,7 @@ export default function Studio() {
             onRecord={record}
             onStop={() => stopTake.current()}
             onToggle={(k) => toggle(t.instrument.id, k)}
+            onDrumPartChange={(part) => changeDrumPart(t.instrument.id, part)}
           />
         ))}
         <div className="playhead-track" aria-hidden>

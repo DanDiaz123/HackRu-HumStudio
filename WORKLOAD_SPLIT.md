@@ -14,7 +14,7 @@ This split reflects the **existing repository**, not a blank project. At the tim
 - The Next.js/React/TypeScript app, plain-CSS styling, and GitHub repository are already initialized.
 - `src/components/Studio.tsx`, `TrackRow.tsx`, and `Spectrogram.tsx` implement a multitrack-oriented interface with recording/generation/reveal states.
 - `src/lib/hum.ts` contains microphone capture and Pitchy pitch estimation.
-- `src/lib/generate.ts` contains deterministic DSP segmentation, quantization, harmony fitting, and instrument-role generation; it is not a trained AI backend.
+- `src/lib/generate.ts` contains deterministic DSP segmentation, quantization, harmony fitting, instrument-role generation, and rhythm-only Drum part mapping; it is not a trained AI backend.
 - `src/lib/playback.ts` and `src/lib/midi.ts` contain tested Tone.js playback and multi-track MIDI export implementations.
 - `DESIGN.md` defines the existing visual identity. **Improve and use it; do not start branding from scratch.**
 - Presence of source code **does not mean each feature has been tested** on a real microphone or deployed browser.
@@ -48,6 +48,7 @@ This split reflects the **existing repository**, not a blank project. At the tim
 - [x] Return notes appropriate for the selected instrument's range; drum/RMS mapping remains documented as a separate limitation.
 - [x] Ensure empty/failed recordings leave existing notes untouched.
 - [x] Add deterministic voiced/unvoiced, wobble, dropout, sensitivity, and generation fixtures; live pitch-to-note verification remains open.
+- [x] Split the Drums lane into Kick, Snare, Closed hat, Open hat, and Crash selectors; selected recording/editing uses onset rhythm only while hidden lanes remain playable.
 
 **Primary files:** `src/lib/hum.ts`, `src/lib/generate.ts`, and any small extracted pure pitch/segmentation/quantization helpers under `src/lib/audio/` or `src/lib/music/`. Coordinate changes to `src/components/Spectrogram.tsx` with Person 3.
 
