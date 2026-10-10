@@ -33,6 +33,7 @@ Pick an instrument track
 - [x] **Zoom:** clicking a track floods it with its color and collapses the others; Escape or "All tracks" returns.
 - [x] **Record:** microphone capture (up to 15 s or the end of the timeline) with Pitchy pitch estimation and a live spectrogram.
 - [x] **Generate:** stable pitch segmentation, harmony fitting, and Off/1/4/1/8/1/16 timing for melodic tracks, with a "Setting the session" loading state.
+- [x] **Note sensitivity:** Low, Medium, and High in the top menu; Medium uses the original thresholds.
 - [x] **Reveal:** notes wipe in left to right over a ghost of the hum; skipped under reduced motion.
 - [x] **Play:** Tone.js playback of all tracks with mute/solo and BPM 60–180.
 - [x] **Track sounds:** independent smplr preset dropdowns beneath expanded track titles, with lazy loading, retry, and the original synth fallback.
@@ -66,7 +67,21 @@ The demo targets **clear, one-note-at-a-time humming** in a reasonably quiet roo
 
 **Important:** Nothing in this repo is a trained AI model. Pitch detection is DSP (Pitchy), and note generation uses deterministic heuristics. Describe it accurately when presenting.
 
-Held notes tolerate short pitch wobbles and unvoiced gaps: defaults are 120 ms of stable pitch before a change, 150 ms of silence hold, and a five-frame median with a 0.7-semitone hold region. Harmony correction happens before merging; confirmed rests still separate notes. Off preserves unsnapped beat timing. These values are tunable in `SEGMENTATION_DEFAULTS`; very fast repeated notes or rests of 150 ms or less can merge.
+Held notes tolerate short pitch wobbles and unvoiced gaps. Each take generates Low, Medium, and High note sets together. **Sensitivity** in the top menu switches the visible notes for every recorded track instantly, without another take. **Snap** immediately re-quantizes those visible notes to the selected grid; switching grids always starts from the take's unsnapped beat positions. Low needs large, sustained changes; Medium is the existing balanced response; High follows smaller/quicker changes and may capture more wobble. Sample tracks without recorded takes keep their existing notes. Drum onsets move to the selected grid while hit durations stay fixed; microphone volume/noise gates are unaffected.
+
+### Fine-tuning note sensitivity
+
+Edit the three `config` objects in [`src/lib/audio/note-sensitivity.ts`](src/lib/audio/note-sensitivity.ts). They are the single source of tuning values:
+
+| Level | Pitch hold (semitones) | Stable change (ms) | Median window (voiced frames) | Minimum note (ms) |
+|---|---|---|---|---|
+| Low | 1.5 | 200 | 7 | 100 |
+| Medium (default) | 0.7 | 120 | 5 | 100 |
+| High | 0.5 | 60 | 3 | 60 |
+
+A new pitch must exceed the hold distance from the held integer MIDI note and remain stable. Smaller `pitchToleranceSemitones` makes smaller changes count; smaller `stableMs`/`medianWindow` reacts faster. MIDI notes still use whole semitones, so High follows small shifts across a rounding boundary. Keep `minNoteMs` no larger than `stableMs` to avoid confirming a change that is then dropped as too short. Valid tolerance is 0.5..3 semitones, timing values are >0..1000 ms, and median windows are integers 1..31.
+
+All profiles retain a 150 ms silence hold. Melody keeps its confirmed rounded pitches, including semitone changes, and defines the song's key/chords after the take. Bass, Keys, and Strings still fit those chords before merging, which can map detected changes to the same final pitch. Confirmed rests remain separate notes. Off preserves unsnapped beat timing. These are starting values for physical-microphone tuning; very fast repeated notes or rests of 150 ms or less can merge.
 
 ## Getting started
 
@@ -103,7 +118,7 @@ npm run build
 npm test
 ```
 
-`npm test` runs 65 tests for playback, preset loading/lifetimes, harmony, segmentation, and generation using TypeScript and Node's built-in test runner, without adding a testing dependency. Fixtures cover held-note wobbles, short dropouts, rests, Off timing, sample switching, stale loads, fallback/retry, velocity conversion, and independent note stops. Real browser listening and microphone tests are still necessary. The production build downloads the existing Archivo font from Google Fonts when it is not cached. Lint ignores the legacy generated `.test-build/` directory.
+`npm test` runs 77 tests for playback, preset loading/lifetimes, harmony, segmentation, generation, and sensitivity using TypeScript and Node's built-in test runner, without adding a testing dependency. Sensitivity fixtures verify small/normal/large changes in both directions, stability, spike rejection, real rests, the original Medium thresholds, preserved Melody semitone changes, every rhythm grid at 60/120/180 BPM, drum independence, input validation, and the async recording seam. Other fixtures cover sample switching/lifetimes, transcription continuity, and duplicate metronome ticks. Real browser listening and microphone tests are still necessary. The production build downloads the existing Archivo font from Google Fonts when it is not cached. Lint ignores the legacy generated `.test-build/` directory.
 
 ## File structure
 

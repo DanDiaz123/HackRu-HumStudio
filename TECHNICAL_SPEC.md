@@ -80,6 +80,7 @@ src/
       sampled-voice.ts       # implemented: per-note sample stop handles and velocity adapter
       click-track.ts         # implemented: metronome and playback count-in
       segment-notes.ts       # implemented: segmentPitchFrames(), tunable configuration
+      note-sensitivity.ts    # implemented: centralized Low/Medium/High tuning profiles
     persistence/
       local-project.ts       # target: multi-track save/load
   tests/                     # implemented: playback, harmony, segmentation, generation fixtures
@@ -213,10 +214,11 @@ export async function generateTrack(
   bpm: number,
   quantize: QuantizeDivision,
   harmony: Harmony,
+  sensitivity?: NoteSensitivity, // "low" | "medium" | "high"; omitted = "medium"
 ): Promise<Note[]>;
 ```
 
-The UI calls only this. It delegates to the pure `generateNotes(inst, frames, bpm, quantize, harmony): Note[]` and retains the existing ~2.4 s presentation delay. Melodic generation segments frames in seconds, octave-fits the instrument, corrects harmony, merges identical pitches within the same phrase, then converts/snaps beat boundaries. Off preserves raw beat timing. A confirmed rest changes the phrase ID so later correction or snapping cannot merge separate attacks. Drums retain RMS-onset kick/snare plus eighth-note-hat heuristics. Tempo outside 60..180, unknown grid values, and more than 10,000 frames throw; unusable melodic input returns `[]` (the UI keeps existing notes). The `generateTrack` and canonical note contracts are unchanged.
+`generateTrack()` retains its optional sensitivity argument for existing callers. The UI calls `generateTrackVariants(inst, frames, bpm, harmony)`, which generates unsnapped note sets for every profile from the same take. Melody retains confirmed rounded pitches and defines harmony; other melodic parts fit that harmony. The menu swaps stored variants across recorded tracks, then applies the current Snap grid from the unsnapped positions without rerunning segmentation. Drums reuse identical profile notes and Snap moves their onsets while preserving hit durations. A confirmed rest changes the phrase ID so merging cannot join separate attacks. Tempo outside 60..180, unknown grid/sensitivity values, and more than 10,000 frames throw; unusable melodic input returns `[]` (the UI keeps existing notes). Canonical `Note`, `Track`, and `HumFrame` contracts are unchanged.
 
 ### 3.4 Shared harmony (implemented, `src/lib/music/harmony.ts`)
 
@@ -410,13 +412,27 @@ export function segmentPitchFrames(
 
 1. Treat rejected or invalid pitch frames as unvoiced.
 2. Map valid `hz` to *continuous* MIDI (`69 + 12 log2(hz/440)`), then apply a rolling median over recent valid frames; avoid prematurely rounding each noisy observation.
-3. Retain the active/candidate pitch while the smoothed value stays within 0.7 semitones; otherwise round to a new integer MIDI pitch. This hysteresis suppresses boundary-crossing vibrato.
+3. Retain the active/candidate pitch while the smoothed value stays within the selected `pitchToleranceSemitones` (Medium: 0.7); otherwise round to a new integer MIDI pitch. This hysteresis suppresses boundary-crossing vibrato.
 4. Start a **candidate** when a pitch appears; confirm only after it stays within the same note region for `stableMs` (default 120 ms). On confirmation, use the candidate's first timestamp as onset.
 5. A candidate that changes before confirmation is replaced, not emitted.
 6. During an active note, treat a short change as pitch jitter. If a different MIDI pitch remains stable for `stableMs`, close the prior segment and start another at the new candidate's first timestamp.
 7. Keep the active note and median history across unvoiced gaps of at most `silenceHoldMs` (default 150 ms), measured from the first unvoiced frame. Longer silence or a missing-frame gap closes the note at the **last voiced timestamp**, clears history, and advances `phraseId`. All timing thresholds use seconds independently of BPM.
 8. After instrument/harmony fitting, generation merges adjacent identical pitches only within the same phrase and a gap <= 150 ms. Quantization follows merging and caps overlaps; a confirmed rest cannot be undone by either step.
-9. Drop segments below `minNoteMs` (default 100 ms), skip invalid/non-increasing timestamps, and limit input to 10,000 frames. Configuration timing must be finite and >0..1000 ms, medianWindow an integer 1..31, and pitchToleranceSemitones finite >=0.5 and <1. Generation clips notes at beat 32. Neither function mutates input frames.
+9. Drop segments below `minNoteMs` (Medium: 100 ms), skip invalid/non-increasing timestamps, and limit input to 10,000 frames. Configuration timing must be finite and >0..1000 ms, medianWindow an integer 1..31, and pitchToleranceSemitones finite 0.5..3. Generation clips notes at beat 32. Neither function mutates input frames.
+
+### Sensitivity profiles and menu
+
+`src/lib/audio/note-sensitivity.ts` is the single source of tunable values and exports `NoteSensitivity`, the fixed option list, descriptions, and a validated `noteSensitivityConfig()` resolver. `SEGMENTATION_DEFAULTS` refers to its Medium configuration so legacy/default calls stay consistent. Unknown, cross-type, and prototype names reject; a missing optional argument defaults to Medium.
+
+| Level | Pitch tolerance (semitones) | Stability (ms) | Median (frames) | Minimum note (ms) | Silence hold (ms) |
+|---|---|---|---|---|---|
+| Low | 1.5 | 200 | 7 | 100 | 150 |
+| Medium | 0.7 | 120 | 5 | 100 | 150 |
+| High | 0.5 | 60 | 3 | 60 | 150 |
+
+Low ignores modest pitch drift and requires large sustained changes. Medium preserves the earlier thresholds. High follows smaller shifts across rounding boundaries with less smoothing and shorter confirmation, at the cost of capturing more wobble. MIDI pitch remains an integer. Minimum note durations should not exceed confirmation time: a confirmed short High note must not be dropped as too short. Silence hold remains identical for all profiles.
+
+`Studio.tsx` holds a global session sensitivity (default Medium) and Snap division. Each successful take stores all three unsnapped note sets in UI state. Changing either menu selection reapplies the chosen profile and grid to every recorded track immediately. When the Melody variant changes, the app updates harmony and refits other tracks before snapping. Sample tracks without variants retain their notes. Melody keeps confirmed integer pitches so inferred-key snapping cannot erase small detected changes. Future persistence should save both settings as project metadata and default missing legacy values to Medium and `1/16`.
 
 ### Known limitations
 
@@ -629,7 +645,7 @@ type ProjectAction =
 
 ### Unit tests (use synthetic fixtures)
 
-`npm test` runs 65 tests: 22 playback, 14 preset loading/voice, 6 harmony, 12 segmentation, and 11 generation tests. Transcription fixtures cover 100 ms pitch wobbles, vibrato, 120 ms dropouts at 10/20/40 ms frame hops, the 150 ms silence boundary, genuine pitch changes/rests, harmony merging, all grids across 60/120/180 BPM, Off timing, instrument ranges, invalid input, immutability, and the async UI seam. Playback covers repeated scheduling, five-track timing, tempo changes, mute/solo, overlapping notes, transport lifecycle, invalid inputs, teardown, metronome/count-in cancellation, and preset selection. Preset fixtures cover catalog/defaults, GM aliases, stale loads, failure/timeout/retry, shared leases, velocity conversion, and individual stop handles. Persistence and real-microphone checks below remain targets; browser MIDI byte preservation is documented in [`SMPLR_INTEGRATION.md`](SMPLR_INTEGRATION.md).
+`npm test` runs 77 tests: 23 playback, 14 preset loading/voice, 6 harmony, 12 segmentation, 11 generation, and 11 sensitivity tests. Transcription fixtures cover pitch wobbles, vibrato, short dropouts at multiple frame hops, confirmed rests, the three sensitivity profiles, preserved Melody semitone changes, harmony merging, all grids at 60/120/180 BPM, Off timing, instrument ranges, invalid input, immutability, and the async UI seam. Playback covers repeated scheduling, five-track timing, tempo changes, mute/solo, overlapping notes, transport lifecycle, invalid inputs, teardown, duplicate metronome ticks, count-in cancellation, and preset selection. Preset fixtures cover catalog/defaults, GM aliases, stale loads, failure/timeout/retry, shared leases, velocity conversion, and individual stop handles. Persistence and real-microphone checks below remain targets; browser MIDI byte preservation is documented in [`SMPLR_INTEGRATION.md`](SMPLR_INTEGRATION.md).
 
 | ID | Input | Expected result |
 |---|---|---|
@@ -665,11 +681,13 @@ type ProjectAction =
 - [ ] Deny permission: error message appears, app stays usable.
 - [ ] Hum a clear melody; it becomes at least several correct-looking notes and can be replayed.
 - [x] Synthetic WAV through Edge's simulated microphone -> Pitchy -> generation -> note reveal: a held pitch with 100 ms semitone wobbles and 120 ms silent gaps produces one note; stable changes produce three notes at two pitches. Both takes stop their media tracks with no browser errors. This verifies the browser integration, not human-microphone accuracy or listening quality.
+- [x] Sensitivity browser regression: nine generated-WAV recording cases (0.6, 1, and 2 semitone changes at all three levels). Low changes only on the 2-semitone fixture; Medium also changes on 1; High also changes on 0.6. Default/keyboard selection, navigation, busy-state disabling, unchanged existing notes, microphone teardown, and 1280/390/320 px menu layouts pass with no browser errors (2026-10-10). Physical-microphone tuning remains open.
 - [ ] Edit note pitch/time/duration; synth reflects changes.
 - [ ] Save JSON, refresh, reopen JSON; every track, BPM, and mute/solo survive.
 - [ ] MIDI export opens in a MIDI application with one track per instrument, correct pitches and tempo.
 - [ ] Stop/cancel/unmount releases mic; browser recording indicator clears.
 - [x] `npm test` (65 tests), `npm run lint` (legacy `.test-build/**` ignored), `npx tsc --noEmit`, and `npm run build` pass for the preset integration (2026-10-10; final validation in [`SMPLR_INTEGRATION.md`](SMPLR_INTEGRATION.md)).
+- [x] Sensitivity implementation: 77 unit tests, lint, TypeScript, and production build pass; `npm audit --omit=dev` reports zero production vulnerabilities (2026-10-10). No dependencies added. The duplicate metronome tick guard has a regression test and all nine recording cases complete without the previous Tone timing error.
 - [x] Automated desktop Edge checks load and play all 20 sampled sounds, preserve note bars and exported MIDI bytes, exercise fallback/retry and rapid/live switching, and confirm one shared audio clock. Output RMS is positive during playback and zero after Pause; this is audio analysis, not human listening.
 - [x] Automated Edge transport checks cover pause/resume, stop, rewind, 60/180 BPM, 32-beat looping, mute/solo, metronome, and playback count-in cancellation. Reload/navigation closes the old audio context. Human listening on the demo laptop remains required.
 

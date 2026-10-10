@@ -246,6 +246,7 @@ Blunt, printed blocks; state is shown by inverting fill and ink, not by glow.
 - **Style:** 34px wells on Studio Black, 1px Hairline border, square, 15px/600 tabular values; label to the left in 11px tracked muted caps.
 - **Focus:** global 2px off-white outline.
 - **Track sound:** native select immediately beneath the expanded track title and above its hint, with a visible Sound label. Use flood fill, ink text/border/focus, square corners, and normal-width controls. Loading/error text and Retry sound sit beneath it. Keep the control within the spine at compact widths; its accessible name and title retain the full sound name.
+- **Note sensitivity:** labeled native Low/Medium/High select beside Snap in the top transport menu. Each take generates three note sets; changing the selection immediately swaps the visible version for recorded tracks. Snap immediately re-quantizes their beat positions. Use the existing square field styling; keep its label visible at compact widths, let the menu wrap, and disable changes while recording/generating.
 
 ### Navigation
 The transport strip is the only navigation: wordmark in the spine column (off-white "HUM" block with ink letters, then "STUDIO"), then rewind/play, position, BPM, Snap, and Export pushed right. Zoomed rows return via the "All tracks" back link at the top of the spine.

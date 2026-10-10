@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { generateTrack } from "@/lib/generate";
+import { generateTrackVariants, snapGeneratedNotes, type NoteSensitivityVariants } from "@/lib/generate";
+import { DEFAULT_NOTE_SENSITIVITY, NOTE_SENSITIVITY_LEVELS, NOTE_SENSITIVITY_PRESETS, isNoteSensitivity, type NoteSensitivity } from "@/lib/audio/note-sensitivity";
 import { type HumFrame, micErrorMessage, startDemoHum, startMic } from "@/lib/hum";
 import { exportMidi } from "@/lib/midi";
 import { DEFAULT_HARMONY, fitToHarmony, harmonyLabel, inferHarmony, voiceChords } from "@/lib/music/harmony";
@@ -35,6 +36,8 @@ export default function Studio() {
   const [harmony, setHarmony] = useState(DEFAULT_HARMONY);
   const [bpm, setBpm] = useState(120);
   const [quantize, setQuantize] = useState<QuantizeDivision>("1/16");
+  const [sensitivity, setSensitivity] = useState<NoteSensitivity>(DEFAULT_NOTE_SENSITIVITY);
+  const [sensitivityNotes, setSensitivityNotes] = useState<Record<string, NoteSensitivityVariants>>({});
   const [zoomedId, setZoomedId] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState("");
@@ -247,7 +250,8 @@ export default function Studio() {
       setStage(0);
       const timer = setInterval(() => setStage((s) => Math.min(2, s + 1)), 800);
       try {
-        const notes = await generateTrack(zoomed.instrument, taken, bpm, quantize, harmony);
+        const variants = await generateTrackVariants(zoomed.instrument, taken, bpm, harmony);
+        const notes = snapGeneratedNotes(zoomed.instrument, variants[sensitivity], quantize);
         clearInterval(timer);
         if (!notes.length) throw new Error("empty");
         setPending(notes);
@@ -255,6 +259,7 @@ export default function Studio() {
         const ms = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : (REVEAL_SEC + 0.5) * 1000;
         setTimeout(() => {
           const id = zoomed.instrument.id;
+          setSensitivityNotes((previous) => ({ ...previous, [id]: variants }));
           // A Melody take sets the song's chords; other pitched parts are re-fitted (moved, never deleted).
           const h = id === "melody" ? inferHarmony(notes) : null;
           if (h) setHarmony(h);
@@ -273,7 +278,7 @@ export default function Studio() {
         setError("No notes came out of that take. Try a longer, steadier hum.");
       }
     },
-    [zoomed, bpm, quantize, harmony],
+    [zoomed, bpm, quantize, harmony, sensitivity],
   );
 
   async function record(useDemo: boolean) {
@@ -341,6 +346,39 @@ export default function Studio() {
     setTracks((ts) => ts.map((t) => (t.instrument.id === id ? { ...t, [key]: !t[key] } : t)));
   }
 
+  function selectSensitivity(level: NoteSensitivity) {
+    setSensitivity(level);
+    updateDisplayedNotes(level, quantize);
+  }
+
+  function selectQuantize(division: QuantizeDivision) {
+    setQuantize(division);
+    updateDisplayedNotes(sensitivity, division);
+  }
+
+  function updateDisplayedNotes(level: NoteSensitivity, division: QuantizeDivision) {
+    const melodyVariant = sensitivityNotes.melody?.[level];
+    const melodyInstrument = tracks.find((track) => track.instrument.id === "melody")?.instrument;
+    const melodyNotes = melodyVariant && melodyInstrument ? snapGeneratedNotes(melodyInstrument, melodyVariant, division) : null;
+    const nextHarmony = melodyNotes ? inferHarmony(melodyNotes) : harmony;
+    if (melodyNotes) setHarmony(nextHarmony);
+    setTracks((current) => current.map((track) => {
+      const variant = sensitivityNotes[track.instrument.id]?.[level];
+      if (variant) {
+        const notes = track.instrument.id === "melody" ? variant : fitToHarmony(variant, track.instrument, nextHarmony);
+        return {
+          ...track,
+          notes: snapGeneratedNotes(track.instrument, notes, division),
+          sample: false,
+        };
+      }
+      if (melodyNotes && track.instrument.kind !== "drums") {
+        return { ...track, notes: track.sample ? voiceChords(nextHarmony) : fitToHarmony(track.notes, track.instrument, nextHarmony) };
+      }
+      return track;
+    }));
+  }
+
   const rowH = (id: string) => {
     if (!zoomedId) return Math.max(56, avail / tracks.length);
     return id === zoomedId ? Math.max(240, avail - COLLAPSED_H * (tracks.length - 1)) : COLLAPSED_H;
@@ -391,11 +429,22 @@ export default function Studio() {
         </div>
         <label className="field">
           <span>Snap</span>
-          <select value={quantize} onChange={(e) => setQuantize(e.target.value as QuantizeDivision)} disabled={busy}>
+          <select value={quantize} onChange={(e) => selectQuantize(e.target.value as QuantizeDivision)} disabled={busy}>
             <option value="off">Off</option>
             <option value="1/4">1/4</option>
             <option value="1/8">1/8</option>
             <option value="1/16">1/16</option>
+          </select>
+        </label>
+        <label className="field sensitivity-field">
+          <span>Sensitivity</span>
+          <select aria-label="Note sensitivity" value={sensitivity} disabled={busy}
+            title={`${NOTE_SENSITIVITY_PRESETS[sensitivity].description} Each recording keeps all three versions for instant switching.`} onChange={event => {
+              if (isNoteSensitivity(event.target.value)) selectSensitivity(event.target.value);
+            }}>
+            {NOTE_SENSITIVITY_LEVELS.map(level => (
+              <option key={level} value={level}>{NOTE_SENSITIVITY_PRESETS[level].label}</option>
+            ))}
           </select>
         </label>
         <button className="export" aria-label="Export MIDI" onClick={() => exportMidi(tracks, bpm)} disabled={busy || tracks.every((t) => !t.notes.length)}>
