@@ -50,7 +50,7 @@ The demo targets **clear, one-note-at-a-time humming** in a reasonably quiet roo
 | Concern | Choice |
 |---|---|
 | App / UI | Next.js 16 App Router, React 19, TypeScript |
-| Styling | Tailwind CSS v4 import + plain CSS in `src/app/globals.css` (see [`DESIGN.md`](DESIGN.md)) |
+| Styling | Plain CSS in `src/app/globals.css` (see [`DESIGN.md`](DESIGN.md)) |
 | Type | Archivo variable font (`next/font/google`, `wdth` axis) |
 | Browser microphone | `navigator.mediaDevices.getUserMedia`, Web Audio `AnalyserNode` |
 | Fundamental pitch estimation | [Pitchy](https://github.com/ianprime0509/pitchy) |
@@ -116,7 +116,7 @@ src/
     generate.ts          # generateTrack(): THE MOCK the backend replaces
     playback.ts          # browser-only playback facade: schedule, play/pause/stop, position, count-in
     midi.ts              # exportMidi(Track[], bpm) -> humstudio.mid
-    music/               # shared contracts: types.ts, timing.ts, quantize.ts
+    music/               # shared contracts: types.ts (Note, QuantizeDivision)
     audio/               # playback engine, Tone adapter, click track
   tests/                 # playback regression suite and five-instrument fixture
 ```

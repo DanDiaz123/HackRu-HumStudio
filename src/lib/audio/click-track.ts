@@ -41,11 +41,8 @@ export function createClickTrack(backend: PlaybackBackend) {
           }
           timers.push(backend.setTimeout(() => finish(true), 4 * beatSec));
         } catch (error) {
-          finished = true;
-          timers.forEach((id) => backend.clearTimeout(id));
-          voice.dispose();
-          cancelCountIn = null;
-          reject(error);
+          reject(error); // settles first, so finish()'s resolve is a no-op
+          finish(false);
         }
       });
     },

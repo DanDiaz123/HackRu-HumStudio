@@ -21,7 +21,7 @@ This file tells implementers **what to build, which interfaces to share, what ed
 | Layer | Library/API | Notes |
 |---|---|---|
 | App | Next.js 16 (App Router) | React 19 + TypeScript; `src/` directory. Read `node_modules/next/dist/docs/` before using unfamiliar APIs. |
-| Styling | Tailwind CSS v4 import + plain CSS | Studio styles and tokens live in `src/app/globals.css`; see `DESIGN.md`. |
+| Styling | Plain CSS (no framework) | Studio styles and tokens live in `src/app/globals.css`; see `DESIGN.md`. |
 | Font | Archivo via `next/font/google` | `axes: ["wdth"]` for the condensed display width. |
 | Audio playback | `tone` v15 | User-gesture audio start, transport, `PolySynth`/`MembraneSynth`/`NoiseSynth`. |
 | Microphone | `getUserMedia`, Web Audio | HTTPS/localhost, mic permission, client-only. |
@@ -67,9 +67,9 @@ src/
     playback.ts              # implemented: browser-only playback facade
     midi.ts                  # implemented: multi-track export
     music/
-      types.ts               # implemented: Note, Project, PitchFrame, NoteSegment, DetectorConfig
-      timing.ts              # implemented: frequencyToMidi, secondsToBeats, beatsToSeconds
-      quantize.ts            # implemented: getGridStep, snapBeat
+      types.ts               # implemented: Note, QuantizeDivision (Project, PitchFrame, NoteSegment, DetectorConfig: target)
+      timing.ts              # target: frequencyToMidi, secondsToBeats, beatsToSeconds (mock uses generate.ts hzToMidi)
+      quantize.ts            # target: getGridStep, snapBeat (mock uses tracks.ts QUANT_BEATS)
     audio/
       playback-engine.ts     # implemented: testable scheduling and lifecycle
       tone-backend.ts        # implemented: Tone.js adapter and instrument voices
@@ -457,7 +457,7 @@ export function countIn(bpm: number, onBeat?: (remaining: number) => void): Prom
 export function dispose(): void;
 ```
 
-`Studio.tsx` re-calls `schedule()` whenever `tracks` or `bpm` change (after audio is ready), reads `positionBeats()` in a `requestAnimationFrame` loop, and uses `state()` to keep the controls aligned with the transport. It calls `dispose()` on unmount and shows an error if audio startup or scheduling fails.
+`playback.ts` exposes `ensureAudio()` (resolves to the engine), `getEngine()` (null until a Play click) and `dispose()`. `Studio.tsx` re-calls `engine.schedule()` whenever `tracks` or `bpm` change (once an engine exists), reads `positionBeats()` in a `requestAnimationFrame` loop, and uses `state()` to keep the controls aligned with the transport. It calls `dispose()` on unmount and shows an error if audio startup or scheduling fails.
 
 Contract and lifecycle:
 
@@ -468,9 +468,9 @@ Contract and lifecycle:
 - Schedule melodic note releases in ticks as well as attacks, so note lengths remain aligned to beats after tempo changes. Release boundary notes through the transport's `loopEnd` event because the loop resets before processing beat 32.
 - Track every scheduled callback ID. `schedule` clears old owned events before replacement. On live edits/tempo changes, restart at the audible beat and recover sustained notes; a brief re-attack is an intentional tradeoff for cancelling lookahead audio reliably.
 - `pause` preserves transport position and disposes pending/sounding voices; `stop` halts playback and resets to zero; `rewind` resets to zero while preserving running/paused state. On unmount, clear owned events, count-in timers, listeners, and synths. Do not close Tone's shared AudioContext.
-- Validate all tracks before replacing the existing schedule: supported unique instrument IDs, boolean mute/solo flags, valid finite notes, BPM 60..180, at most 10,000 notes and 32 simultaneous notes per instrument. Playback covers the visible 32-beat loop; later onsets are silent and note ends are clipped at its boundary.
+- Validate BPM 60..180 before replacing the existing schedule. `Track[]` is typed app state and is not re-validated here; untrusted note data is validated once at JSON import (section 10). Playback covers the visible 32-beat loop; later onsets are silent and note ends are clipped at its boundary.
 - Muted tracks are silent even when soloed. Multiple solo tracks play together. Independent synth lanes preserve durations of overlapping notes at the same pitch. Synthesized drums support MIDI 36, 38, 42, 46, and 49 with fixed percussive envelopes rather than sustained pitched-note durations.
-- `positionBeats` reads transport ticks at the current audible AudioContext time, excluding Tone's lookahead. Before initialization it returns zero; `state` returns `stopped`.
+- `positionBeats` reads transport ticks at the current audible AudioContext time, excluding Tone's lookahead. Before initialization `getEngine()` returns `null`.
 - The optional metronome accents every four beats. `countIn` schedules four clicks on the audio clock without advancing the arrangement, and resolves `false` on pause/stop/rewind/reschedule/disposal. Count-in currently precedes playback; recording count-in remains a Person 1/4 integration decision, and must start microphone-relative timestamps only after counting completes.
 - MIDI pitch is numeric in state. At synth boundary convert to note name/frequency with Tone helpers or verified pitch conversion; never change canonical note format.
 - The editor is the canonical state. Tone.js scheduling is a **derived side effect**, never the only copy of the arrangement.

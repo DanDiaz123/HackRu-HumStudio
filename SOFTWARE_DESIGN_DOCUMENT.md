@@ -131,7 +131,7 @@ flowchart TD
 | `src/lib/generate.ts` | `generateTrack(instrument, frames, bpm, quantize) → Note[]`. | **Mock**; backend/transcriber replaces |
 | `src/lib/playback.ts` | Browser-only facade for scheduling, play/pause/stop/rewind/position, metronome, count-in, and teardown; delegates to `src/lib/audio/`. | Built (playback regression tests; listening pending) |
 | `src/lib/midi.ts` | `Track[]` → multi-track `.mid` download. | Built |
-| `src/lib/music/{types,timing,quantize}.ts` | Shared `Note`/`Project`/`PitchFrame` contracts and pure timing/grid helpers. | Built (shared contract) |
+| `src/lib/music/types.ts` | Shared `Note`/`QuantizeDivision` contract. `Project`/`PitchFrame` and timing/grid helpers are added with persistence and segmentation. | Built (`Note` only) |
 | `src/lib/audio/segment-notes.ts` | Group pitch frames into note segments. | Planned |
 | `src/lib/persistence/local-project.ts` | Validate/store/reopen multi-track project JSON. | Planned |
 

@@ -12,8 +12,6 @@ export interface HumFrame {
   rms: number;
 }
 
-export type StopFn = () => void;
-
 const binHz = (i: number) => F_LO * Math.pow(F_HI / F_LO, i / (BIN_COUNT - 1));
 
 export function micErrorMessage(err: unknown): string {
@@ -27,7 +25,7 @@ export function micErrorMessage(err: unknown): string {
   return "The microphone could not start.";
 }
 
-export async function startMic(onFrame: (f: HumFrame) => void): Promise<StopFn> {
+export async function startMic(onFrame: (f: HumFrame) => void): Promise<() => void> {
   if (!navigator.mediaDevices?.getUserMedia) throw new DOMException("insecure", "SecurityError");
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
@@ -74,7 +72,7 @@ export async function startMic(onFrame: (f: HumFrame) => void): Promise<StopFn> 
 }
 
 /** Synthetic hum for demos without a mic. Labeled "Demo hum" wherever it's shown. */
-export function startDemoHum(onFrame: (f: HumFrame) => void): StopFn {
+export function startDemoHum(onFrame: (f: HumFrame) => void): () => void {
   const contour = [0, 2, 4, 4, 7, 5, 4, 2, 0, 0, 4, 7, 9, 7, 4, 2]; // semitones over C4
   const t0 = performance.now();
   const id = window.setInterval(() => {

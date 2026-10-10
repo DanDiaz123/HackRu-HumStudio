@@ -53,7 +53,7 @@ Only claim a command passed if it actually ran and passed. If no `package.json` 
 
 ## 3. Immutable shared contracts
 
-The canonical types are defined in `TECHNICAL_SPEC.md` section 3 and live in `src/lib/music/types.ts` (re-exported by `src/lib/tracks.ts`):
+The canonical types are defined in `TECHNICAL_SPEC.md` section 3 ; `Note` and `QuantizeDivision` live in `src/lib/music/types.ts` (re-exported by `src/lib/tracks.ts`). `Project` is specified but not in code yet; add it with persistence:
 
 ```ts
 export type QuantizeDivision = "off" | "1/4" | "1/8" | "1/16";
@@ -95,9 +95,7 @@ src/components/Studio.tsx        # shell, canonical Track[] state, record/genera
 src/components/TrackRow.tsx      # one track: arrangement row / zoomed lane / note UI           (Person 3)
 src/components/Spectrogram.tsx   # halftone display of HumFrame[]                               (Person 1 + 3)
 src/lib/tracks.ts                # Instrument, Track, INSTRUMENTS, lane geometry                 (shared)
-src/lib/music/types.ts           # Note, Project, PitchFrame, NoteSegment, DetectorConfig       (shared)
-src/lib/music/timing.ts          # pitch/beat helpers
-src/lib/music/quantize.ts        # grid snapping
+src/lib/music/types.ts           # Note, QuantizeDivision; add PitchFrame/NoteSegment/DetectorConfig with segmentation (shared)
 src/lib/hum.ts                   # mic lifecycle, Pitchy gating, demo hum -> HumFrame            (Person 1)
 src/lib/generate.ts              # generateTrack(): MOCK, replace the body                       (Person 1)
 src/lib/playback.ts              # browser-only playback facade                                 (Person 2)

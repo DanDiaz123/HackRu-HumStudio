@@ -1,4 +1,4 @@
-import { initialTracks, type Track } from "../../lib/tracks";
+import { initialTracks, type Track } from "../../lib/tracks.ts";
 
 /** Deterministic five-instrument arrangement for playback tests and integration handoff. */
 export function playbackFixtureTracks(): Track[] {

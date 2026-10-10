@@ -1,4 +1,29 @@
-@import "tailwindcss";
+/* ponytail: the slice of Tailwind preflight this sheet relied on */
+*,
+::before,
+::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  border: 0 solid;
+}
+h1,
+h2 {
+  font-size: inherit;
+  font-weight: inherit;
+}
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+}
+svg,
+canvas {
+  display: block;
+  vertical-align: middle;
+}
 
 :root {
   --ground: #0d0d0d;

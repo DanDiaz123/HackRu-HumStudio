@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { generateTrack } from "@/lib/generate";
-import { type HumFrame, type StopFn, micErrorMessage, startDemoHum, startMic } from "@/lib/hum";
+import { type HumFrame, micErrorMessage, startDemoHum, startMic } from "@/lib/hum";
 import { exportMidi } from "@/lib/midi";
 import * as playback from "@/lib/playback";
 import {
@@ -50,8 +50,7 @@ export default function Studio() {
   const rowsRef = useRef<HTMLDivElement>(null);
   const headRef = useRef<HTMLDivElement>(null);
   const posRef = useRef<HTMLOutputElement>(null);
-  const stopRef = useRef<StopFn | null>(null);
-  const audioReady = useRef(false);
+  const stopRef = useRef<(() => void) | null>(null);
   const playbackRequest = useRef(0);
   const arrangementRef = useRef({ tracks, bpm });
   const stopTake = useRef<() => void>(() => {});
@@ -69,11 +68,12 @@ export default function Studio() {
   // Keep the transport in sync with notes, mutes and tempo.
   useEffect(() => {
     arrangementRef.current = { tracks, bpm };
-    if (!audioReady.current) return;
+    const engine = playback.getEngine();
+    if (!engine) return;
     try {
-      playback.schedule(tracks, bpm);
+      engine.schedule(tracks, bpm);
     } catch {
-      playback.stop();
+      engine.stop();
       const frame = requestAnimationFrame(() => {
         setPlaying(false);
         setPlaybackError("These notes could not be played. Check their pitch, timing, and tempo.");
@@ -82,15 +82,19 @@ export default function Studio() {
     }
   }, [tracks, bpm]);
 
+  const setPos = (beat: number) => {
+    if (headRef.current) headRef.current.style.left = `${beatX(beat)}%`;
+    if (posRef.current) posRef.current.textContent = readout(beat);
+  };
+
   // Playhead + position readout run outside React.
   useEffect(() => {
     if (!playing) return;
     let raf = 0;
     const tick = () => {
-      const beat = playback.positionBeats() % TOTAL_BEATS;
-      if (headRef.current) headRef.current.style.left = `${beatX(beat)}%`;
-      if (posRef.current) posRef.current.textContent = readout(beat);
-      if (playback.state() !== "started") {
+      const engine = playback.getEngine();
+      setPos(engine?.positionBeats() ?? 0);
+      if (engine?.state() !== "started") {
         setPlaying(false);
         return;
       }
@@ -104,19 +108,14 @@ export default function Studio() {
   useEffect(() => () => {
     stopRef.current?.();
     playbackRequest.current++;
-    audioReady.current = false;
     playback.dispose();
   }, []);
 
-  const setPos = (beat: number) => {
-    if (headRef.current) headRef.current.style.left = `${beatX(beat)}%`;
-    if (posRef.current) posRef.current.textContent = readout(beat);
-  };
-
   async function togglePlay() {
-    if (playback.state() === "started") {
-      playback.pause();
-      setPos(playback.positionBeats());
+    const live = playback.getEngine();
+    if (live?.state() === "started") {
+      live.pause();
+      setPos(live.positionBeats());
       setPlaying(false);
       return;
     }
@@ -125,22 +124,21 @@ export default function Studio() {
     setStartingAudio(true);
     setPlaybackError("");
     try {
-      await playback.ensureAudio();
+      const engine = await playback.ensureAudio();
       if (request !== playbackRequest.current) return;
-      audioReady.current = true;
       const current = arrangementRef.current;
-      playback.schedule(current.tracks, current.bpm);
-      playback.setMetronome(metronome);
+      engine.schedule(current.tracks, current.bpm);
+      engine.setMetronome(metronome);
       if (countIn) {
-        const completed = await playback.countIn(current.bpm, setCountInBeat);
+        const completed = await engine.countIn(current.bpm, setCountInBeat);
         if (!completed || request !== playbackRequest.current) return;
       }
       setCountInBeat(null);
-      playback.play();
-      setPlaying(playback.state() === "started");
+      engine.play();
+      setPlaying(engine.state() === "started");
     } catch {
       if (request !== playbackRequest.current) return;
-      playback.stop();
+      playback.getEngine()?.stop();
       setPlaying(false);
       setPlaybackError("Audio could not start. Check your output device and try Play again.");
     } finally {
@@ -155,13 +153,13 @@ export default function Studio() {
     playbackRequest.current++;
     setStartingAudio(false);
     setCountInBeat(null);
-    playback.stop();
+    playback.getEngine()?.stop();
     setPlaying(false);
     setPos(0);
   }
 
   function rewind() {
-    playback.rewind();
+    playback.getEngine()?.rewind();
     setPos(0);
   }
 
@@ -225,9 +223,10 @@ export default function Studio() {
 
   async function record(useDemo: boolean) {
     if (!zoomed || busy) return;
-    if (playback.state() === "started") {
-      playback.pause();
-      setPos(playback.positionBeats());
+    const live = playback.getEngine();
+    if (live?.state() === "started") {
+      live.pause();
+      setPos(live.positionBeats());
       setPlaying(false);
     }
     const taken: HumFrame[] = [];
@@ -284,17 +283,17 @@ export default function Studio() {
           <span>Hum</span>Studio
         </h1>
         <div className="transport-group">
-          <button className="t-btn" onClick={rewind} disabled={busy || startingAudio} aria-label="Back to start">
+          <button className="t-btn" onClick={rewind} disabled={busy} aria-label="Back to start">
             <RewindIcon />
           </button>
-          <button className={`t-btn play${playing ? " on" : ""}`} onClick={togglePlay} disabled={busy || startingAudio} aria-label={startingAudio ? "Starting audio" : playing ? "Pause" : "Play"}>
+          <button className={`t-btn play${playing ? " on" : ""}`} onClick={togglePlay} disabled={busy} aria-label={startingAudio ? "Starting audio" : playing ? "Pause" : "Play"}>
             {playing ? <PauseIcon /> : <PlayIcon />}
           </button>
           <button className="t-btn" onClick={stopPlayback} disabled={busy && !startingAudio} aria-label="Stop">
             <StopIcon />
           </button>
           <button className={metronome ? "t-btn play" : "t-btn"} aria-label="Metronome" title="Metronome" aria-pressed={metronome} disabled={busy} onClick={() => {
-            playback.setMetronome(!metronome);
+            playback.getEngine()?.setMetronome(!metronome);
             setMetronome(!metronome);
           }}>M</button>
           <button className={countIn ? "t-btn play" : "t-btn"} aria-label="Four-beat count-in" title="Four-beat count-in before playback" aria-pressed={countIn} disabled={busy} onClick={() => setCountIn(!countIn)}>4</button>

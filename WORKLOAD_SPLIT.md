@@ -11,7 +11,7 @@
 
 This split reflects the **existing repository**, not a blank project. At the time this plan was prepared:
 
-- The Next.js/React/TypeScript app, Tailwind styling, and GitHub repository are already initialized.
+- The Next.js/React/TypeScript app, plain-CSS styling, and GitHub repository are already initialized.
 - `src/components/Studio.tsx`, `TrackRow.tsx`, and `Spectrogram.tsx` implement a multitrack-oriented interface with recording/generation/reveal states.
 - `src/lib/hum.ts` contains microphone capture and Pitchy pitch estimation.
 - `src/lib/generate.ts` has a **prototype / simulated generation stage** with simple note-building logic; it is not a trained AI backend.
@@ -97,9 +97,7 @@ are optional. No `Note`, `Track`, or `Project` fields changed.
 - `src/components/icons.tsx` (Pause icon)
 - `src/tests/playback.test.ts`
 - `src/tests/fixtures/playback.ts`
-- `tsconfig.test.json`
-- `package.json` (test script; no dependency changes)
-- `.gitignore` and `eslint.config.mjs` (ignore compiled test output)
+- `package.json` (test script runs `node --test` on `.ts` directly; no dependency changes)
 - `TECHNICAL_SPEC.md`, `README.md`, and `WORKLOAD_SPLIT.md`
 
 **Public integration:** Call `await ensureAudio()` from a Play click, then
@@ -127,9 +125,9 @@ Play/Stop/count-in controls render. Remote browser testing returned
 determine the browser URL reliably. Neither attempt verified audible output.
 
 **Security review:** The playback path has no server endpoint, authentication,
-file upload, network audio, or logging of microphone/project data. Track IDs,
-numeric inputs, drum lanes, note count, and simultaneous polyphony are validated
-before replacing a schedule; prototype-like instrument IDs are rejected. Full
+file upload, network audio, or logging of microphone/project data. BPM is validated
+before replacing a schedule; note/track validation belongs at JSON import, the
+only untrusted input. Full
 `npm audit` reported five existing high-severity development-tool findings in
 the ESLint/fast-glob/micromatch/braces chain. `npm audit --omit=dev` reported zero
 production findings. No force update/downgrade was applied.
