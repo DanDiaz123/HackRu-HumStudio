@@ -20,6 +20,9 @@ export const PlayIcon = (p: P) => (
 export const StopIcon = (p: P) => (
   <svg {...base} {...p}><rect x="6" y="6" width="12" height="12" fill="currentColor" stroke="none" /></svg>
 );
+export const PauseIcon = (p: P) => (
+  <svg {...base} {...p}><path d="M8 5v14M16 5v14" strokeWidth={5} /></svg>
+);
 export const RewindIcon = (p: P) => (
   <svg {...base} {...p}><path d="M5 5v14" /><path d="M19 5.5v13L9 12z" fill="currentColor" stroke="none" /></svg>
 );

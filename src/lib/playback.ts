@@ -1,74 +1,69 @@
-import * as Tone from "tone";
-import { TOTAL_BEATS, type Track } from "./tracks";
+import { createPlaybackEngine, type PlaybackEngine, type PlaybackState } from "./audio/playback-engine";
+import type { Track } from "./tracks";
 
-type Voice = { play: (midi: number, durSec: number, time: number, vel: number) => void; dispose: () => void };
+let engine: PlaybackEngine | null = null;
+let initializing: Promise<void> | null = null;
+let lifecycle = 0;
 
-let voices: Record<string, Voice> | null = null;
-let eventIds: number[] = [];
-
-function synth(type: "triangle" | "sawtooth" | "square" | "sine", release: number, vol: number): Voice {
-  const s = new Tone.PolySynth(Tone.Synth, { oscillator: { type }, envelope: { attack: 0.01, release } }).toDestination();
-  s.volume.value = vol;
-  return {
-    play: (m, d, t, v) => s.triggerAttackRelease(Tone.Frequency(m, "midi").toFrequency(), d, t, v),
-    dispose: () => s.dispose(),
-  };
-}
-
-function drumKit(): Voice {
-  const kick = new Tone.MembraneSynth().toDestination();
-  const snare = new Tone.NoiseSynth({ noise: { type: "white" }, envelope: { attack: 0.001, decay: 0.18, sustain: 0 } }).toDestination();
-  const hat = new Tone.NoiseSynth({ noise: { type: "pink" }, envelope: { attack: 0.001, decay: 0.05, sustain: 0 } }).toDestination();
-  snare.volume.value = -8;
-  hat.volume.value = -18;
-  return {
-    play: (m, _d, t, v) => {
-      if (m === 36) kick.triggerAttackRelease("C1", "8n", t, v);
-      else if (m === 38) snare.triggerAttackRelease("16n", t, v);
-      else hat.triggerAttackRelease(m === 42 ? "32n" : "8n", t, v);
-    },
-    dispose: () => [kick, snare, hat].forEach((x) => x.dispose()),
-  };
-}
-
-const transport = () => Tone.getTransport();
-const ticks = (beat: number) => `${Math.round(beat * transport().PPQ)}i`;
-
-/** Must run inside a user gesture. */
-export async function ensureAudio() {
-  await Tone.start();
-  voices ??= {
-    melody: synth("sawtooth", 0.3, -14),
-    bass: synth("square", 0.2, -12),
-    keys: synth("triangle", 0.8, -14),
-    strings: synth("sine", 1.2, -10),
-    drums: drumKit(),
-  };
-}
-
-export function schedule(tracks: Track[], bpm: number) {
-  const tr = transport();
-  eventIds.forEach((id) => tr.clear(id));
-  eventIds = [];
-  tr.bpm.value = bpm;
-  tr.loop = true;
-  tr.loopStart = 0;
-  tr.loopEnd = ticks(TOTAL_BEATS);
-  if (!voices) return;
-  const anySolo = tracks.some((t) => t.solo);
-  for (const t of tracks) {
-    if (t.muted || (anySolo && !t.solo)) continue;
-    const v = voices[t.instrument.id];
-    for (const n of t.notes) {
-      const durSec = (n.durationBeats * 60) / bpm;
-      eventIds.push(tr.schedule((time) => v.play(n.midi, durSec, time, n.velocity), ticks(n.startBeat)));
-    }
+/** Initialize browser-only synthesis from a real Play click; concurrent calls share one engine. */
+export async function ensureAudio(): Promise<void> {
+  if (typeof window === "undefined") throw new Error("Playback is only available in a browser.");
+  if (initializing) return initializing;
+  const revision = lifecycle;
+  initializing = (async () => {
+    const { createToneBackend, unlockAudio } = await import("./audio/tone-backend");
+    await unlockAudio();
+    if (revision !== lifecycle) throw new Error("Audio initialization was cancelled.");
+    engine ??= createPlaybackEngine(createToneBackend());
+  })();
+  const pending = initializing;
+  try {
+    await pending;
+  } finally {
+    if (initializing === pending) initializing = null;
   }
 }
 
-export const play = () => transport().start();
-export const stop = () => transport().pause();
-export function rewind() {
-  transport().ticks = 0;
+/** Derive tick-aligned playback from canonical tracks at a validated BPM of 60..180. */
+export function schedule(tracks: readonly Track[], bpm: number): void {
+  if (!engine) throw new Error("Initialize audio before scheduling playback.");
+  engine.schedule(tracks, bpm);
 }
-export const positionBeats = () => transport().ticks / transport().PPQ;
+
+/** Start/resume the initialized arrangement. */
+export function play(): void {
+  if (!engine) throw new Error("Initialize audio before playback.");
+  engine.play();
+}
+
+/** Pause while preserving the beat position. Safe before audio has been initialized. */
+export function pause(): void { engine?.pause(); }
+
+/** Halt playback, silence pending voices, and reset the position. */
+export function stop(): void { engine?.stop(); }
+
+/** Reset to beat zero; running playback continues from the start. */
+export function rewind(): void { engine?.rewind(); }
+
+/** Audible playhead position in quarter-note beats, zero before initialization. */
+export function positionBeats(): number { return engine?.positionBeats() ?? 0; }
+
+/** Actual transport state, rather than an independent UI flag. */
+export function state(): PlaybackState { return engine?.state() ?? "stopped"; }
+
+/** Toggle the beat-aligned metronome after initializing audio. */
+export function setMetronome(enabled: boolean): void { engine?.setMetronome(enabled); }
+
+/** Count four beats without moving the playhead; false means Stop/unmount cancelled it. */
+export function countIn(bpm: number, onBeat?: (remaining: number) => void): Promise<boolean> {
+  if (!engine) throw new Error("Initialize audio before counting in.");
+  return engine.countIn(bpm, onBeat);
+}
+
+/** Release this studio's audio resources and cancel any pending initialization. */
+export function dispose(): void {
+  lifecycle++;
+  initializing = null;
+  engine?.dispose();
+  engine = null;
+}
