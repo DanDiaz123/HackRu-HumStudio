@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createPlaybackEngine, type PlaybackBackend, type PlaybackState, type PlaybackVoice } from "../lib/audio/playback-engine.ts";
 import * as playback from "../lib/playback.ts";
-import { TOTAL_BEATS, type Track } from "../lib/tracks.ts";
+import { TOTAL_BEATS, toggleTrackFlag, type Track } from "../lib/tracks.ts";
 import { playbackFixtureTracks } from "./fixtures/playback.ts";
 
 class FakeBackend implements PlaybackBackend {
@@ -154,7 +154,7 @@ test("stop resets while rewind preserves running/paused state", () => {
   assert.equal(engine.positionBeats(), 0);
 });
 
-test("mute wins over solo, multiple solos combine, and a live mute silences old voices", () => {
+test("backend honors supplied solo flags, mute wins, and a live mute silences old voices", () => {
   const { backend, engine, tracks } = setup();
   engine.schedule(tracks, 120);
   engine.play();
@@ -170,6 +170,30 @@ test("mute wins over solo, multiple solos combine, and a live mute silences old 
   backend.calls = [];
   backend.fire(0);
   assert.deepEqual(new Set(backend.calls.filter((call) => call.action === "attack").map((call) => call.instrument)), new Set(["melody", "keys"]));
+});
+
+test("exclusive studio solo transitions schedule one track, respect mute, and restore normal playback", () => {
+  const { backend, engine, tracks } = setup();
+  let current = tracks;
+  engine.schedule(current, 120);
+  engine.play();
+  const heard = () => {
+    engine.schedule(current, 120);
+    backend.calls = [];
+    backend.fire(0);
+    return new Set(backend.calls.filter(call => call.action === "attack").map(call => call.instrument));
+  };
+  current = toggleTrackFlag(current, "bass", "solo");
+  assert.deepEqual(heard(), new Set(["bass"]));
+  current = toggleTrackFlag(current, "melody", "solo");
+  assert.deepEqual(heard(), new Set(["melody"]));
+  current = toggleTrackFlag(current, "melody", "muted");
+  assert.deepEqual(heard(), new Set());
+  assert.equal(current.find(track => track.instrument.id === "melody")?.solo, true);
+  current = toggleTrackFlag(current, "melody", "solo");
+  assert.deepEqual(heard(), new Set(["bass", "keys", "drums", "strings"]));
+  current = toggleTrackFlag(current, "melody", "muted");
+  assert.deepEqual(heard(), new Set(tracks.map(track => track.instrument.id)));
 });
 
 test("live pitch edits replace old events and recover notes spanning the playhead", () => {

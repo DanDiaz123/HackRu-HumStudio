@@ -4,7 +4,7 @@ import ToneMidi from "@tonejs/midi";
 import { midiBytes } from "../lib/midi.ts";
 import { DEFAULT_HARMONY } from "../lib/music/harmony.ts";
 import { type LoadedProject, MAX_PROJECT_CHARS, MAX_PROJECT_NOTES, parseProject, serializeProject, toProject } from "../lib/persistence/project.ts";
-import { INSTRUMENTS, initialTracks } from "../lib/tracks.ts";
+import { INSTRUMENTS, initialTracks, toggleTrackFlag } from "../lib/tracks.ts";
 
 const { Midi } = ToneMidi; // CommonJS package: Node has no named export
 
@@ -34,6 +34,32 @@ test("T-08: a project round-trips every track, setting and the harmony", () => {
   assert.deepEqual(after.harmony, before.harmony);
   assert.deepEqual(after.tracks, before.tracks);
   assert.equal(after.tracks.find(track => track.instrument.id === "drums")?.drumPart, "kick");
+});
+
+test("legacy multi-solo imports select the first fixed category without dropping any drum or project notes", () => {
+  const before = JSON.parse(serializeProject(project()));
+  before.tracks.reverse();
+  for (const track of before.tracks) track.solo = ["bass", "keys", "drums"].includes(track.instrumentId);
+  const after = parseProject(JSON.stringify(before));
+  assert.deepEqual(after.tracks.filter(track => track.solo).map(track => track.instrument.id), ["bass"]);
+  for (const track of after.tracks) {
+    const saved = before.tracks.find((item: { instrumentId: string }) => item.instrumentId === track.instrument.id);
+    assert.deepEqual(track.notes, saved.notes);
+    assert.equal(track.muted, saved.muted);
+    assert.equal(track.presetId, saved.presetId);
+  }
+  assert.equal(after.tracks.find(track => track.instrument.id === "drums")?.drumPart, "kick");
+});
+
+test("saving writes one solo without mutating state, and exclusive solo selections round-trip", () => {
+  const original = project();
+  original.tracks = original.tracks.map(track => ({ ...track, solo: true }));
+  const before = structuredClone(original);
+  assert.deepEqual(toProject(original).tracks.filter(track => track.solo).map(track => track.instrumentId), ["melody"]);
+  assert.deepEqual(original, before);
+  const valid = project();
+  valid.tracks = toggleTrackFlag(valid.tracks, "drums", "solo");
+  assert.deepEqual(parseProject(serializeProject(valid)).tracks, valid.tracks);
 });
 
 test("T-09: invalid files throw instead of loading part of them", () => {

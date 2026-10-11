@@ -4,7 +4,7 @@
 
 HumStudio is a browser-based music sketchpad for **HackRU Fall 2026**. It looks like a familiar multi-track editor: one track per instrument (Melody, Bass, Keys, Drums, Strings). Click a track to zoom into it, hum into your microphone while a live spectrogram prints your voice across the lane, and watch the track fill with generated notes. Then play the arrangement or export it as MIDI.
 
-> **Current repository status (2026-10-10):** The Next.js studio includes arrangement view, track zoom, live hum spectrogram, animated reveal, five-instrument playback, collision-aware note editing, and MIDI export. Low/Medium/High sensitivity profiles are generated and cached per take for immediate switching; Snap rebuilds from capture tempo and updates notes immediately. The zoomed Drums tab has five rhythm-only parts (Kick, Snare, Closed hat, Open hat, Crash) in a dropdown; recording and editing target the selected lane while playback/export retain all lanes. Undo/redo, Clear/Repeat, keyboard shortcuts, strict ProjectV2 save/open, autosave, and v1 migration are built. The merged branch passes 170 tests, lint, TypeScript, production build, and automated Edge checks. Generation uses deterministic DSP and instrument roles; no trained model is implemented. Physical-microphone tuning, listening, deployment, and demo rehearsal remain open. See [`WORKLOAD_SPLIT.md`](WORKLOAD_SPLIT.md) for ownership.
+> **Current repository status (2026-10-10):** The Next.js studio includes arrangement view, track zoom, live hum spectrogram, animated reveal, five-instrument playback, collision-aware note editing, and MIDI export. Low/Medium/High sensitivity profiles are generated and cached per take for immediate switching; Snap rebuilds from capture tempo and updates notes immediately. The zoomed Drums tab displays all five rhythm-only parts (Kick, Snare, Closed hat, Open hat, Crash); recording and editing target the selected lane while playback/export retain all lanes. Right-click deletion and exclusive Solo use the existing Undo/Redo history. Clear/Repeat, keyboard shortcuts, strict ProjectV2 save/open, autosave, and v1 migration are built. Regression tests and automated Edge checks cover the studio interactions. Generation uses deterministic DSP and instrument roles; no trained model is implemented. Physical-microphone tuning, listening, deployment, and demo rehearsal remain open. See [`WORKLOAD_SPLIT.md`](WORKLOAD_SPLIT.md) for ownership.
 
 ## What are we building?
 
@@ -36,17 +36,17 @@ Pick an instrument track
 - [x] **Reveal:** shows the pipeline's real stages: detected notes print in, timing snaps when enabled, and the key/chords appear. Melody keeps confirmed pitches; other roles fit harmony. Skipped under reduced motion.
 - [x] **Learn:** chord names and roman numerals on the zoomed lane's bar grid (the current chord lights during playback), key and part role in the track panel, do-re-mi on notes, and a live pitch readout (note, degree, cents) while recording.
 - [x] **Note sensitivity:** Low, Medium, and High in the top menu; all three profiles are generated per take and swap immediately. Snap updates existing notes immediately. Hand edits opt a part out of automatic profile switching.
-- [x] **Play:** Tone.js playback of all tracks with mute/solo and BPM 60–180.
+- [x] **Play:** Tone.js playback of all tracks with independent Mute, exclusive Solo, and BPM 60–180. M/S show their names on hover or keyboard focus.
 - [x] **Track sounds:** independent smplr preset dropdowns beneath expanded track titles, with lazy loading, retry, and the original synth fallback.
 - [x] **Playback count-in / metronome:** optional four-beat count-in and beat clicks; listening verification remains open.
 - [x] **Export:** multi-track `.mid` (drums on MIDI channel 10).
 - [x] **Recover:** mic denial, insecure origin, missing device, and silent takes show a message plus a **Demo hum** fallback; failed takes never erase existing notes.
 - [ ] **Real-device tuning:** validate the DSP generation with human humming on the demo microphone (Person 1).
-- [x] **Edit:** in the zoomed track, drag to move, drag either edge to stretch, click empty space to add, double-click or Delete to remove, arrows to nudge (Shift+arrows stretch). Edits snap to the Snap grid. Notes on one pitch never overlap: a move onto another note slides to the nearest free spot (or stays put), a stretch stops at the neighbour, and a new note fits the gap.
+- [x] **Edit:** in the zoomed track, drag to move, drag either edge to stretch, click empty space to add, right-click/double-click or Delete/Backspace to remove, arrows to nudge (Shift+arrows stretch). Edits snap to the Snap grid. Notes on one pitch never overlap: a move onto another note slides to the nearest free spot (or stays put), a stretch stops at the neighbour, and a new note fits the gap.
 - [x] **Undo / redo:** buttons and Ctrl+Z / Ctrl+Shift+Z (Ctrl+Y) for edits, takes, key changes, Sensitivity/Snap regeneration, Clear/Repeat, and Open (100 steps, this session).
 - [x] **Part actions:** Clear a part, or Repeat bars 1–4 onto 5–8. Re-recording a part you recorded or edited asks first.
 - [x] **Save/reopen:** autosaves to this browser and restores on reload; Save downloads a `.humstudio.json` (all tracks, sounds, key/chords, BPM, Snap, Sensitivity); Open validates the whole file before replacing anything. v1 files load as the Melody track.
-- [x] **Drum parts:** select Kick, Snare, Closed hat, Open hat, or Crash in the zoomed Drums tab; each part uses onset rhythm only and can be recorded, edited, cleared, repeated, saved, and exported with the other lanes intact.
+- [x] **Drum parts:** all five rows stay visible; select Kick, Snare, Closed hat, Open hat, or Crash to record, add, move/resize, Clear, or Repeat that lane. Right-click can delete a note on any row. Other lanes remain intact during recording, editing, Save/Open, and export.
 - [x] **Keyboard:** Space play/pause, R record/stop, 1–5 open a track, Esc back, M/S mute/solo, K metronome, L Learn, Ctrl+S save, ? for the list.
 - [x] **Recording count-in** (four clicks, then the click continues under the take).
 
@@ -121,7 +121,15 @@ npm run build
 npm test
 ```
 
-`npm test` runs the 170 playback, preset, harmony, segmentation, capture, generation, persistence, editing, and MIDI regression tests using TypeScript and Node's built-in test runner, without adding a testing dependency. Fixtures cover held-note wobbles, short dropouts across frame rates and tempos, genuine rests, all sensitivity profiles, rhythm-only Drum parts, harmony merging, Off timing, sample switching, stale loads, fallback/retry, strict project validation and v1 migration, collision-aware edits, velocity conversion, and independent note stops. Automated Edge checks cover sensitivity/Snap switching, Drum part selection, Save/Open/autosave, undo/redo, invalid-file preservation, responsive controls, and synthetic microphone capture. Real browser listening and physical microphone tests are still necessary. The production build downloads the existing Archivo font from Google Fonts when it is not cached. Lint ignores the legacy generated `.test-build/` directory.
+`npm test` runs playback, preset, harmony, segmentation, capture, generation, persistence, editing, track-control, and MIDI regression tests using TypeScript and Node's built-in test runner, without adding a testing dependency. Fixtures cover held-note wobbles, short dropouts across frame rates and tempos, genuine rests, all sensitivity profiles, rhythm-only Drum parts, harmony merging, Off timing, sample switching, stale loads, fallback/retry, strict project validation and v1 migration, collision-aware edits, single-note deletion, selected-lane replacement, exclusive Solo and legacy multi-solo normalization, velocity conversion, and independent note stops. Real browser listening and physical microphone tests are still necessary. The production build downloads the existing Archivo font from Google Fonts when it is not cached. Lint ignores the legacy generated `.test-build/` directory.
+
+The optional [studio interaction suite](src/tests/browser/studio-interactions.mjs) uses an existing Playwright installation and Microsoft Edge, with Node 24+ and `npm run dev` running. No application dependency is added:
+
+```bash
+node src/tests/browser/studio-interactions.mjs <path-to-playwright-package> [http://localhost:3000]
+```
+
+It checks right-click/keyboard deletion and history, drag/resize, all drum lanes and selected-part edits, synthetic microphone capture and reveal, hover/focus tooltips, exclusive Solo and keyboard S, Save/Open/autosave, MIDI export, and playback controls at 1280/390/320 px. Delayed synthetic samples exercise real smplr decoding, rapid switching, fallback/retry, and fixed transport/ruler/track positions without depending on upstream downloads. Screenshots and results are written to ignored `.test-build/`; physical microphone accuracy and real instrument timbre are not measured.
 
 ## File structure
 
@@ -152,7 +160,7 @@ Note editing lives in `TrackRow.tsx` with pure rules in `src/lib/note-edit.ts`; 
 ## Key design choices
 
 - **One `Note` shape everywhere:** `midi`, `startBeat`, `durationBeats`, `velocity`, timed in **quarter-note beats** so BPM changes don't move notes. Defined in `src/lib/music/types.ts`.
-- **Tracks per instrument:** app state is `Track[]` (`src/lib/tracks.ts`). Each track has an instrument (color, pitch range, synth/drums), its notes, and mute/solo flags. The Drums track also stores the selected `drumPart`; all five rhythm lanes remain in its notes for playback/export.
+- **Tracks per instrument:** app state is `Track[]` (`src/lib/tracks.ts`). Each track has an instrument (color, pitch range, synth/drums), its notes, and mute/solo flags. Solo is exclusive; older files with several flags keep the first soloed category in Melody/Bass/Keys/Drums/Strings order. The Drums track stores the selected `drumPart`; all five rhythm lanes remain visible and saved, while the editing callback receives only the selected lane. Single-note deletion targets the complete track by note ID.
 - **Generation boundary:** `generateTrack(...)` remains the async single-profile facade; `generateTrackVariants(...)` computes all three profiles for the UI. Pure settings helpers preserve capture tempo, manual edits, and harmony decisions.
 - **Pitch is not an FFT peak:** Pitchy estimates the fundamental; the spectrogram is display only.
 - **Honest samples:** Keys and Drums start with parts labeled **Sample**; the demo hum is labeled **Demo hum**. Never present a preset as live output.
