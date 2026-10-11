@@ -4,6 +4,7 @@ import {
   buildTheoryPrompt,
   extractCandidateText,
   isChordExplanationContext,
+  readSseData,
   sanitizeTheoryModel,
   splitSseEvents,
 } from "@/lib/theory-agent";
@@ -23,6 +24,22 @@ const STREAM_HEADERS = {
 
 const frame = (payload: unknown) => `data: ${JSON.stringify(payload)}\n\n`;
 
+// ponytail: per-instance in-memory limit; serverless instances don't share it. Use a shared store if abuse spans instances.
+const RATE_WINDOW_MS = 60_000;
+const RATE_MAX = 10;
+const MAX_TRACKED_CLIENTS = 10_000;
+const hits = new Map<string, number[]>();
+
+function rateLimited(request: Request): boolean {
+  const ip = request.headers.get("x-forwarded-for")?.split(",")[0].trim() || request.headers.get("x-real-ip") || "unknown";
+  const now = Date.now();
+  const recent = (hits.get(ip) ?? []).filter((t) => now - t < RATE_WINDOW_MS);
+  if (recent.length >= RATE_MAX) return true;
+  if (!hits.has(ip) && hits.size >= MAX_TRACKED_CLIENTS) hits.clear();
+  hits.set(ip, [...recent, now]);
+  return false;
+}
+
 export async function POST(request: Request) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -30,6 +47,10 @@ export async function POST(request: Request) {
       { error: "The theory agent isn't configured. Add a GEMINI_API_KEY to the server environment." },
       { status: 503 },
     );
+  }
+
+  if (rateLimited(request)) {
+    return Response.json({ error: "Too many explanations requested. Try again in a minute." }, { status: 429 });
   }
 
   let body: unknown;
@@ -77,9 +98,7 @@ export async function POST(request: Request) {
           const { events, rest } = splitSseEvents(buffer);
           buffer = rest;
           for (const event of events) {
-            const line = event.split("\n").find((l) => l.startsWith("data:"));
-            if (!line) continue;
-            const payload = line.slice(5).trim();
+            const payload = readSseData(event);
             if (!payload || payload === "[DONE]") continue;
             let parsed: unknown;
             try {

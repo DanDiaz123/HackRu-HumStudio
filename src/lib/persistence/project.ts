@@ -1,6 +1,6 @@
 // Versioned multi-track project files. Pure: validation never touches the browser, so a bad file
 // can be rejected before any app state changes.
-import { DEFAULT_NOTE_SENSITIVITY, type NoteSensitivity, isNoteSensitivity } from "../audio/note-sensitivity.ts";
+import { DEFAULT_NOTE_SENSITIVITY, NOTE_SENSITIVITY_LEVELS, type NoteSensitivity, isNoteSensitivity } from "../audio/note-sensitivity.ts";
 import { presetForTrack } from "../audio/instrument-presets.ts";
 import type { RegenerationData, TakeSource } from "../music/arrangement-settings.ts";
 import { DEFAULT_HARMONY, type Harmony, type Key, inferHarmony } from "../music/harmony.ts";
@@ -59,8 +59,8 @@ export function toProject(p: LoadedProject, now = new Date()): ProjectV3 {
     ...(p.regeneration ? { regeneration: {
       takes: Object.fromEntries(Object.entries(p.regeneration.takes).map(([id, take]) => [id, {
         bpm: take.bpm, ...(take.drumPart ? { drumPart: take.drumPart } : {}),
-        sources: Object.fromEntries(["low", "medium", "high"].map(level => {
-          const source = take.sources[level as NoteSensitivity];
+        sources: Object.fromEntries(NOTE_SENSITIVITY_LEVELS.map(level => {
+          const source = take.sources[level];
           return [level, { notes: copyNotes(source.notes), phraseIds: [...source.phraseIds] }];
         })) as TakeSource["sources"],
       }])),
@@ -243,9 +243,9 @@ function regeneration(input: unknown, tracks: Map<string, Track>): RegenerationD
     const track = tracks.get(id)!;
     if (take.drumPart !== undefined && (track.instrument.kind !== "drums" || !DRUM_PARTS.some(p => p.id === take.drumPart))) fail("bad take drum part");
     if (track.sample) fail("sample parts cannot contain recorded takes");
-    const profiles = strictObject(take.sources, ["low", "medium", "high"], "profiles");
+    const profiles = strictObject(take.sources, NOTE_SENSITIVITY_LEVELS, "profiles");
     const sources = {} as TakeSource["sources"];
-    for (const level of ["low", "medium", "high"] as const) {
+    for (const level of NOTE_SENSITIVITY_LEVELS) {
       const profile = strictObject(profiles[level], ["notes", "phraseIds"], "profile");
       const detected = notes(profile.notes, new Set());
       claimIds(id, detected);

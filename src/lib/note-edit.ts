@@ -1,16 +1,15 @@
 // Editing rules for the zoomed lane. Pure, so the gestures in TrackRow stay thin and testable.
+import { isValidNote } from "./persistence/project.ts";
 import { DRUM_PARTS, type DrumPart, type Note, TOTAL_BEATS } from "./tracks.ts";
 
 const EPS = 1e-6;
 const MAX_SEARCH_STEPS = 10_000;
 const end = (n: Note) => n.startBeat + n.durationBeats;
 const sameRow = (a: Note, b: Note) => a.id !== b.id && a.midi === b.midi;
-const validFields = (n: Note) => n && typeof n.id === "string" && n.id.length > 0 && n.id.length <= 200 &&
-  Number.isInteger(n.midi) && n.midi >= 0 && n.midi <= 127 &&
-  Number.isFinite(n.startBeat) && n.startBeat >= 0 && n.startBeat < TOTAL_BEATS &&
-  Number.isFinite(n.durationBeats) && n.durationBeats > 0 && n.durationBeats <= TOTAL_BEATS &&
-  Number.isFinite(n.velocity) && n.velocity >= 0 && n.velocity <= 1;
-const validNote = (n: Note) => validFields(n) && end(n) <= TOTAL_BEATS;
+const validNote = (n: Note) => isValidNote(n);
+// Same bounds, but a new note may ask for more length than the song has left; addNote trims it.
+const validFields = (n: Note) => isValidNote({ ...n, durationBeats: Math.min(n?.durationBeats, TOTAL_BEATS - n?.startBeat) }) &&
+  n.durationBeats <= TOTAL_BEATS;
 const minimumLength = (minLen: number) => {
   if (!Number.isFinite(minLen) || minLen <= 0 || minLen > TOTAL_BEATS)
     throw new RangeError("Minimum note length must be positive and within the song.");

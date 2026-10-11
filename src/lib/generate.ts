@@ -39,12 +39,24 @@ export function snapNotesToGrid(inst: Instrument, notes: readonly Note[], quanti
   if (!Object.hasOwn(QUANT_BEATS, quantize)) throw new RangeError("Unsupported quantization.");
   const grid = QUANT_BEATS[quantize];
   if (!grid) return notes.map((note) => ({ ...note }));
-  return notes.map((note) => {
+  const snapped = notes.map((note) => {
     const startBeat = Math.min(TOTAL_BEATS - grid, Math.max(0, Math.round(note.startBeat / grid) * grid));
     if (inst.kind === "drums") return { ...note, startBeat, durationBeats: Math.min(note.durationBeats, TOTAL_BEATS - startBeat) };
     const endBeat = Math.min(TOTAL_BEATS, Math.max(startBeat + grid, Math.round((note.startBeat + note.durationBeats) / grid) * grid));
     return { ...note, startBeat, durationBeats: endBeat - startBeat };
   });
+  // Same-pitch notes may not overlap (note-edit.ts fits()): trim the earlier one, dropping it if nothing is left.
+  const lastOnPitch = new Map<number, Note>();
+  const dropped = new Set<Note>();
+  for (const note of [...snapped].sort((a, b) => a.startBeat - b.startBeat)) {
+    const prev = lastOnPitch.get(note.midi);
+    if (prev && prev.startBeat + prev.durationBeats > note.startBeat) {
+      prev.durationBeats = note.startBeat - prev.startBeat;
+      if (prev.durationBeats <= 0) dropped.add(prev);
+    }
+    lastOnPitch.set(note.midi, note);
+  }
+  return snapped.filter((note) => !dropped.has(note));
 }
 
 /** Generates canonical notes; raw audio stays local. */

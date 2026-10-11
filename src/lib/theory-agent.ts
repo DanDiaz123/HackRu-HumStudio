@@ -91,7 +91,7 @@ export function splitSseEvents(buffer: string): { events: string[]; rest: string
 }
 
 /** One `data:` payload from a server-sent event, or null if the event has no data line. */
-function readSseData(event: string): string | null {
+export function readSseData(event: string): string | null {
   for (const line of event.split("\n")) {
     if (line.startsWith("data:")) return line.slice(5).trim();
   }
