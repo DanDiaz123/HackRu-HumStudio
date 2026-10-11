@@ -37,9 +37,10 @@ export function buildTheoryPrompt(context: ChordExplanationContext): string {
     `Its chord progression, one chord per bar, is: ${progressionLabel(context)}.`,
     "",
     "Explain the theory behind this progression to a beginner who can hum but does not read music.",
-    "In two short paragraphs: (1) what the key means and why these chords belong together, using their",
-    "Roman-numeral function and any tension or resolution; (2) one concrete change the listener can try,",
-    "such as swapping one chord for another. Plain sentences only, no notation, tab, or code. Under 160 words.",
+    "In three short paragraphs: (1) what the key means and why these chords belong together, using their",
+    "Roman-numeral function and any tension or resolution; (2) how the progression moves bar to bar and",
+    "where it feels settled or unfinished; (3) one or two concrete changes the listener can try, such as",
+    "swapping one chord for another. Plain sentences only, no notation, tab, or code. Aim for 200–300 words.",
   ].join("\n");
 }
 

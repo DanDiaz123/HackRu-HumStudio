@@ -36,13 +36,14 @@ export async function POST(request: Request) {
   const model = sanitizeTheoryModel(process.env.GEMINI_MODEL) ?? DEFAULT_THEORY_MODEL;
   let upstream: Response;
   try {
+    console.log("sending request")
     upstream = await fetch(`${GENERATE_URL}/${model}:generateContent`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
         contents: [{ role: "user", parts: [{ text: buildTheoryPrompt(body) }] }],
-        generationConfig: { temperature: 0.5, maxOutputTokens: 400 },
+        generationConfig: { temperature: 0.5, maxOutputTokens: 5000 },
       }),
     });
   } catch {
@@ -55,6 +56,9 @@ export async function POST(request: Request) {
 
   const data: unknown = await upstream.json().catch(() => null);
   const text = extractCandidateText(data);
+  console.log(data)
+  console.log(text)
+
   if (!text) {
     return Response.json({ error: "The theory agent sent back an empty answer." }, { status: 502 });
   }

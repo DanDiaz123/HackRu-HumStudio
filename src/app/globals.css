@@ -972,14 +972,35 @@ button.lane:focus-visible {
   min-width: 0;
   padding: 0 8px;
 }
+.theory-dialog[open] {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
 .theory-dialog .theory-key {
   margin: -6px 0 14px;
   font-size: 13px;
   font-weight: 800;
   color: var(--text);
+  flex: none;
+}
+/* The reading pane: a long, scrollable window so the whole answer stays reachable. */
+.theory-dialog .theory-output {
+  flex: 1 1 auto;
+  min-height: 140px;
+  max-height: min(58vh, 460px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  background: var(--ground);
+}
+.theory-dialog .theory-output:focus-visible {
+  outline-offset: 0;
 }
 .theory-dialog .theory-status {
-  margin: 0 0 14px;
+  margin: 0;
   font-size: 14px;
   line-height: 1.45;
   color: var(--muted);
@@ -988,18 +1009,23 @@ button.lane:focus-visible {
   margin: 0 0 10px;
 }
 .theory-dialog .theory-text {
-  margin: 0 0 14px;
+  margin: 0;
   font-size: 14px;
-  line-height: 1.5;
+  line-height: 1.55;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .theory-dialog .theory-caveat {
-  margin: 0 0 14px;
+  margin: 14px 0;
   padding-top: 12px;
   border-top: 1px solid var(--line);
   font-size: 11px;
   line-height: 1.4;
   color: var(--muted);
+  flex: none;
+}
+.theory-dialog > .ghost-btn {
+  flex: none;
 }
 
 /* Editing in the zoomed lane */

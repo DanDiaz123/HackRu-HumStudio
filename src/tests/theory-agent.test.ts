@@ -34,7 +34,7 @@ test("buildTheoryPrompt states the key and progression and bounds the answer", (
   const prompt = buildTheoryPrompt(harmonyToAgentContext(DEFAULT_HARMONY));
   assert.match(prompt, /C major/);
   assert.match(prompt, /Am \(vi\)/);
-  assert.match(prompt, /Under 160 words/);
+  assert.match(prompt, /Aim for 200–300 words/);
 });
 
 test("isChordExplanationContext accepts a well-formed context and rejects malformed input", () => {

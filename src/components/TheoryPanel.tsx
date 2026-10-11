@@ -56,16 +56,18 @@ export default function TheoryPanel({ harmony }: { harmony: Harmony }) {
       <dialog ref={dialogRef} className="help theory-dialog" aria-labelledby="theory-title" onClose={close}>
         <h2 id="theory-title">Theory agent</h2>
         <p className="theory-key">{harmonyLabel(harmony, harmony.bars.length)}</p>
-        {status === "loading" && (
-          <p className="theory-status" role="status">Thinking about these chords…</p>
-        )}
-        {status === "error" && (
-          <div className="theory-status" role="alert">
-            <p>{error}</p>
-            <button className="ghost-btn" onClick={() => void explain()}>Try again</button>
-          </div>
-        )}
-        {status === "done" && <p className="theory-text">{text}</p>}
+        <div className="theory-output" tabIndex={0} aria-live="polite" aria-busy={status === "loading"}>
+          {status === "loading" && (
+            <p className="theory-status" role="status">Thinking about these chords…</p>
+          )}
+          {status === "error" && (
+            <div className="theory-status" role="alert">
+              <p>{error}</p>
+              <button className="ghost-btn" onClick={() => void explain()}>Try again</button>
+            </div>
+          )}
+          {status === "done" && <p className="theory-text">{text}</p>}
+        </div>
         <p className="theory-caveat">
           AI-generated explanation of your inferred key and chords. Harmony can be ambiguous, so treat it as a
           starting point, not an answer key.

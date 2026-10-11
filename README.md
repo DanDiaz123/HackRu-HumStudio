@@ -35,6 +35,7 @@ Pick an instrument track
 - [x] **Generate:** stable pitch segmentation, harmony fitting, and Off/1/4/1/8/1/16 timing for melodic tracks.
 - [x] **Reveal:** shows the pipeline's real stages: detected notes print in, timing snaps when enabled, and the key/chords appear. Melody keeps confirmed pitches; other roles fit harmony. Skipped under reduced motion.
 - [x] **Learn:** chord names and roman numerals on the zoomed lane's bar grid (the current chord lights during playback), key and part role in the track panel, do-re-mi on notes, and a live pitch readout (note, degree, cents) while recording.
+- [x] **Theory agent:** with Learn on, the zoomed panel's **Explain** button asks a Gemini-backed agent to explain the current key and chord progression in plain language. Only the inferred key and chord labels are sent; no audio or note data. Requires a server-side `GEMINI_API_KEY` and is clearly labeled AI-generated.
 - [x] **Note sensitivity:** Low, Medium, and High in the top menu; all three profiles are generated per take and swap immediately. Snap updates existing notes immediately. Hand edits opt a part out of automatic profile switching.
 - [x] **Play:** Tone.js playback of all tracks with independent Mute, exclusive Solo, and BPM 60–180. M/S show their names on hover or keyboard focus.
 - [x] **Track sounds:** independent smplr preset dropdowns beneath expanded track titles, with lazy loading, retry, and the original synth fallback.
@@ -66,11 +67,12 @@ The demo targets **clear, one-note-at-a-time humming** in a reasonably quiet roo
 | Sampled sounds | [smplr](https://github.com/danigb/smplr) 1.1.0; selected assets load on demand |
 | Transport / synth fallback | [Tone.js](https://tonejs.github.io/) v15; same underlying audio context as smplr |
 | MIDI export | [`@tonejs/midi`](https://github.com/Tonejs/Midi) |
+| Theory agent (optional) | Gemini `generateContent` REST API via a server Route Handler (`src/app/api/explain/route.ts`); no SDK dependency |
 | State | React state in `src/components/Studio.tsx` (`Track[]`) |
 | Persistence | `localStorage` autosave + `.humstudio.json` files, schema v2 (`src/lib/persistence/project.ts`) |
-| Cloud / accounts | **None.** Audio never leaves the browser. |
+| Cloud / accounts | **None.** Audio and notes never leave the browser. The optional theory agent sends only the inferred key and chord labels. |
 
-**Important:** Nothing in this repo is a trained AI model. Pitch detection is DSP (Pitchy), and note generation uses deterministic heuristics. Describe it accurately when presenting.
+**Important:** Nothing in this repo is a trained AI model. Pitch detection is DSP (Pitchy), and note generation uses deterministic heuristics. The only model call is the optional theory agent, which explains already-computed chords. Describe it accurately when presenting.
 
 Held notes tolerate short pitch wobbles and unvoiced gaps: Medium uses 120 ms of stable pitch before a change, 150 ms of silence hold, a five-frame median, and a 0.7-semitone hold region. Confirmed rests still separate notes. Off preserves unsnapped timing. Voiced repeated syllables split on a level dip; recovery after a bridged dropout waits through the 100 ms re-attack window so it does not break a continuous note. Short octave slips are folded back. Repeated notes separated only by near-silence of 150 ms or less can still merge.
 
@@ -112,6 +114,22 @@ Open any track and choose **Sound** beneath its title. Each track retains its ow
 
 Samples need an initial network download from the upstream hosts. No audio is uploaded, and MIDI exports retain note data rather than sampled audio. See [sound credits and licenses](public/sound-credits.txt).
 
+### Optional: theory agent (Gemini)
+
+The **Explain** button in the Learn panel is optional. It stays hidden behind a clear error unless the server has a key; everything else works without it.
+
+1. Create a Gemini API key in [Google AI Studio](https://aistudio.google.com/apikey).
+2. Set it in the server environment (never commit it; `.env*` is git-ignored):
+
+   ```bash
+   GEMINI_API_KEY=your-key-here npm run dev
+   # or add GEMINI_API_KEY=your-key-here to .env.local
+   ```
+
+3. Optional: override the model with `GEMINI_MODEL` (default `gemini-3.8-flash`).
+
+The key is read only in `src/app/api/explain/route.ts`; it is never bundled into the client. Without a key, `POST /api/explain` returns `503` and the dialog shows a configuration message.
+
 ### Check your changes
 
 ```bash
@@ -121,7 +139,7 @@ npm run build
 npm test
 ```
 
-`npm test` runs playback, preset, harmony, segmentation, capture, generation, persistence, editing, track-control, and MIDI regression tests using TypeScript and Node's built-in test runner, without adding a testing dependency. Fixtures cover held-note wobbles, short dropouts across frame rates and tempos, genuine rests, all sensitivity profiles, rhythm-only Drum parts, harmony merging, Off timing, sample switching, stale loads, fallback/retry, strict project validation and v1 migration, collision-aware edits, single-note deletion, selected-lane replacement, exclusive Solo and legacy multi-solo normalization, velocity conversion, and independent note stops. Real browser listening and physical microphone tests are still necessary. The production build downloads the existing Archivo font from Google Fonts when it is not cached. Lint ignores the legacy generated `.test-build/` directory.
+`npm test` runs playback, preset, harmony, segmentation, capture, generation, persistence, editing, track-control, theory-agent, and MIDI regression tests using TypeScript and Node's built-in test runner, without adding a testing dependency. Fixtures cover held-note wobbles, short dropouts across frame rates and tempos, genuine rests, all sensitivity profiles, rhythm-only Drum parts, harmony merging, Off timing, sample switching, stale loads, fallback/retry, strict project validation and v1 migration, collision-aware edits, single-note deletion, selected-lane replacement, exclusive Solo and legacy multi-solo normalization, velocity conversion, independent note stops, and the agent's context/prompt/validation helpers. Real browser listening and physical microphone tests are still necessary. The production build downloads the existing Archivo font from Google Fonts when it is not cached. Lint ignores the legacy generated `.test-build/` directory.
 
 The optional [studio interaction suite](src/tests/browser/studio-interactions.mjs) uses an existing Playwright installation and Microsoft Edge, with Node 24+ and `npm run dev` running. No application dependency is added:
 
@@ -139,15 +157,18 @@ src/
     layout.tsx           # Archivo font, metadata
     page.tsx             # renders <Studio />
     globals.css          # design tokens + all studio styles
+    api/explain/route.ts # server Route Handler: validates context, calls Gemini with GEMINI_API_KEY
   components/
     Studio.tsx           # app shell: transport, ruler, rows, Track[] state, record/generate flow
     TrackRow.tsx         # one track: arrangement row or zoomed lane (prompt, phases, reveal)
     Spectrogram.tsx      # live halftone canvas on the lane's pitch axis
+    TheoryPanel.tsx      # Learn: Explain button + theory-agent dialog
     icons.tsx            # inline SVG icons
   lib/
     tracks.ts            # Instrument, Track, INSTRUMENTS, sample parts, lane geometry
     hum.ts               # startMic (Pitchy) / startDemoHum -> HumFrame stream; mic error messages
     generate.ts          # generateTrack() async facade / generateNotes() pure DSP pipeline
+    theory-agent.ts      # chord-explanation context/prompt builders, validation, client request
     playback.ts          # browser-only playback facade: schedule, play/pause/stop, position, count-in
     midi.ts              # exportMidi(Track[], bpm) -> humstudio.mid
     music/               # shared contracts: types.ts (Note, QuantizeDivision)
@@ -164,7 +185,7 @@ Note editing lives in `TrackRow.tsx` with pure rules in `src/lib/note-edit.ts`; 
 - **Generation boundary:** `generateTrack(...)` remains the async single-profile facade; `generateTrackVariants(...)` computes all three profiles for the UI. Pure settings helpers preserve capture tempo, manual edits, and harmony decisions.
 - **Pitch is not an FFT peak:** Pitchy estimates the fundamental; the spectrogram is display only.
 - **Honest samples:** Keys and Drums start with parts labeled **Sample**; the demo hum is labeled **Demo hum**. Never present a preset as live output.
-- **Local processing:** no account, API key, or network inference. Sampled presets fetch upstream assets on demand; the synth fallback works without them.
+- **Local processing by default:** no account and no network inference unless the optional theory agent is enabled. Sampled presets fetch upstream assets on demand; the synth fallback works without them. The theory agent sends only key/chord labels, never audio or notes.
 
 ## Suggested 90-second judge demo
 
@@ -190,7 +211,7 @@ If the room or mic fails, use **Demo hum** and say it is a demo hum.
 
 ## Privacy and data
 
-Microphone samples are analyzed locally and discarded. Latest-take analysis features and sensitivity caches remain in memory only; hand edits remove that part's take cache. Saved projects and autosave contain notes and settings, never audio or analysis frames. Nothing is uploaded.
+Microphone samples are analyzed locally and discarded. Latest-take analysis features and sensitivity caches remain in memory only; hand edits remove that part's take cache. Saved projects and autosave contain notes and settings, never audio or analysis frames. The optional theory agent sends only the inferred key and chord labels (no audio, notes, or project identifiers) to Google's Gemini API, and only when you press **Explain**.
 
 ## Documentation
 
