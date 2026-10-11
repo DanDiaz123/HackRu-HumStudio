@@ -1,10 +1,38 @@
 import type { HumFrame } from "./hum";
 import { MAX_SEGMENTATION_FRAMES, segmentPitchFrames, type SegmentationConfig } from "./audio/segment-notes.ts";
-import { DEFAULT_NOTE_SENSITIVITY, NOTE_SENSITIVITY_LEVELS, noteSensitivityConfig, type NoteSensitivity } from "./audio/note-sensitivity.ts";
+import { DEFAULT_NOTE_SENSITIVITY, DRUM_ONSET_PRESETS, NOTE_SENSITIVITY_LEVELS, noteSensitivityConfig, type NoteSensitivity } from "./audio/note-sensitivity.ts";
 import { type Harmony, type Key, chordAt, detectKey, fitToHarmony, nearest, pickChords, snapToScale } from "./music/harmony.ts";
 import { DRUM_ROWS, drumPart, type DrumPart, type Instrument, type Note, type QuantizeDivision, QUANT_BEATS, TOTAL_BEATS, noteId } from "./tracks.ts";
 
 export type NoteSensitivityVariants = Record<NoteSensitivity, Note[]>;
+
+/** Unsnapped musical detections. Phrase boundaries preserve real rests during pitch fitting. */
+export interface DetectedProfile {
+  notes: Note[];
+  phraseIds: number[];
+}
+export type NoteSensitivitySources = Record<NoteSensitivity, DetectedProfile>;
+
+/** Capture musical detections for later grids/harmonies, without retaining audio or analysis frames. */
+export function detectTrackProfiles(inst: Instrument, frames: readonly HumFrame[], bpm: number, selectedPart?: DrumPart): NoteSensitivitySources {
+  if (!Number.isFinite(bpm) || bpm < 60 || bpm > 180) throw new RangeError("BPM must be between 60 and 180.");
+  if (!Array.isArray(frames) || frames.length > MAX_SEGMENTATION_FRAMES) throw new RangeError("Too many analysis frames.");
+  return Object.fromEntries(NOTE_SENSITIVITY_LEVELS.map(level => {
+    if (inst.kind === "drums") {
+      const notes = generateNotes(inst, frames, bpm, "off", { tonic: 0, mode: "major", bars: [] }, level, undefined, selectedPart);
+      return [level, { notes, phraseIds: notes.map((_, index) => index) }];
+    }
+    return [level, detectPitchedProfile(inst, frames, bpm, noteSensitivityConfig(level))];
+  })) as NoteSensitivitySources;
+}
+
+/** Reuse the generation pipeline with saved detections and the original capture tempo. */
+export function renderTrackProfiles(inst: Instrument, sources: NoteSensitivitySources, bpm: number, quantize: QuantizeDivision,
+  harmony: Harmony, selected: NoteSensitivity = DEFAULT_NOTE_SENSITIVITY, trace?: GenTrace, selectedPart?: DrumPart): NoteSensitivityVariants {
+  return Object.fromEntries(NOTE_SENSITIVITY_LEVELS.map(level => [level,
+    generateNotes(inst, [], bpm, quantize, harmony, level === selected ? trace : undefined, level, selectedPart, sources[level]),
+  ])) as NoteSensitivityVariants;
+}
 
 /** Snap a source note set without changing pitch, ids, or manual polyphonic overlaps. */
 export function snapNotesToGrid(inst: Instrument, notes: readonly Note[], quantize: QuantizeDivision): Note[] {
@@ -47,13 +75,8 @@ export function generateTrackVariants(
   // The selected profile also determines the trace; reject it before generating any variants.
   noteSensitivityConfig(selected);
   const variants = {} as NoteSensitivityVariants;
-  if (inst.kind === "drums") {
-    const notes = generateNotes(inst, frames, bpm, quantize, harmony, trace, selected, selectedDrumPart);
-    for (const level of NOTE_SENSITIVITY_LEVELS) variants[level] = notes.map((note) => ({ ...note }));
-    return variants;
-  }
   for (const level of NOTE_SENSITIVITY_LEVELS)
-    variants[level] = generateNotes(inst, frames, bpm, quantize, harmony, level === selected ? trace : undefined, level);
+    variants[level] = generateNotes(inst, frames, bpm, quantize, harmony, level === selected ? trace : undefined, level, selectedDrumPart);
   return variants;
 }
 
@@ -77,6 +100,7 @@ export function generateNotes(
   traceOrSensitivity?: GenTrace | NoteSensitivity,
   sensitivityOrTrace?: NoteSensitivity | GenTrace,
   selectedDrumPart?: DrumPart,
+  source?: DetectedProfile,
 ): Note[] {
   if (!Number.isFinite(bpm) || bpm < 60 || bpm > 180) throw new RangeError("BPM must be between 60 and 180.");
   if (!Object.hasOwn(QUANT_BEATS, quantize)) throw new RangeError("Unsupported quantization.");
@@ -117,9 +141,22 @@ export function generateNotes(
       f.hz >= 80 && f.hz <= 1000 && Number.isFinite(f.rms) && f.rms >= 0.01).length,
     raw: [], key: { tonic: harmony.tonic, mode: harmony.mode }, grid,
   });
-  if (inst.kind === "drums") return drums(frames, beatsFrom, snap, trace, selectedDrumPart);
+  if (inst.kind === "drums") {
+    if (!source) return drums(frames, beatsFrom, snap, trace, selectedDrumPart, sensitivity);
+    const beatOf = beatsFrom(source.notes.map(note => note.startBeat * 60 / bpm));
+    const seen = new Set<string>();
+    return source.notes.flatMap(note => {
+      const raw = beatOf(note.startBeat * 60 / bpm);
+      const startBeat = snap(raw);
+      if (trace) trace.raw.push({ ...note, startBeat: raw });
+      const key = `${startBeat}:${note.midi}`;
+      if (startBeat >= TOTAL_BEATS || seen.has(key)) return [];
+      seen.add(key);
+      return [{ ...note, startBeat, durationBeats: Math.min(note.durationBeats, TOTAL_BEATS - startBeat) }];
+    });
+  }
 
-  const line = (fit: (notes: Note[]) => Note[]) => hummedLine(inst, frames, beatsFrom, snap, grid, bpm, fit, config, trace);
+  const line = (fit: (notes: Note[]) => Note[]) => hummedLine(inst, frames, beatsFrom, snap, grid, bpm, fit, config, trace, source);
   switch (inst.id) {
     case "bass":
       return bassRole(line((n) => fitToHarmony(n, inst, harmony)), inst, harmony);
@@ -192,7 +229,20 @@ function clampToRange(midi: number, inst: Instrument): number {
 
 // ── Shared: hum → one monophonic line ──────────────────────────────────────────
 
-/** Segment, octave-fit, apply the role's pitch correction, merge what correction made identical, then snap. */
+/** Detect once in capture-tempo beats so fitting/snapping no longer require microphone data. */
+function detectPitchedProfile(inst: Instrument, frames: readonly HumFrame[], bpm: number, config: Readonly<SegmentationConfig>): DetectedProfile {
+  const segments = segmentPitchFrames(frames, config);
+  const shift = octaveShift(inst, segments.map(segment => segment.midi));
+  const staged = segments.map(segment => {
+    const startBeat = segment.startSec * bpm / 60;
+    const endBeat = Math.min(TOTAL_BEATS, segment.endSec * bpm / 60);
+    return { phraseId: segment.phraseId, note: { id: noteId(), midi: clampToRange(segment.midi + shift, inst),
+      startBeat, durationBeats: endBeat - startBeat, velocity: 0.8 } };
+  }).filter(({ note }) => note.startBeat < TOTAL_BEATS && note.durationBeats > 0);
+  return { notes: staged.map(item => item.note), phraseIds: staged.map(item => item.phraseId) };
+}
+
+/** Apply pitch correction, merge within phrases, then snap the captured musical detections. */
 function hummedLine(
   inst: Instrument,
   frames: readonly HumFrame[],
@@ -203,17 +253,14 @@ function hummedLine(
   fit: (notes: Note[]) => Note[],
   config: Readonly<SegmentationConfig>,
   trace?: GenTrace,
+  source?: DetectedProfile,
 ): Note[] {
-  const segments = segmentPitchFrames(frames, config);
-  const beatOf = beatsFrom(segments.map((r) => r.startSec));
-  const shift = octaveShift(inst, segments.map((r) => r.midi));
-  const staged = segments.map((r) => {
-    const startBeat = beatOf(r.startSec);
-    const endBeat = Math.min(TOTAL_BEATS, beatOf(r.endSec));
-    return {
-      phraseId: r.phraseId,
-      note: { id: noteId(), midi: clampToRange(r.midi + shift, inst), startBeat, durationBeats: endBeat - startBeat, velocity: 0.8 },
-    };
+  const detected = source ?? detectPitchedProfile(inst, frames, bpm, config);
+  const beatOf = beatsFrom(detected.notes.map(note => note.startBeat * 60 / bpm));
+  const staged = detected.notes.map((note, index) => {
+    const startBeat = beatOf(note.startBeat * 60 / bpm);
+    const endBeat = Math.min(TOTAL_BEATS, beatOf((note.startBeat + note.durationBeats) * 60 / bpm));
+    return { phraseId: detected.phraseIds[index], note: { ...note, startBeat, durationBeats: endBeat - startBeat } };
   }).filter(({ note }) => note.startBeat < TOTAL_BEATS && note.durationBeats > 0);
   if (trace) trace.raw = staged.map(({ note }) => ({ ...note }));
   // Correction can make different raw pitches identical; merging must follow it.
@@ -399,6 +446,7 @@ function drums(
   snap: (b: number) => number,
   trace?: GenTrace,
   selectedPart?: DrumPart,
+  sensitivity: NoteSensitivity = DEFAULT_NOTE_SENSITIVITY,
 ): Note[] {
   // Match segmentation's ordered, finite timestamp boundary; invalid amplitude cannot become velocity.
   let lastFrameSec = -Infinity;
@@ -410,11 +458,12 @@ function drums(
   });
   // Fixed hit durations: the 85 ms analysis window blurs attacks shorter than that.
   const hits: { tSec: number; peak: number; kick: boolean; hiss: boolean | null }[] = [];
+  const onset = DRUM_ONSET_PRESETS[sensitivity];
   let lastOnset = -Infinity;
   for (let i = 0; i < usable.length; i++) {
     const f = usable[i];
     const floor = i ? Math.min(...usable.slice(Math.max(0, i - 4), i).map((p) => p.rms)) : 0;
-    if (f.rms <= 0.02 || !(floor <= 0.02 || f.rms >= 2 * floor) || f.tSec - lastOnset < HIT_REFRACTORY_SEC) continue;
+    if (f.rms <= onset.minRms || !(floor <= onset.minRms || f.rms >= onset.riseRatio * floor) || f.tSec - lastOnset < HIT_REFRACTORY_SEC) continue;
     lastOnset = f.tSec;
     let end = i + 1;
     while (end < usable.length && usable[end].tSec - f.tSec <= HIT_WINDOW_SEC) end++;

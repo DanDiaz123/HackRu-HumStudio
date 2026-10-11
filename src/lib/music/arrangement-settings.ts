@@ -1,136 +1,155 @@
-import { generateTrackVariants, snapNotesToGrid, type NoteSensitivityVariants } from "../generate.ts";
-import type { HumFrame } from "../hum.ts";
-import type { NoteSensitivity } from "../audio/note-sensitivity.ts";
-import { drumPart, type DrumPart, type Note, type QuantizeDivision, type Track } from "../tracks.ts";
+import { renderTrackProfiles, snapNotesToGrid, type NoteSensitivityVariants, type NoteSensitivitySources } from "../generate.ts";
+import { isNoteSensitivity, type NoteSensitivity } from "../audio/note-sensitivity.ts";
+import { QUANT_BEATS, drumPart, type DrumPart, type Note, type QuantizeDivision, type Track } from "../tracks.ts";
 import type { LoadedProject } from "../persistence/project.ts";
 import { MAX_PROJECT_NOTES } from "../persistence/project.ts";
 import { chordsFromVoicing, fitToHarmony, inferHarmony, voiceChords, withKey, type Harmony, type Key } from "./harmony.ts";
 
-/** Runtime analysis only. Capture tempo stays fixed because the saved note positions are musical beats. */
-export interface RecordedTake {
-  frames: HumFrame[];
+/** Serializable musical sources, never microphone audio or capture frames. Tempo is fixed at capture. */
+export interface TakeSource {
   bpm: number;
-  variants: NoteSensitivityVariants;
-  /** Drum recordings use onset rhythm for this selected lane only. */
+  sources: NoteSensitivitySources;
   drumPart?: DrumPart;
 }
-
+/** Runtime profiles rebuilt from note-only sources after Open, Snap or harmony changes. */
+export interface RecordedTake extends TakeSource { variants: NoteSensitivityVariants }
 export type RecordedTakes = Record<string, RecordedTake>;
 export type SnapSources = Record<string, Note[]>;
-
-/** In-memory history includes analysis/settings sources; project JSON deliberately contains only LoadedProject. */
+export interface RegenerationData {
+  takes: Record<string, TakeSource>;
+  snapSources: SnapSources;
+  pickedKey: Key | null;
+  harmonyDriver: "melody" | "keys" | null;
+}
+/** History includes sources/settings so a whole recording or setting change is undoable. */
 export interface ArrangementSnapshot extends LoadedProject {
   takes: RecordedTakes;
   snapSources: SnapSources;
   pickedKey: Key | null;
   harmonyDriver: "melody" | "keys" | null;
 }
-
-/** Copy mutable runtime containers; notes, takes, and harmony are replaced immutably by their owners. */
+/** Notes and source objects are immutable; clone containers modified by the studio. */
 export function captureArrangementSnapshot(state: ArrangementSnapshot): ArrangementSnapshot {
   return { ...state, meta: { ...state.meta }, takes: { ...state.takes }, snapSources: { ...state.snapSources } };
 }
-
-/** Files contain notes, never captures: an imported part's saved timing becomes its new Snap source. */
+/** Restore musical sources; older files retain their final notes as the only timing source. */
 export function projectArrangementSnapshot(project: LoadedProject): ArrangementSnapshot {
-  return captureArrangementSnapshot({ ...project, takes: {}, pickedKey: null, harmonyDriver: null,
-    snapSources: Object.fromEntries(project.tracks.map(track => [track.instrument.id, track.notes.map(note => ({ ...note }))])) });
+  const data = project.regeneration;
+  const takes: RecordedTakes = Object.fromEntries(project.tracks.flatMap(track => {
+    const take = data?.takes[track.instrument.id];
+    return take ? [[track.instrument.id, { ...take, variants: renderTake(track, take, project.harmony) }]] : [];
+  }));
+  return captureArrangementSnapshot({ ...project, takes, pickedKey: data?.pickedKey ?? null,
+    harmonyDriver: data?.harmonyDriver ?? null,
+    snapSources: { ...Object.fromEntries(project.tracks.filter(track => !takes[track.instrument.id])
+      .map(track => [track.instrument.id, track.notes.map(note => ({ ...note }))])), ...data?.snapSources } });
 }
-
 export interface NoteSettingsInput {
   tracks: Track[];
   harmony: Harmony;
   takes: RecordedTakes;
   snapSources: SnapSources;
-  sensitivity: NoteSensitivity;
-  quantize: QuantizeDivision;
+  /** Only this track changes, except necessary shared-harmony pitch fitting. */
+  trackId?: string;
+  sensitivity?: NoteSensitivity;
+  quantize?: QuantizeDivision;
   harmonyDriver: "melody" | "keys" | null;
   keyOverride: Key | null;
-  /** Only an explicit key pick corrects a hand-edited Melody's pitch. */
   fitEditedMelody?: boolean;
-  /** Rebuild from original timing on a grid change; profile changes reuse all three cached variants. */
   resnap?: boolean;
 }
-
-/** Compare musical contents so equivalent new chord arrays do not trigger role regeneration. */
+/** Compare musical contents, not object identities. */
 export function sameHarmony(a: Harmony, b: Harmony): boolean {
   return a.tonic === b.tonic && a.mode === b.mode && a.bars.length === b.bars.length &&
     a.bars.every((bar, index) => bar.length === b.bars[index].length && bar.every((pitch, i) => pitch === b.bars[index][i]));
 }
-
-/** Refit pitch only, preserving manual timing. The labeled Keys sample follows the song's voicing. */
+/** Refit pitch without changing manual timing. Only the labeled Keys sample uses chord voicing. */
 export function refitTrack(track: Track, harmony: Harmony, melodyToo = false): Track {
   if (track.instrument.kind === "drums" || (track.instrument.id === "melody" && !melodyToo)) return track;
-  return { ...track, notes: track.sample ? voiceChords(harmony) : fitToHarmony(track.notes, track.instrument, harmony) };
+  if (track.sample && track.instrument.id === "keys") {
+    const voiced = voiceChords(harmony);
+    // Sample chords follow the song, but their timing still belongs to the track's chosen grid.
+    if (voiced.length === track.notes.length)
+      return { ...track, notes: track.notes.map((note, index) => ({ ...note, midi: voiced[index].midi })) };
+  }
+  return { ...track, notes: fitToHarmony(track.notes, track.instrument, harmony) };
 }
-
-/**
- * Compute a complete profile/grid update outside React state updaters. Inputs are never mutated;
- * returned takes and unsnapped sources must be retained together with the returned tracks/harmony.
- * Edited tracks have no take and therefore cannot be overwritten by a sensitivity selection.
- */
+function renderTake(track: Track, take: TakeSource, harmony: Harmony): NoteSensitivityVariants {
+  return renderTrackProfiles(track.instrument, take.sources, take.bpm, track.quantize, harmony, track.sensitivity, undefined, take.drumPart);
+}
+/** Keep the other drum lanes when the latest selected-lane take changes profile. */
+function takeNotes(track: Track, take: RecordedTake): Note[] {
+  const variant = take.variants[track.sensitivity];
+  if (!variant.length) return track.notes; // A strict profile must never erase a working part.
+  if (!take.drumPart || track.instrument.kind !== "drums") return variant;
+  return [...track.notes.filter(note => note.midi !== drumPart(take.drumPart).midi), ...variant]
+    .sort((a, b) => a.startBeat - b.startBeat || a.midi - b.midi || a.id.localeCompare(b.id));
+}
+/** Apply one instrument's settings atomically. Hand edits discard takes and cannot restore old profiles. */
 export function applyNoteSettings(input: NoteSettingsInput): {
   tracks: Track[]; harmony: Harmony; takes: RecordedTakes; snapSources: SnapSources;
 } {
-  const { sensitivity, quantize } = input;
+  if (input.sensitivity !== undefined && !isNoteSensitivity(input.sensitivity)) throw new RangeError("Unsupported note sensitivity.");
+  if (input.quantize !== undefined && !Object.hasOwn(QUANT_BEATS, input.quantize)) throw new RangeError("Unsupported quantization.");
+  if (input.trackId !== undefined && !input.tracks.some(track => track.instrument.id === input.trackId)) throw new RangeError("Unknown instrument.");
   const takes = { ...input.takes };
   const snapSources = { ...input.snapSources };
-  const rebuild = (track: Track, harmony: Harmony) => {
-    const take = takes[track.instrument.id];
-    const variants = generateTrackVariants(track.instrument, take.frames, take.bpm, quantize, harmony, sensitivity, undefined, take.drumPart);
-    if (take.drumPart && track.instrument.kind === "drums") {
-      const selectedMidi = drumPart(take.drumPart).midi;
-      const otherParts = track.notes.filter(note => note.midi !== selectedMidi);
-      for (const level of Object.keys(variants) as NoteSensitivity[]) {
-        variants[level] = [...otherParts, ...variants[level]].sort((a, b) => a.startBeat - b.startBeat || a.midi - b.midi || a.id.localeCompare(b.id));
-      }
+  let requested = input.tracks.map(track => track.instrument.id === input.trackId ? { ...track,
+    sensitivity: input.sensitivity ?? track.sensitivity, quantize: input.quantize ?? track.quantize } : track);
+  const target = requested.find(track => track.instrument.id === input.trackId);
+  if (target && takes[target.instrument.id] && input.resnap) {
+    const take = takes[target.instrument.id];
+    takes[target.instrument.id] = { ...take, variants: renderTake(target, take, input.harmony) };
+    if (take.drumPart && target.instrument.kind === "drums") {
+      const midi = drumPart(take.drumPart).midi;
+      const otherParts = (snapSources[target.instrument.id] ?? target.notes).filter(note => note.midi !== midi);
+      snapSources[target.instrument.id] = otherParts;
+      const snapped = snapNotesToGrid(target.instrument, otherParts, target.quantize);
+      requested = requested.map(track => track.instrument.id === target.instrument.id
+        ? { ...track, notes: [...snapped, ...track.notes.filter(note => note.midi === midi)] } : track);
     }
-    takes[track.instrument.id] = { ...take, variants };
-  };
-  if (input.resnap) {
-    for (const track of input.tracks) if (takes[track.instrument.id]) rebuild(track, input.harmony);
   }
-
-  const melodyVariant = takes.melody?.variants[sensitivity];
-  const melody = melodyVariant?.length ? melodyVariant : input.tracks.find(track => track.instrument.id === "melody")?.notes ?? [];
+  const notesFor = (track: Track) => takes[track.instrument.id] ? takeNotes(track, takes[track.instrument.id]) : track.notes;
+  const melodyTrack = requested.find(track => track.instrument.id === "melody")!;
+  const melody = notesFor(melodyTrack);
+  const melodyChanged = input.trackId === "melody" && !!takes.melody && takes.melody.variants[melodyTrack.sensitivity].length > 0;
   const baseHarmony = input.keyOverride ? withKey(input.keyOverride, melody)
-    : input.harmonyDriver === "melody" && melodyVariant?.length ? inferHarmony(melody) : input.harmony;
-  if (input.harmonyDriver === "keys" && takes.keys && (input.fitEditedMelody ||
-    baseHarmony.tonic !== input.harmony.tonic || baseHarmony.mode !== input.harmony.mode)) {
-    const keysTrack = input.tracks.find(track => track.instrument.id === "keys");
-    if (keysTrack) rebuild(keysTrack, baseHarmony);
-  }
-  const keys = takes.keys?.variants[sensitivity];
-  const harmony = input.harmonyDriver === "keys" && keys?.length ? chordsFromVoicing(keys, baseHarmony) : baseHarmony;
+    : input.harmonyDriver === "melody" && melodyChanged ? inferHarmony(melody) : input.harmony;
+  const keysTrack = requested.find(track => track.instrument.id === "keys")!;
+  const keyChanged = baseHarmony.tonic !== input.harmony.tonic || baseHarmony.mode !== input.harmony.mode;
+  if (input.harmonyDriver === "keys" && takes.keys && (keyChanged || input.fitEditedMelody))
+    takes.keys = { ...takes.keys, variants: renderTake(keysTrack, takes.keys, baseHarmony) };
+  const keysChanged = input.trackId === "keys" || keyChanged || input.fitEditedMelody;
+  const keys = takes.keys?.variants[keysTrack.sensitivity];
+  const harmony = input.harmonyDriver === "keys" && keysChanged && keys?.length ? chordsFromVoicing(keys, baseHarmony) : baseHarmony;
   const harmonyChanged = !sameHarmony(harmony, input.harmony);
-
-  // Recreate dependent roles instead of individually fitting an old chord stack into a new chord.
-  if (harmonyChanged) {
-    for (const track of input.tracks) {
-      if (!takes[track.instrument.id] || track.instrument.id === "melody" || track.instrument.kind === "drums" ||
-        (track.instrument.id === "keys" && input.harmonyDriver === "keys")) continue;
-      rebuild(track, harmony);
-    }
-  }
-
-  const tracks = input.tracks.map(track => {
+  // Recreate role voicings at each dependent track's own grid, instead of fitting old chord stacks.
+  if (harmonyChanged) for (const track of requested) {
     const id = track.instrument.id;
-    const variant = takes[id]?.variants[sensitivity];
-    if (variant?.length) {
-      // A manually chosen key continues to apply when selecting another cached Melody profile.
-      const notes = id === "melody" && input.keyOverride ? fitToHarmony(variant, track.instrument, harmony) : variant;
-      return { ...track, notes, sample: false };
-    }
-    if (variant) return track; // A stricter profile with no notes must not erase a working part.
-    const source = snapSources[id] ?? track.notes;
-    const shouldFit = harmonyChanged || input.fitEditedMelody;
-    const fittedSource = shouldFit ? refitTrack({ ...track, notes: source }, harmony, input.fitEditedMelody).notes : source;
-    const fitted = shouldFit ? { ...track, notes: snapSources[id] ? refitTrack(track, harmony, input.fitEditedMelody).notes : fittedSource } : track;
-    if (snapSources[id] || input.resnap) snapSources[id] = fittedSource;
-    return input.resnap ? { ...fitted, notes: snapNotesToGrid(track.instrument, fittedSource, quantize) } : fitted;
-  });
-  if (tracks.reduce((count, track) => count + track.notes.length, 0) > MAX_PROJECT_NOTES) {
-    throw new RangeError(`This project can hold at most ${MAX_PROJECT_NOTES.toLocaleString()} notes. Remove notes before generating or repeating a part.`);
+    if (!takes[id] || id === "melody" || track.instrument.kind === "drums" || (id === "keys" && input.harmonyDriver === "keys")) continue;
+    takes[id] = { ...takes[id], variants: renderTake(track, takes[id], harmony) };
   }
+  const tracks = requested.map(track => {
+    const id = track.instrument.id;
+    const isTarget = id === input.trackId;
+    const shouldFit = harmonyChanged || input.fitEditedMelody;
+    if (takes[id]) {
+      if (!isTarget && !shouldFit) return track;
+      const notes = notesFor(track);
+      return { ...track, notes: id === "melody" && input.keyOverride
+        ? fitToHarmony(notes, track.instrument, harmony) : notes, sample: false };
+    }
+    const source = snapSources[id] ?? track.notes;
+    const fittedSource = shouldFit ? refitTrack({ ...track, notes: source }, harmony, input.fitEditedMelody).notes : source;
+    const fitted = shouldFit ? refitTrack(track, harmony, input.fitEditedMelody) : track;
+    if (shouldFit && snapSources[id]) snapSources[id] = fittedSource;
+    if (isTarget && input.resnap) {
+      snapSources[id] = fittedSource;
+      return { ...fitted, notes: snapNotesToGrid(track.instrument, fittedSource, track.quantize) };
+    }
+    return fitted;
+  });
+  if (tracks.reduce((count, track) => count + track.notes.length, 0) > MAX_PROJECT_NOTES)
+    throw new RangeError("This project can hold at most " + MAX_PROJECT_NOTES.toLocaleString() + " notes. Remove notes before generating or repeating a part.");
   return { tracks, harmony, takes, snapSources };
 }

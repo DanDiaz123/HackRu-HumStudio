@@ -11,12 +11,10 @@ const { Midi } = ToneMidi; // CommonJS package: Node has no named export
 const project = (): LoadedProject => ({
   meta: { id: "p1", name: "Idea", createdAt: "2026-10-10T00:00:00.000Z" },
   bpm: 96,
-  quantize: "1/8",
-  sensitivity: "high",
   harmony: DEFAULT_HARMONY,
-  tracks: initialTracks().map((t) => (t.instrument.id === "melody"
+  tracks: initialTracks().map(original => { const t = { ...original, quantize: "1/8" as const, sensitivity: "high" as const }; return (t.instrument.id === "melody"
     ? { ...t, notes: [{ id: "m1", midi: 64, startBeat: 2, durationBeats: 1, velocity: 0.8 }], muted: true }
-    : t)),
+    : t); }),
 });
 const json = (patch: (p: Record<string, unknown>) => void) => {
   const p = JSON.parse(serializeProject(project()));
@@ -29,8 +27,8 @@ test("T-08: a project round-trips every track, setting and the harmony", () => {
   const after = parseProject(serializeProject(before));
   assert.deepEqual(after.meta, before.meta);
   assert.equal(after.bpm, 96);
-  assert.equal(after.quantize, "1/8");
-  assert.equal(after.sensitivity, "high");
+  assert.equal(after.tracks[0].quantize, "1/8");
+  assert.equal(after.tracks[0].sensitivity, "high");
   assert.deepEqual(after.harmony, before.harmony);
   assert.deepEqual(after.tracks, before.tracks);
   assert.equal(after.tracks.find(track => track.instrument.id === "drums")?.drumPart, "kick");
@@ -65,10 +63,10 @@ test("saving writes one solo without mutating state, and exclusive solo selectio
 test("T-09: invalid files throw instead of loading part of them", () => {
   const bad = [
     "", "{", "[]", "null", " ".repeat(MAX_PROJECT_CHARS + 1),
-    json((p) => { p.schemaVersion = 3; }),
+    json((p) => { p.schemaVersion = 4; }),
     json((p) => { p.bpm = 400; }),
-    json((p) => { p.quantize = "1/3"; }),
-    json((p) => { p.sensitivity = "__proto__"; }),
+    json((p) => { (p.tracks as Record<string, unknown>[])[0].quantize = "1/3"; }),
+    json((p) => { (p.tracks as Record<string, unknown>[])[0].sensitivity = "__proto__"; }),
     json((p) => { p.updatedAt = "yesterday"; }),
     json((p) => { (p.harmony as { bars: unknown[] }).bars.pop(); }),
     json((p) => { (p.tracks as { instrumentId: string }[])[0].instrumentId = "kazoo"; }),
@@ -161,6 +159,7 @@ test("a v1 file loads as the Melody track with harmony inferred from it", () => 
   assert.ok(p.tracks.filter((t) => t.instrument.id !== "melody").every((t) => !t.notes.length));
   assert.equal(p.harmony.tonic, 0);
   assert.equal(p.harmony.mode, "major");
+  assert.ok(p.tracks.every(track => track.sensitivity === "medium" && track.quantize === "1/16"));
 });
 
 test("T-10 / T-15: MIDI maps beats to seconds and puts drums on channel index 9", () => {
