@@ -3,9 +3,10 @@
 **Team size:** 4 developers  
 **Event:** HackRU Fall 2026  
 **Working product name:** HumStudio  
-**Status:** Current ownership and remaining-work plan as of 2026-10-10. Core implementation is merged on `main`; unchecked items are real-device, listening, deployment, or presentation follow-up.
+**Track:** HackRU **Education Track** — learning basic music theory by singing, visualizing, editing and hearing notes.  
+**Status:** Four-person ownership and remaining-work plan as of 2026-10-10. The core app and Learn overlays are implemented on `main`; real-mic, human listening, education walkthrough, deployment and presentation verification remain open.
 
-> **The demo goal:** Pick an instrument track, hum a short melody, see the live spectrogram, reveal editable notes, play the arrangement, and export MIDI. Finish a reliable end-to-end demo before adding extra features.
+> **Education Track demo goal:** A beginner hums a melody, sees the actual note name/degree/cents, recognizes the key/chords, edits or quantizes a note, and hears the change. The multitrack arrangement, smplr sounds, and MIDI export support this **learn-by-doing** story. Finish a reliable live demonstration before adding speculative lessons or scores.
 
 ## 1. Current starting point and scope
 
@@ -17,18 +18,30 @@ This split reflects the **existing repository**, not a blank project. At the tim
 - `src/lib/generate.ts` contains deterministic DSP segmentation, quantization, harmony fitting, instrument-role generation, and rhythm-only Drum part mapping; it is not a trained AI backend.
 - `src/lib/playback.ts` and `src/lib/midi.ts` contain tested Tone.js playback and multi-track MIDI export implementations.
 - `DESIGN.md` defines the existing visual identity. **Improve and use it; do not start branding from scratch.**
-- Presence of source code **does not mean each feature has been tested** on a real microphone or deployed browser.
+- A **Learn** toggle (on by default), note/solfège labels, key and role summary, live pitch/degree/cents, chord names/Roman numerals and bar highlighting are already implemented in `Studio.tsx`, `TrackRow.tsx` and `music/harmony.ts`.
+- `src/tests/harmony.test.ts` already covers scale degrees, solfège and Roman numerals. The education UI and physical microphone still need manual validation.
+- Presence of source code **does not mean each feature has been tested** on a real microphone or deployed browser, or with learners.
 
 **Product-scope clarification:** The repository now implements the **multitrack, instrument-specific editor** and live spectrogram/reveal sequence. The app produces a generated instrument arrangement inspired by a monophonic hum, using deterministic DSP and harmony rules; it does not claim faithful transcription, machine learning, or a backend. Remaining unchecked work is validation on real hardware, deployment, listening, and presentation.
+
+### 1.1 Education Track definition of success
+
+[HackRU's Education Track](https://www.hackru.org/) focuses on building an educated community. The value proposition is **music-theory concepts made tangible** for someone who can hum but cannot yet identify or enter the notes. The main demo should make these three learner actions visible:
+
+1. **Name it:** Find a sung pitch, scale degree/solfège, and chord/Roman numeral.
+2. **Change it:** Alter a note's pitch or Snap setting; predict what happens.
+3. **Hear it:** Play the edited part, then isolate another instrument to understand its role.
+
+**Already built:** exploratory theory overlays and music controls. **Not built:** a curriculum, automatic intonation grade, quizzes, saved progress, or teacher dashboard. No one should promise measured learning outcomes. All four people share final education-path testing.
 
 ## 2. Assignment summary
 
 | Person | Role | Primary ownership | GitHub |
 | --- | --- | --- | --- |
-| **1** | **Microphone + voice-to-notes** | Pitch detection, note segmentation, quantization, generating the selected track's notes | [Issue #2](https://github.com/DanDiaz123/HackRu-Project/issues/2) |
-| **2** | **Music playback + transport** | Tone.js, track instruments, tempo, play/pause/rewind, mute/solo, timing | [Issue #3](https://github.com/DanDiaz123/HackRu-Project/issues/3) |
-| **3** | **Track editor + piano roll** | Track-note display, drag/edit/resize notes, note grid, playhead/editor interactions | [Issue #4](https://github.com/DanDiaz123/HackRu-Project/issues/4) |
-| **4** | **Integration + branding + persistence** | App shell, brand polish, shared state, recording flow coordination, saving/loading, MIDI export, deployment/demo | [Issue #5](https://github.com/DanDiaz123/HackRu-Project/issues/5) |
+| **1** | **Microphone + voice-to-notes** | Stable pitch detection, segmentation and quantization; verify live educational pitch/cents accuracy | [Issue #2](https://github.com/DanDiaz123/HackRu-Project/issues/2) |
+| **2** | **Music playback + transport** | Tone.js/smplr, track instruments and tempo; demonstrate rhythm and arrangement roles by listening | [Issue #3](https://github.com/DanDiaz123/HackRu-Project/issues/3) |
+| **3** | **Track editor + Learn overlays** | Editable piano roll, readable pitch/solfège/chord/Roman-numeral labels, bar/pitch feedback | [Issue #4](https://github.com/DanDiaz123/HackRu-Project/issues/4) |
+| **4** | **Integration + branding + education story** | Shared state, Learn/key controls, privacy, persistence/MIDI, brand, Education Track pitch, deployment/demo | [Issue #5](https://github.com/DanDiaz123/HackRu-Project/issues/5) |
 
 **Ownership is about avoiding merge conflicts, not forbidding help.** Anyone can help debug and test another workstream. Agree on shared interfaces before changing files owned by another person.
 
@@ -49,12 +62,15 @@ This split reflects the **existing repository**, not a blank project. At the tim
 - [x] Ensure empty/failed recordings leave existing notes untouched.
 - [x] Add deterministic voiced/unvoiced, wobble, dropout, sensitivity, and generation fixtures; live pitch-to-note verification remains open.
 - [x] Split the Drums lane into Kick, Snare, Closed hat, Open hat, and Crash selectors; selected recording/editing uses onset rhythm only while hidden lanes remain playable.
+- [x] Expose `HumFrame.hz` and timestamps to the existing live pitch display; `harmony.ts` can derive scale degree/solfège from the current key.
+- [ ] **Education validation:** Record or sing reference pitches (A4 440 Hz, C4 approximately 261.63 Hz) on the **physical demo microphone** and verify the Learn pitch note, cents sign and "no pitch" state match what is heard; log false notes/octave errors.
+- [ ] Select a short, reliable melody with distinct pitches/rests for the judge; confirm what the generated **Melody** preserves versus role-generated Bass/Keys/Strings, and share any interpretation limitations with Person 4.
 
 **Primary files:** `src/lib/hum.ts`, `src/lib/generate.ts`, and any small extracted pure pitch/segmentation/quantization helpers under `src/lib/audio/` or `src/lib/music/`. Coordinate changes to `src/components/Spectrogram.tsx` with Person 3.
 
 **Handoff to Person 4:** The tested `generateTrack(...)` output as canonical `Note[]` plus accurate loading/error status and a short recorded-demo procedure.
 
-**Definition of done:** A 5–15-second clean hum creates recognizably correct note pitches and approximate timing on the selected track; no microphone leaks or disappearing existing notes. This is a **DSP prototype**, not automatically a neural AI system.
+**Education definition of done:** A 5–15-second clean hum yields usable note data and a truthful pitch/degree/cents visual that can be explained in plain language; permission denial and empty takes do not erase learning progress. Pitch estimates and inferred harmony must not be labeled as grading, neural AI, or an exact music-theory answer key.
 
 ## 4. Person 2 — Tone.js audio engine and playback
 
@@ -72,12 +88,15 @@ This split reflects the **existing repository**, not a blank project. At the tim
 - [x] Ensure browser audio starts only following a real user gesture; do not initialize Tone audio during server rendering.
 - [x] Add metronome and count-in **only after** basic playback is reliable (core checks passed before implementation; count-in precedes playback).
 - [ ] Listen to generated melody alongside sample drums/keys on the demo laptop to prove simultaneous audible multitrack playback.
+- [ ] **Education validation:** Demonstrate Snap Off vs 1/4 or 1/8, optionally with the metronome, and verify the beat-placement difference is actually audible and not just visual.
+- [ ] Verify the current bar highlight and sounding chord happen together during playback; coordinate highlight fixes with Person 3 rather than modifying their component without agreement.
+- [ ] Balance sampled presets for a beginner demo: one melody plus one accompaniment should remain intelligible, with samples preloaded or working synth fallback.
 
 **Primary files:** `src/lib/playback.ts` and isolated transport/audio controls. Person 4 owns the overall `Studio.tsx` layout; coordinate any transport-hookup changes rather than both editing the same component simultaneously.
 
 **Handoff to Person 4:** Documented functions to initialize, schedule `Track[]`, play/pause, rewind, and report playhead position, with a hardcoded test arrangement.
 
-**Definition of done:** Repeated play/stop/rewind and track changes work audibly, stay synchronized with note positions, and do not build up overlapping scheduled events.
+**Education definition of done:** Repeated Play/Pause/Stop, Snap and mute/solo demonstrate audible changes consistently enough for a learner to infer what a beat, part or chord does. This requires **human listening**, not only a passing unit test.
 
 ### Person 2 implementation handoff
 
@@ -173,12 +192,17 @@ automated scheduling tests do not establish audible quality.
 - [x] Keep the piano roll aligned with the beat ruler, track clips, instrument range, and playhead.
 - [x] Preserve instrument-specific lanes, including drum rows where appropriate.
 - [x] Keep editing logic separate in `src/lib/note-edit.ts` from audio scheduling and microphone capture.
+- [x] **Learn UI already present:** note pitch/solfège in zoomed `NoteBars`, `LaneChords` per bar with chord name/Roman numeral, Key and instrument Role summary, and `LivePitch` showing note/degree/cents while recording.
+- [ ] **Education QA:** Toggle Learn and verify the note labels, Key/Role summary, chord names and live pitch appear/disappear without altering stored notes or playback. The reveal can still show learning context as part of the explanatory transition.
+- [ ] In a chosen Key, verify MIDI C4/E4/G4 correspond to do/mi/sol and that C-major I/V chord numerals and playhead-linked highlighting render correctly. Use `harmony.test.ts` fixtures as reference.
+- [ ] Review label legibility, small screens, keyboard focus and high-contrast states for a novice during a judged demonstration; keep `LivePitch` visual-only accessibility limitation documented (it is currently `aria-hidden`).
+- [ ] Add short in-context explanations only if needed for the demo; do **not** build an unrelated tutorial system or automatic grading flow.
 
 **Primary files:** `src/components/TrackRow.tsx`, a new `src/components/PianoRoll.tsx` if helpful, and presentation/geometry helpers. Coordinate spectrogram changes with Person 1. Person 4 owns global CSS/design tokens; request a style change rather than independently restyling all of `globals.css`.
 
 **Handoff to Person 4:** A track editor that accepts the selected track's notes and emits valid immutable note edits to parent state. Agree on callback props before implementing them.
 
-**Definition of done:** A judge can visually identify the generated notes, correct a wrong pitch, move a note in time, resize it, and hear the updated arrangement play.
+**Education definition of done:** A new music learner can point to a generated pitch and its do/re/mi label, identify a chord function on the timeline, change a note, and connect the edit with the sound. The same piano-roll editing behavior must still work with Learn turned off.
 
 ## 6. Person 4 — Integration, branding, persistence, and demo
 
@@ -196,6 +220,9 @@ automated scheduling tests do not establish audible quality.
 - [ ] Own deployment of a real HTTPS demo and verify microphone behavior there.
 - [x] Reconcile the old single-track documentation with the newer `PRODUCT.md` and the actual `Track[]` data model (README, SDD, TECHNICAL_SPEC, AGENTS updated 2026-10-10).
 - [x] Agree on and implement the versioned multitrack save format (`ProjectV2`, strict validation, v1 migration).
+- [x] Own the `Learn` transport toggle (default on) and the manual Key selector in `Studio.tsx`; keep Learn as an ephemeral view state, not a saved correctness score.
+- [ ] **Education QA:** Check that saving/opening retains real harmony/notes/settings, that Learn remains a presentation toggle, and that a manual Key override changes harmony and dependent parts as documented.
+- [ ] Lead a 90-second **Education Track** demonstration and a small novice/teammate walkthrough: can they recognize one note/degree, one chord, and the result of an edit? Record qualitative feedback without asserting learning gains.
 
 ### Branding and visual presentation — same owner, after core loop
 
@@ -204,14 +231,16 @@ automated scheduling tests do not establish audible quality.
 - [x] Maintain consistent buttons, controls, error/loading/recording states and accessible contrast.
 - [x] Polish the studio shell, responsive desktop layout, recording call-to-action, and empty/onboarding states.
 - [x] Keep the live spectrogram and note-reveal animation legible, honest, and respectful of reduced-motion settings.
-- [ ] Capture final screenshots, write short Devpost presentation copy, and rehearse a **90-second judge demo** with a real recording moment.
+- [ ] Capture final screenshots and Devpost copy that **lead with beginner music education** rather than merely "AI music generation." Show Learn labels clearly and rehearse a **90-second judge demo** with a real recording moment.
+- [ ] Add a one-sentence plain-language explanation for **key**, **scale degree**, **cents**, and **Snap** to the presenter notes or UI if time allows; do not label future tooltips as implemented before they exist.
+- [ ] Confirm the team distinguishes live mic audio from **Demo hum** and inferred chords from music-theory ground truth during judging.
 - [x] Coordinate piano-roll styling through the existing design tokens.
 
 **Primary files:** `src/components/Studio.tsx`, `src/app/`, `src/app/globals.css`, `src/lib/midi.ts`, persistence/state modules, `public/` branding assets, and product/demo docs. **Do not rebuild the app scaffold or overwrite teammates' components.**
 
 **Handoff to everyone:** A working hosted integration environment, clear contracts, a list of outstanding blockers, and a demo script.
 
-**Definition of done:** A browser user can record, edit, play, save/reopen, and export without crashes; branding is cohesive and the deployed demo clearly distinguishes real input from the built-in **Demo hum** fallback.
+**Education definition of done:** A browser user can record, identify note/chord/rhythm concepts in Learn mode, edit-and-listen, save/reopen, and export without crashes. The Education Track pitch is supported by what actually works; branding is cohesive and the deployed demo clearly labels **Demo hum**, inferred harmony, and generated roles.
 
 **Capacity warning:** This is the broadest role. Person 4 should establish state/contracts/deployment early, then prioritize saving, integration, and demo reliability before optional marketing polish. Everyone shares final integration testing.
 
@@ -233,9 +262,11 @@ export interface Note {
 - **Track data:** Current app uses `Track[]` from `src/lib/tracks.ts`, each containing an instrument and `Note[]`. Do not accidentally flatten all instrument tracks when saving or playing.
 - **Note owner:** Person 1 creates notes, Person 3 edits notes, Person 2 plays notes, Person 4 owns the canonical state and persists/exports notes.
 - **Shared files:** `Studio.tsx` and `globals.css` belong to Person 4 for merge coordination; `TrackRow.tsx` belongs to Person 3; `generate.ts`/`hum.ts` to Person 1; `playback.ts` to Person 2. `tracks.ts` and `music/types.ts` are shared contracts, so change them only after notifying everyone.
-- **Design ownership:** Person 4 owns product branding and global design tokens; Person 3 owns the usability and implementation of piano-roll note interactions.
+- **Design ownership:** Person 4 owns product branding and global design tokens; Person 3 owns the usability and implementation of piano-roll note interactions **and Learn visual overlays**. Person 1 verifies pitch-signal accuracy while Person 2 verifies playback-linked harmonic/rhythmic feedback.
+- **Theory logic boundary:** `src/lib/music/harmony.ts` is shared. Person 1 owns pitch/key inference correctness; Person 3 consumes its public `solfege`, `scaleDegree`, `romanNumeral` and `keyName` functions for learning UI; Person 4 coordinates state changes from Key/Snap and the educational story.
+- **No grading data:** Neither the UI toggle nor signed cents is a saved student score. Do not add user accounts, learning-progress databases, or unreviewed audio uploads.
 
-Before writing glue code, agree on (1) the selected track ID, (2) the note-edit callback shape, (3) the save format for multitrack state, and (4) the meaning of "Generate": faithful transcription or arrangement transformation. Do not silently change existing contracts.
+The current contracts already define track identity, note-edit callbacks, v2 save format, and **deterministic instrument-role arrangement**. Do not silently change them or re-label the generator as neural AI or exact transcription. Any proposed guided-learning feature needs a separate scope decision and a new testable acceptance criterion.
 
 ## 8. Integration timeline (relative, not fixed clock times)
 
@@ -245,9 +276,22 @@ Before writing glue code, agree on (1) the selected track ID, (2) the note-edit 
 | **First independent checkpoint** | Real hum → note data; two-track Tone playback; notes visible/editor prototype; hosted app builds | Persons 1 / 2 / 3 / 4 respectively |
 | **Midpoint integration** | Person 1's `Note[]` appears in Person 3's editor and plays through Person 2's audio with Person 4's state | Everyone |
 | **Feature-complete checkpoint** | Edit a generated note; export MIDI; project survives reload; handle failed mic | Everyone; Person 4 leads |
-| **Final hours — feature freeze** | Test on actual demo laptop/Chrome, deployed HTTPS, real mic, mute/solo, reload, fallback, 90-second presentation | Everyone |
+| **Education-path QA** | Learn note/degree/cents from a real hum, chord/Roman-numeral highlight, one edited note and audible comparison; report an understandable learner takeaway | P1 signal / P2 audio / P3 UI / P4 story |
+| **Final hours — feature freeze** | Test on actual demo laptop/Chrome, deployed HTTPS, real mic, mute/solo, reload, fallback, **Education Track 90-second pitch** | Everyone |
 
 Make **small PRs as soon as a vertical slice works**, instead of waiting for all four full features to finish. Prefer an end-to-end working demo over adding nonessential options.
+
+### 90-second Education Track demo handoff (Person 4 narrates)
+
+| Time | Show | Learning point |
+| --- | --- | --- |
+| 0–15 s | The DAW-style screen and the problem: hearing a tune but not knowing its note names | Music should be learnable by ear, without a keyboard |
+| 15–35 s | Melody → Learn on → Record a clear hum (or truthfully labeled Demo hum) → live pitch, degree and cents | Your voice has identifiable pitches, not just a recording waveform |
+| 35–55 s | Animated notes, solfège labels, selected/inferred key, chord names and Roman numerals | The melodic phrase relates to a scale and harmony; guesses can be corrected |
+| 55–75 s | Change one note or Snap; Play and mute/solo an accompaniment | Pitch, beat placement and instrument roles change what you hear |
+| 75–90 s | Full tracks, MIDI export, verbal takeaway | A beginner can see, experiment with and reuse musical structure |
+
+**Judge-facing phrasing:** "HumStudio is an interactive music-theory sketchpad: hum to see your notes, identify a scale degree or chord, adjust them and instantly hear the difference." Do not claim it has student quiz scores, teacher adoption, validated learning gains, or generative AI.
 
 ## 9. Pull-request and AI-agent rules
 
@@ -268,13 +312,16 @@ Make **small PRs as soon as a vertical slice works**, instead of waiting for all
 - [x] At least one note can be edited; browser regression covers edits and state preservation.
 - [x] At least two tracks schedule together with mute/solo and no duplicated notes in deterministic transport tests.
 - [x] A user can export valid MIDI and save/reopen the complete multitrack project.
+- [x] Learn toggles and derived note/solfège, Key/Role, chord/Roman-numeral and live-pitch UI are implemented; `harmony.test.ts` tests theoretical labels.
+- [ ] **Manual Learn QA:** identify at least one pitch/degree with the real mic, then show a matching labeled note and chord; verify cents and no-pitch state without presenting them as grades.
+- [ ] **Education demo QA:** change a note or Snap setting, hear the result, isolate an instrument role, and ask one beginner to describe what they learned without coaching.
 - [x] Mic denial, silence, refresh, and invalid input preserve good state in code/browser regression coverage.
 - [ ] Deployment and 90-second live demo are tested on the judging laptop.
 
 ### Cut order if the team falls behind
 
-1. **Keep at all costs:** working hum → notes → visible track → audible playback and an honest, reliable demo.
-2. **Next:** one editable note interaction, MIDI export, stable tempo/mute/solo.
+1. **Keep at all costs:** working hum → notes → **Learn note/chord labels** → visible track → audible playback, plus an honest, reliable Education Track explanation.
+2. **Next:** one audible edit/Snap comparison, MIDI export, stable tempo/mute/solo.
 3. **Then:** project persistence, count-in/metronome, instrument refinements.
 4. **Cut first:** new authentication/Supabase backend, elaborate animations, neural model experiments, additional effects, multiplayer, mobile-specific polish.
 
