@@ -126,7 +126,7 @@ The **Explain** button in the Learn panel is optional. It stays hidden behind a 
    # or add GEMINI_API_KEY=your-key-here to .env.local
    ```
 
-3. Optional: override the model with `GEMINI_MODEL` (default `gemini-3.8-flash`).
+3. Optional: override the model with `GEMINI_MODEL` (default `gemini-3.5-flash-lite`, which streams quickly; `gemini-3.8-flash` gives richer prose but is slower).
 
 The key is read only in `src/app/api/explain/route.ts`; it is never bundled into the client. Without a key, `POST /api/explain` returns `503` and the dialog shows a configuration message.
 

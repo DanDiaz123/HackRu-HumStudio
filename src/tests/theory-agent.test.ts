@@ -9,6 +9,7 @@ import {
   isChordExplanationContext,
   progressionLabel,
   sanitizeTheoryModel,
+  splitSseEvents,
 } from "../lib/theory-agent.ts";
 
 test("harmonyToAgentContext names each bar's chord and Roman numeral", () => {
@@ -74,4 +75,33 @@ test("extractCandidateText reads Gemini's response shape and ignores junk", () =
   assert.equal(extractCandidateText({ candidates: [{ content: {} }] }), "");
   assert.equal(extractCandidateText(null), "");
   assert.equal(extractCandidateText({ error: "boom" }), "");
+});
+
+test("extractCandidateText skips reasoning parts", () => {
+  assert.equal(
+    extractCandidateText({
+      candidates: [{ content: { parts: [{ text: "thinking...", thought: true }, { text: "answer" }] } }],
+    }),
+    "answer",
+  );
+});
+
+test("extractCandidateText preserves spaces that span streamed chunks", () => {
+  assert.equal(
+    extractCandidateText({ candidates: [{ content: { parts: [{ text: "Welcome to " }, { text: "HumStudio" }] } }] }),
+    "Welcome to HumStudio",
+  );
+});
+
+test("splitSseEvents yields complete events and keeps the trailing partial", () => {
+  assert.deepEqual(splitSseEvents("data: a\n\ndata: b\n\ndata: c"), {
+    events: ["data: a", "data: b"],
+    rest: "data: c",
+  });
+  assert.deepEqual(splitSseEvents(""), { events: [], rest: "" });
+  assert.deepEqual(splitSseEvents("data: a\n\n"), { events: ["data: a"], rest: "" });
+  assert.deepEqual(splitSseEvents("data: a\r\n\r\ndata: b\r\n\r\n"), {
+    events: ["data: a", "data: b"],
+    rest: "",
+  });
 });

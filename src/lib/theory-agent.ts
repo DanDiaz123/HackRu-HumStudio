@@ -3,7 +3,7 @@
 // The API key never reaches the client; the call goes through app/api/explain/route.ts.
 import { chordName, keyName, romanNumeral, type Harmony } from "./music/harmony.ts";
 
-export const DEFAULT_THEORY_MODEL = "gemini-3.8-flash";
+export const DEFAULT_THEORY_MODEL = "gemini-3.5-flash-lite";
 export const MAX_AGENT_CHORDS = 32;
 export const MAX_FIELD_CHARS = 32;
 
@@ -71,32 +71,79 @@ export function sanitizeTheoryModel(model: string | undefined): string | null {
   return /^[A-Za-z0-9._-]{1,64}$/.test(trimmed) ? trimmed : null;
 }
 
-/** Pull the text out of a Gemini generateContent response, ignoring anything malformed. */
+/** Pull the visible text out of a Gemini response, ignoring reasoning parts and anything malformed. */
 export function extractCandidateText(data: unknown): string {
   if (!isRecord(data) || !Array.isArray(data.candidates)) return "";
   const first = data.candidates[0];
   if (!isRecord(first) || !isRecord(first.content) || !Array.isArray(first.content.parts)) return "";
   return first.content.parts
-    .map((part) => (isRecord(part) && typeof part.text === "string" ? part.text : ""))
-    .join("")
-    .trim();
+    .map((part) =>
+      isRecord(part) && part.thought !== true && typeof part.text === "string" ? part.text : "",
+    )
+    .join("");
 }
 
-/** Ask the server route to explain the current harmony. Browser-only; the key stays server-side. */
-export async function requestChordExplanation(harmony: Harmony, signal?: AbortSignal): Promise<string> {
+/** Split an SSE buffer into complete events, keeping the trailing partial event for the next read. */
+export function splitSseEvents(buffer: string): { events: string[]; rest: string } {
+  const chunks = buffer.replace(/\r\n/g, "\n").split("\n\n");
+  const rest = chunks.pop() ?? "";
+  return { events: chunks, rest };
+}
+
+/** One `data:` payload from a server-sent event, or null if the event has no data line. */
+function readSseData(event: string): string | null {
+  for (const line of event.split("\n")) {
+    if (line.startsWith("data:")) return line.slice(5).trim();
+  }
+  return null;
+}
+
+/**
+ * Stream the server route's explanation of the current harmony, invoking onChunk as text arrives.
+ * Browser-only; the key stays server-side. Resolves when the stream ends, throws on error frames.
+ */
+export async function streamChordExplanation(
+  harmony: Harmony,
+  onChunk: (text: string) => void,
+  signal?: AbortSignal,
+): Promise<void> {
   const response = await fetch("/api/explain", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(harmonyToAgentContext(harmony)),
     signal,
   });
-  const data: unknown = await response.json().catch(() => null);
-  if (!response.ok) {
+
+  if (!response.ok || !response.body) {
+    const data: unknown = await response.json().catch(() => null);
     const message = isRecord(data) && typeof data.error === "string" ? data.error : null;
     throw new Error(message ?? "The theory agent is unavailable right now.");
   }
-  if (!isRecord(data) || typeof data.text !== "string" || !data.text.trim()) {
-    throw new Error("The theory agent sent back an empty answer.");
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const { events, rest } = splitSseEvents(buffer);
+      buffer = rest;
+      for (const event of events) {
+        const payload = readSseData(event);
+        if (!payload || payload === "[DONE]") continue;
+        let frame: unknown;
+        try {
+          frame = JSON.parse(payload);
+        } catch {
+          continue;
+        }
+        if (isRecord(frame) && typeof frame.error === "string") throw new Error(frame.error);
+        if (isRecord(frame) && typeof frame.text === "string") onChunk(frame.text);
+      }
+    }
+  } finally {
+    reader.releaseLock();
   }
-  return data.text.trim();
 }
