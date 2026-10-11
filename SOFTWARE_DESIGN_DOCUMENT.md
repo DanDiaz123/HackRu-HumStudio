@@ -359,7 +359,7 @@ Today `Studio.tsx` owns tracks and settings in React state, replaces arrays immu
 - Implemented: TypeScript regressions using Node's built-in test runner cover playback, preset loading/voices, harmony, segmentation, generation, cached settings, microphone resource cleanup, MIDI encoding, project persistence, and editing. Fixtures include wobbles/dropouts, real rests, all three profiles, preserved Melody pitches, capture-tempo Snap, invalid input, stale callbacks, fallback/retry, sample lifetimes, independent MIDI channels, download cleanup, strict project schemas, and collision-aware edits. Preset browser evidence and remaining human checks are in [`SMPLR_INTEGRATION.md`](SMPLR_INTEGRATION.md).
 - Implemented: project JSON round-trip and v1 migration tests retain BPM, notes, settings, and track flags; malformed, oversized, and unexpected fields reject before changing the studio.
 - Implemented: time-stamped synthetic `HumFrame[]` fixtures with known pitches, vibrato, short noise, and dropouts.
-- **Education tests to complete:** Verify `scaleDegree`, `solfege`, and `romanNumeral` for a fixed key and edge/out-of-scale cases; verify note labels change after an edit and changing the key; verify Learn is a view-only toggle and LivePitch shows "no pitch" on silence. Do not mark these as tested solely because the functions exist. Check keyboard and visual contrast with a human learner.
+- **Education tests:** `src/tests/harmony.test.ts` already covers major/minor Roman numerals, degrees, solfège and out-of-scale null cases. **Still to verify in the browser:** note labels after an edit/Key change, Learn as a view-only toggle, LivePitch's "no pitch" silence behavior, and readable/focusable theory UI with a beginner. Function-level tests do not establish interface accessibility or learning outcomes.
 
 ### Manual test matrix
 
@@ -409,7 +409,7 @@ Ownership is assigned in [`WORKLOAD_SPLIT.md`](WORKLOAD_SPLIT.md): **voice-to-no
 
 ## 16. Future iterations (not HackRU commitments)
 
-- User-created tracks, per-track volume/instrument choice, and arrangements longer than 8 bars.
+- User-created tracks, per-track volume/mixing controls, richer sample editing, and arrangements longer than 8 bars. Per-track instrument **Sound** choices are already implemented.
 - MIDI import, keyboard input, guided pitch/ear-training activities, short rhythm-matching exercises, optional reference tones, and pitch confidence visualization.
 - Accessible nonvisual pitch feedback, educator-authored examples, opt-in learning-progress records, and evidence-based learner usability studies.
 - Offline audio-file analysis and higher-fidelity onset detection for repeated notes.
