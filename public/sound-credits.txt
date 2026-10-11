@@ -5,6 +5,11 @@ HumStudio uses smplr 1.1.0 by danigb (MIT license):
 https://github.com/danigb/smplr
 https://github.com/danigb/smplr#license
 
+Copyright (c) danigb. The MIT permission and warranty notice is retained in
+public/smplr-license.txt (served as /smplr-license.txt).
+smplr's package metadata and upstream README declare MIT; the installed 1.1.0
+package does not include a separate LICENSE file.
+
 Sampled sounds are fetched from the sources below when selected or played.
 HumStudio does not bundle or modify the sample audio files. smplr decodes them
 and selects/pitches samples for playback. MIDI export contains notes, not audio.
@@ -57,5 +62,6 @@ https://github.com/smpldsnds/drum-machines
 Asset host: https://smpldsnds.github.io/drum-machines/
 The source README identifies this collection as public-domain samples.
 
-These are sample-source credits, not a license for HumStudio's own code.
-Source descriptions and license links were checked on 2026-10-10.
+HumStudio's original code is licensed separately under the root LICENSE.md.
+That MIT license does not replace the licenses of these third-party samples.
+Source descriptions and license links were checked on 2026-10-11.

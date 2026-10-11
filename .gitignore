@@ -48,3 +48,19 @@ next-env.d.ts
 
 # design-tool review screenshots (generated)
 /.impeccable/review/
+
+# Private engineering documentation; the public README and license are retained.
+*.md
+!/README.md
+!/LICENSE.md
+
+# Local agent configuration and design-tool state
+/.agents/
+/.codex/
+/.aws/
+/.impeccable/
+
+# Local project exports and microphone take fixtures
+*.humstudio.json
+/src/tests/takes/*
+!/src/tests/takes/.gitkeep

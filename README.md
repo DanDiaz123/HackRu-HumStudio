@@ -4,7 +4,7 @@
 
 A music learning and composition sketchpad built for **HackRU Fall 2026 · Education Track**. Hum a melody, see it become editable notes, build an instrumental arrangement, and explore the theory behind your music.
 
-**[Try the live demo](https://hackru-project-six.vercel.app/)** · [Run locally](#run-locally) · [Technical specification](TECHNICAL_SPEC.md)
+**[Try the live demo](https://hackru-project-six.vercel.app/)** · [Run locally](#run-locally) · [License](LICENSE.md)
 
 ## Why HumStudio?
 
@@ -131,7 +131,7 @@ On Windows PowerShell, use `npm.cmd` and `npx.cmd` if execution policy blocks th
 
 - [x] **Real-device tuning:** DSP generation validated with human humming on the demo microphone.
 
-Regression suites cover pitch segmentation, harmony, playback, sound loading, editing, project validation, MIDI, and theory-agent helpers. Browser suites cover studio interactions, startup sounds, per-track settings/copy, and persistence boundaries. See [the audit](AUDIT.md) for recorded checks and remaining manual verification.
+Regression suites cover pitch segmentation, harmony, playback, sound loading, editing, project validation, MIDI, and theory-agent helpers. Browser suites cover studio interactions, startup sounds, per-track settings/copy, and persistence boundaries.
 
 To check implementation changes:
 
@@ -150,16 +150,9 @@ node src/tests/browser/studio-interactions.mjs <path-to-playwright-package> [htt
 
 Related suites: [startup sounds](src/tests/browser/startup-sounds.mjs), [per-track settings and copy](src/tests/browser/per-track-copy.mjs), and [persistence boundaries](src/tests/browser/persistence-boundaries.mjs). Results are written to ignored `.test-build/`. Synthetic microphone tests exercise the recording pipeline; human listening and learner feedback require separate checks.
 
-## Project documentation
+## License
 
-| Document | Purpose |
-| --- | --- |
-| [Product](PRODUCT.md) | Audience, educational goals, and scope |
-| [Technical specification](TECHNICAL_SPEC.md) | Shared contracts, audio pipeline, persistence, and tests |
-| [Software design](SOFTWARE_DESIGN_DOCUMENT.md) | Architecture and design decisions |
-| [Design system](DESIGN.md) | Visual identity, typography, layout, and motion |
-| [Workload split](WORKLOAD_SPLIT.md) | Team ownership and handoffs |
-| [Engineering rules](AGENTS.md) | Contribution and security guidelines |
-| [Sound integration](SMPLR_INTEGRATION.md) | Preset catalog, fallback behavior, and verification |
+HumStudio's original source code is licensed under the [MIT License](LICENSE.md).
+Third-party libraries and sampled sounds retain their own licenses. smplr is MIT-licensed; sound sources include CC BY 3.0, CC0, and public-domain samples. See [sound credits and license notices](public/sound-credits.txt) and the [smplr MIT notice](public/smplr-license.txt).
 
-**Event:** HackRU Fall 2026 · **Track:** Education · **License:** not yet selected.
+**Event:** HackRU Fall 2026 · **Track:** Education · **License:** [MIT](LICENSE.md).
