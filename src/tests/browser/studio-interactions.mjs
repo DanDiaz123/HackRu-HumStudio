@@ -6,7 +6,8 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { DEFAULT_HARMONY } from "../../lib/music/harmony.ts";
 import { STORAGE_KEY, serializeProject } from "../../lib/persistence/project.ts";
-import { initialTracks, midiName } from "../../lib/tracks.ts";
+import { initialTracks } from "../../lib/tracks.ts";
+import { installSampleFixtures, wave } from "./sample-fixtures.mjs";
 
 const { chromium } = await import(process.argv[2] ? pathToFileURL(resolve(process.argv[2], "index.mjs")).href : "playwright");
 const baseUrl = process.argv[3] ?? "http://localhost:3000";
@@ -21,25 +22,9 @@ const fixture = {
       : [note(`${track.instrument.id}-a`, track.instrument.lo + 12, 0, 4)] })),
 };
 
-// Synthetic PCM is used for microphone and sampler checks; this suite does not measure real timbre or humming accuracy.
-function wave(seconds, pulsed = false) {
-  const rate = 48000, count = Math.round(rate * seconds), bytes = Buffer.alloc(44 + count * 2);
-  bytes.write("RIFF", 0); bytes.writeUInt32LE(bytes.length - 8, 4); bytes.write("WAVEfmt ", 8);
-  bytes.writeUInt32LE(16, 16); bytes.writeUInt16LE(1, 20); bytes.writeUInt16LE(1, 22);
-  bytes.writeUInt32LE(rate, 24); bytes.writeUInt32LE(rate * 2, 28); bytes.writeUInt16LE(2, 32);
-  bytes.writeUInt16LE(16, 34); bytes.write("data", 36); bytes.writeUInt32LE(count * 2, 40);
-  for (let i = 0; i < count; i++) {
-    const t = i / rate, level = pulsed && t % 0.6 > 0.4 ? 0 : 0.25;
-    bytes.writeInt16LE(Math.round(level * Math.sin(2 * Math.PI * 392 * t) * 32767), 44 + i * 2);
-  }
-  return bytes;
-}
-
 await mkdir(".test-build", { recursive: true });
 const microphonePath = resolve(".test-build/studio-interactions-mic.wav");
 await writeFile(microphonePath, wave(16, true));
-const audio = `data:audio/wav;base64,${wave(0.1).toString("base64")}`;
-const soundfont = `MIDI.Soundfont.fixture = {${Array.from({ length: 128 }, (_, midi) => `${JSON.stringify(midiName(midi))}:${JSON.stringify(audio)}`).join(",")},};`;
 const browser = await chromium.launch({ channel: "msedge", headless: true, args: [
   "--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", `--use-file-for-fake-audio-capture=${microphonePath}`,
 ] });
@@ -73,11 +58,7 @@ try {
     await context.addInitScript(({ key, saved }) => { if (!localStorage.getItem(key)) localStorage.setItem(key, saved); }, { key: STORAGE_KEY, saved: serializeProject(fixture) });
     // Deterministic delayed samples exercise the real smplr loader without relying on upstream host availability.
     let failTrumpet = true;
-    await context.route(/https:\/\/(gleitz|smpldsnds)\.github\.io\//, async route => {
-      await new Promise(resolve => setTimeout(resolve, 250));
-      const success = route.request().url().includes("gleitz.github.io") && !(failTrumpet && route.request().url().includes("trumpet"));
-      await route.fulfill({ status: success ? 200 : 503, headers: { "access-control-allow-origin": "*" }, contentType: "text/plain", body: success ? soundfont : "Fixture sample download failure" });
-    });
+    await installSampleFixtures(context, { delayMs: 250, shouldFail: url => failTrumpet && url.includes("trumpet") });
     const page = await context.newPage(), errors = [], checks = [];
     page.on("pageerror", error => errors.push(error.message));
     page.on("console", message => {

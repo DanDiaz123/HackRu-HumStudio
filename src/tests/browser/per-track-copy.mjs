@@ -7,6 +7,7 @@ import { renderTrackProfiles } from "../../lib/generate.ts";
 import { DEFAULT_HARMONY } from "../../lib/music/harmony.ts";
 import { STORAGE_KEY, serializeProject } from "../../lib/persistence/project.ts";
 import { initialTracks } from "../../lib/tracks.ts";
+import { installSampleFixtures } from "./sample-fixtures.mjs";
 
 const { chromium } = await import(process.argv[2] ? pathToFileURL(resolve(process.argv[2], "index.mjs")).href : "playwright");
 const baseUrl = process.argv[3] ?? "http://localhost:3000";
@@ -68,6 +69,7 @@ await mkdir(".test-build", { recursive: true });
 try {
   for (const width of [1280, 390, 320]) {
     const context = await browser.newContext({ viewport: { width, height: 900 }, reducedMotion: "reduce" });
+    await installSampleFixtures(context);
     await context.addInitScript(({ key, value }) => { if (!localStorage.getItem(key)) localStorage.setItem(key, value); }, { key: STORAGE_KEY, value: serializeProject(fixture) });
     const page = await context.newPage(), errors = [], checks = [];
     page.on("pageerror", e => errors.push(e.message));

@@ -14,6 +14,7 @@ class FakeSample implements SampledInstrument {
   resolve!: () => void;
   reject!: (error: Error) => void;
   disposed = false;
+  disposals = 0;
   starts: StartedEvent[] = [];
   stops: { id?: string | number; time?: number }[] = [];
   drumMap?: ReadonlyMap<number, string>;
@@ -27,7 +28,7 @@ class FakeSample implements SampledInstrument {
     this.starts.push(started);
     return (time?: number) => { this.stops.push({ id: started.stopId, time }); };
   }
-  dispose() { this.disposed = true; }
+  dispose() { this.disposed = true; this.disposals++; }
 }
 const track = (category: string, presetId?: string): Track => {
   const value = initialTracks().find(t => t.instrument.id === category)!;
@@ -123,6 +124,7 @@ test("late completion cannot replace a newer selection", async () => {
   old.resolve();
   await first;
   assert.equal(old.disposed, true);
+  assert.equal(old.disposals, 1);
   assert.equal(statuses.at(-1)!.activePresetId, "melody.marimba");
   manager.dispose();
 });
@@ -193,10 +195,48 @@ test("dispose cancels unresolved loads, listeners, and resources without later r
   const count = statuses.length;
   pending.resolve(); await loading;
   assert.equal(pending.disposed, true);
+  assert.equal(pending.disposals, 1);
   assert.equal(statuses.length, count);
   assert.equal(ready, 0);
   assert.throws(() => manager.createVoice("bass"));
   manager.dispose();
+});
+
+test("startup preloads all selected sounds, including empty/muted tracks, and isolates failed downloads", async () => {
+  const { manager, sample, samples } = setup();
+  const tracks = initialTracks().map(track => ({ ...track, muted: true, notes: [] }));
+  const before = structuredClone(tracks);
+  const statuses = new Map<string, PresetStatus>();
+  manager.subscribe(status => statuses.set(status.trackId, status));
+  const first = manager.prepare(tracks);
+  const concurrent = manager.prepare(tracks);
+  assert.equal(samples.size, 5);
+  for (const track of tracks) {
+    assert.equal(samples.get(track.presetId)!.length, 1);
+    assert.equal(statuses.get(track.instrument.id)!.state, "loading");
+    if (track.instrument.id === "bass") sample(track.presetId).reject(new Error("offline"));
+    else sample(track.presetId).resolve();
+  }
+  await Promise.all([first, concurrent]);
+  assert.equal(statuses.get("bass")!.state, "fallback");
+  for (const id of ["melody", "keys", "strings", "drums"]) assert.equal(statuses.get(id)!.state, "ready");
+  assert.deepEqual(tracks, before);
+  manager.dispose();
+  for (const values of samples.values()) assert.equal(values[0].disposals, 1);
+});
+
+test("retired sample leases released after manager disposal do not dispose resources twice", async () => {
+  const { manager, sample } = setup();
+  const first = manager.prepare([track("strings")]);
+  const old = sample("strings.ensemble");
+  old.resolve(); await first;
+  const voice = manager.createVoice("strings", "strings.ensemble");
+  const next = manager.prepare([track("strings", "strings.violin")]);
+  sample("strings.violin").resolve(); await next;
+  manager.dispose();
+  voice.dispose();
+  assert.equal(old.disposals, 1);
+  assert.equal(sample("strings.violin").disposals, 1);
 });
 
 test("sample adapter uses the exact audio clock and independent stop IDs for equal pitches", () => {

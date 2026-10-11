@@ -37,7 +37,7 @@ Pick an instrument track
 - [x] **Learn:** chord names and roman numerals on the zoomed lane's bar grid (the current chord lights during playback), key and part role in the track panel, do-re-mi on notes, and a live pitch readout (note, degree, cents) while recording.
 - [x] **Note sensitivity:** Low, Medium, and High beneath each expanded track's Sound selector, alongside that instrument's Snap grid. All five tracks remember independent settings (Drums shares one pair across its five parts). Switching profiles regenerates the latest unedited take even after Save/Open or autosave reload. Hand edits opt a part out; older saves keep their notes and apply sensitivity to future takes.
 - [x] **Play:** Tone.js playback of all tracks with independent Mute, exclusive Solo, and BPM 60–180. M/S show their names on hover or keyboard focus.
-- [x] **Track sounds:** independent smplr preset dropdowns beneath expanded track titles, with lazy loading, retry, and the original synth fallback.
+- [x] **Track sounds:** independent smplr preset dropdowns beneath expanded track titles, with automatic startup loading, retry, and the original synth fallback.
 - [x] **Playback count-in / metronome:** optional four-beat count-in and beat clicks; listening verification remains open.
 - [x] **Export:** multi-track `.mid` (drums on MIDI channel 10).
 - [x] **Recover:** mic denial, insecure origin, missing device, and silent takes show a message plus a **Demo hum** fallback; failed takes never erase existing notes.
@@ -63,7 +63,7 @@ The demo targets **clear, one-note-at-a-time humming** in a reasonably quiet roo
 | Fundamental pitch estimation | [Pitchy](https://github.com/ianprime0509/pitchy) |
 | Spectrogram | `<canvas>` halftone drawn from 48 log-spaced bins (80–1000 Hz) |
 | Note generation | `generateTrack(...)` in `src/lib/generate.ts`: local DSP segmentation, harmony fitting, then quantization |
-| Sampled sounds | [smplr](https://github.com/danigb/smplr) 1.1.0; selected assets load on demand |
+| Sampled sounds | [smplr](https://github.com/danigb/smplr) 1.1.0; all five selected sounds preload on opening |
 | Transport / synth fallback | [Tone.js](https://tonejs.github.io/) v15; same underlying audio context as smplr |
 | MIDI export | [`@tonejs/midi`](https://github.com/Tonejs/Midi) |
 | State | React state in `src/components/Studio.tsx` (`Track[]`) |
@@ -108,7 +108,7 @@ Open [http://localhost:3000](http://localhost:3000). Keys and Drums start with l
 
 No microphone handy? Open a track and press **Demo hum**: it feeds a synthetic, clearly labeled hum through the same pipeline.
 
-Open any track and choose **Sound** beneath its title. Each track retains its own choice and MIDI notes. Defaults are Flute, Fingered Electric Bass, Splendid Grand Piano, String Ensemble, and TR-808. Play preloads audible tracks; switching loads only the chosen sound. On a download failure, the previous working sound or original synth keeps playing; Retry sound retries that choice. The installed catalog has no TR-909, so Drums offer TR-808, LinnDrum LM-2, and Casio RZ-1. CP80 is excluded: two upstream OGG files are missing and its M4A files failed to decode in Edge. See [the integration handoff](SMPLR_INTEGRATION.md) for the full verified catalog and checks.
+Open any track and choose **Sound** beneath its title. Each track retains its own choice and MIDI notes. Defaults are Flute, Fingered Electric Bass, Splendid Grand Piano, String Ensemble, and TR-808. After restoring the project, the app automatically preloads the selected sound for all five tracks, including empty or muted tracks. Open and Undo/Redo also preload changed choices; other unused presets download when selected. Startup does not resume audio or start playback. Play unlocks audio and waits for any unfinished audible sounds. On a download failure, the previous working sound or original synth keeps playing; Retry sound retries that choice. The installed catalog has no TR-909, so Drums offer TR-808, LinnDrum LM-2, and Casio RZ-1. CP80 is excluded: two upstream OGG files are missing and its M4A files failed to decode in Edge. See [the integration handoff](SMPLR_INTEGRATION.md) for the full verified catalog and checks.
 
 Samples need an initial network download from the upstream hosts. No audio is uploaded, and MIDI exports retain note data rather than sampled audio. See [sound credits and licenses](public/sound-credits.txt).
 
@@ -130,6 +130,8 @@ node src/tests/browser/studio-interactions.mjs <path-to-playwright-package> [htt
 ```
 
 It checks right-click/keyboard deletion and history, drag/resize, all drum lanes and selected-part edits, synthetic microphone capture and reveal, hover/focus tooltips, exclusive Solo and keyboard S, Save/Open/autosave, MIDI export, and playback controls at 1280/390/320 px. Delayed synthetic samples exercise real smplr decoding, rapid switching, fallback/retry, and fixed transport/ruler/track positions without depending on upstream downloads. Screenshots and results are written to ignored `.test-build/`; physical microphone accuracy and real instrument timbre are not measured.
+
+Run `node src/tests/browser/startup-sounds.mjs <path-to-playwright-package> [base-url]` to verify startup loading for all five sounds, restored empty/muted choices, no automatic audio resume/playback, resource reuse on Play, isolated failure/retry, and Open/Undo/Redo/reload. Shared sample fixtures cover soundfonts, grand/electric piano, and all drum kits without downloading upstream assets.
 
 ## Copy a region and reuse a phrase
 
@@ -177,7 +179,7 @@ Note editing lives in `EditableNotes.tsx` (rendered by `TrackRow.tsx`) with pure
 - **Generation boundary:** `generateTrack(...)` remains the async single-profile facade; `generateTrackVariants(...)` computes all three profiles for the UI. Pure settings helpers preserve capture tempo, manual edits, and harmony decisions.
 - **Pitch is not an FFT peak:** Pitchy estimates the fundamental; the spectrogram is display only.
 - **Honest samples:** Keys and Drums start with parts labeled **Sample**; the demo hum is labeled **Demo hum**. Never present a preset as live output.
-- **Local processing:** no account, API key, or network inference. Sampled presets fetch upstream assets on demand; the synth fallback works without them.
+- **Local processing:** no account, API key, or network inference. Selected sampled sounds fetch upstream assets on opening; the synth fallback works without them.
 
 ## Suggested 90-second judge demo
 
