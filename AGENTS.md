@@ -82,7 +82,7 @@ export interface Project {
 
 Valid notes satisfy: integer MIDI 0..127; finite startBeat >= 0; finite durationBeats > 0; finite velocity 0..1. Tempo input is constrained to 60..180; the UI defaults to **BPM 120 and quantization `"1/4"`**. Fixed 4/4, 8 bars.
 
-**Multi-track contracts** (`src/lib/tracks.ts`, see `TECHNICAL_SPEC.md` 3.1-3.3): `Instrument`, `Track { instrument, presetId, drumPart?, notes, muted, solo, sample }`, `INSTRUMENTS` (Melody, Bass, Keys, Drums, Strings), `HumFrame`, and the generation seam. `drumPart` is one of `kick`, `snare`, `hat`, `openHat`, or `crash`; it selects the rhythm lane shown in the zoomed Drums tab while all lanes stay in the Track notes for playback/export.
+**Multi-track contracts** (`src/lib/tracks.ts`, see `TECHNICAL_SPEC.md` 3.1-3.3): `Instrument`, `Track { instrument, presetId, drumPart?, notes, muted, solo, sample }`, `INSTRUMENTS` (Melody, Bass, Keys, Drums, Strings), `HumFrame`, and the generation seam. `drumPart` is one of `kick`, `snare`, `hat`, `openHat`, or `crash`; it selects the recording/editing lane while all five drum lanes remain visible and stored for playback/export. Part-edit callbacks carry only selected-lane notes; the dedicated deletion callback can remove any visible note by ID. Solo is exclusive; older multi-solo projects keep the first soloed category in fixed instrument order.
 
 ```ts
 generateTrack(inst: Instrument, frames: HumFrame[], bpm: number, quantize: QuantizeDivision, harmony: Harmony, sensitivity?: NoteSensitivity): Promise<Note[]>

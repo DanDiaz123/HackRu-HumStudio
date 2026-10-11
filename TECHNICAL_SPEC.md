@@ -486,12 +486,13 @@ Do **not** label a DSP pitch detector as a trained neural model unless a model i
 - Clamp pitch to MIDI 0..127 and start to beat >= 0; minimum duration is selected grid step (or 0.1 beat when Off).
 - Pointer capture prevents losing drag when pointer leaves rectangle. Support `pointercancel` and `Escape` to abandon a drag without committing partial changes.
 - P0 fallback when drag-resize is difficult: a selected-note duration input plus drag for pitch/time.
+- Right-click suppresses the native note context menu and deletes only that ID via the canonical track owner; Delete/Backspace and double-click deletion remain. Empty-space right-click does nothing, and busy states block deletion. All deletions are undoable.
 
 ### 8.2 Transport and recording controls
 
 - **Transport bar (implemented):** wordmark, Rewind, Play/Pause, Stop, metronome, count-in, position, BPM, Key/chords, Snap (Off/1/4/1/8/1/16), Sensitivity (Low/Medium/High), Undo, Redo, Open project, Save project, keyboard shortcut help, and Export MIDI.
 - **Zoomed header (implemented):** All tracks (back), instrument name, hint, Record / Stop / Re-record, Demo hum, and a status line with a filled-or-hollow mark plus text (e.g. "Demo hum 0:05.2", "Generating", "8 notes").
-- **Drums selector (implemented):** The zoomed Drums header includes Kick, Snare, Closed hat, Open hat, and Crash. The lane, editing gestures, Clear, Repeat, and recording target only the selected rhythm lane; hidden lanes remain in the same playable/exported Drums track.
+- **Drums selector (implemented):** The zoomed Drums header includes Kick, Snare, Closed hat, Open hat, and Crash. All five lanes remain visible through recording and reveal; the selected row is emphasized. Recording, click-to-add, moving/resizing, Clear, and Repeat target only the selected lane. Part-edit callbacks contain only that lane's notes; a separate `onDeleteNote(noteId)` callback can delete any visible note from the full track. Switching parts never changes note data.
 - A first Play or Record gesture awaits `Tone.start()`. Recording shares Tone's audio context and click clock; microphone analysis never connects to the speakers.
 - **Defaults (implemented):** BPM = 120, quantization = 1/4, sensitivity = Medium, matching `Studio.tsx`. The original v1 Project baseline still specifies 1/16 quantization.
 - **Replace rule (implemented):** confirm before recording over a non-sample part. A successful take replaces notes after reveal and is undoable; failed/empty takes retain them. Re-record labels fit compact sidebars.
@@ -548,7 +549,7 @@ Contract and lifecycle:
 - Track every scheduled callback ID. `schedule` clears old owned events before replacement. On live edits/tempo changes, restart at the audible beat and recover sustained notes; a brief re-attack is an intentional tradeoff for cancelling lookahead audio reliably.
 - `pause` preserves transport position and disposes pending/sounding voices; `stop` halts playback and resets to zero; `rewind` resets to zero while preserving running/paused state. On unmount, clear owned events, count-in timers, listeners, and synths. Do not close Tone's shared AudioContext.
 - Validate BPM 60..180 before replacing the existing schedule. `Track[]` is typed app state and is not re-validated here; untrusted note data is validated once at JSON import (section 10). Playback covers the visible 32-beat loop; later onsets are silent and note ends are clipped at its boundary.
-- Muted tracks are silent even when soloed. Multiple solo tracks play together. Independent synth lanes preserve durations of overlapping notes at the same pitch. Synthesized drums support MIDI 36, 38, 42, 46, and 49 with fixed percussive envelopes rather than sustained pitched-note durations.
+- Muted tracks are silent even when soloed. Studio updates solo flags exclusively in one immutable change: selecting a new Solo clears all others, and selecting the active Solo clears it. Mute remains independent. Import, Save, and state restoration normalize older multi-solo values to the first soloed category in fixed `INSTRUMENTS` order, preserving notes and mute flags. The transport continues consuming the supplied flags. Independent synth lanes preserve durations of overlapping notes at the same pitch. Synthesized drums support MIDI 36, 38, 42, 46, and 49 with fixed percussive envelopes rather than sustained pitched-note durations.
 - `positionBeats` reads transport ticks at the current audible AudioContext time, excluding Tone's lookahead. Before initialization `getEngine()` returns `null`.
 - The optional metronome accents every four beats. `countIn` schedules four clicks on the audio clock without advancing the arrangement, and resolves `false` on pause/stop/rewind/reschedule/disposal. Count-in precedes playback when toggled, and always precedes a mic recording; microphone-relative timestamps start only after counting completes (§5). Background sample readiness while paused/stopped must not cancel this count-in.
 - MIDI pitch is numeric in state. At synth boundary convert to note name/frequency with Tone helpers or verified pitch conversion; never change canonical note format.
@@ -559,6 +560,8 @@ Contract and lifecycle:
 `instrument-presets.ts` holds 20 options (Melody 5, Bass 4, Keys 4, Strings 4, Drums 3), validated against installed smplr catalogs. The full catalog, exclusions, and verification are in [`SMPLR_INTEGRATION.md`](SMPLR_INTEGRATION.md). `presetForTrack(category, undefined)` supplies a missing legacy field's default; unknown/cross-category IDs reject before any schedule changes. Project imports apply the same migration and validation (§10).
 
 The labeled native selector sits directly beneath each expanded title. Changing it updates only that track's `presetId`; note arrays, IDs, pitch/timing, mute/solo, and category remain unchanged. Loading and fallback status stay outside serializable state. Play awaits audible selections; an explicit choice preloads even an empty track. Audio starts only on a user gesture.
+
+Loading and failure/retry feedback stays inside the selected track's Sound section. Sample status never inserts a notice above the ruler, so rapid sound changes do not move the transport, ruler, or editor region. Project-file and storage errors remain visible.
 
 `preset-manager.ts` deduplicates loads, ignores stale completions, retains the previous working sound on failure, and times out after 20 seconds. `smplr-backend.ts` caches decoded buffers, loads the category's pitch range/all velocity layers, and rejects missing samples. Requests require approved HTTPS hosts, standard ports, no credentials, and no redirects. Asset sources/licenses are listed in [`public/sound-credits.txt`](public/sound-credits.txt), also linked from the selector. Raw microphone data is never sent to those hosts.
 
@@ -707,10 +710,14 @@ type ProjectAction =
 - [x] Save JSON, refresh, reopen JSON; project notes, key, BPM, and settings survive. Invalid files preserve the current arrangement; pure round-trip tests also cover track flags.
 - [ ] MIDI export opens in a MIDI application with one track per instrument, correct pitches and tempo.
 - [ ] Stop/cancel/unmount releases mic; browser recording indicator clears.
-- [x] Drum part browser check: the dropdown exposes five parts, switches visible notes to the selected MIDI lane, and remains within the desktop layout without page errors.
+- [x] Drum part browser check: the dropdown exposes five parts; all drum notes remain visible while the selected MIDI lane controls editing/recording. Right-click can delete any visible note. See the optional interaction regression suite below for desktop/narrow checks.
 - [x] Merge audit: all 170 tests, lint, `npx tsc --noEmit`, and `npm run build` pass (2026-10-10). See [`AUDIT.md`](AUDIT.md) for current browser checks and limitations.
 - [x] Automated desktop Edge checks load and play all 20 sampled sounds, preserve note bars and exported MIDI bytes, exercise fallback/retry and rapid/live switching, and confirm one shared audio clock. Output RMS is positive during playback and zero after Pause; this is audio analysis, not human listening.
 - [x] Automated Edge transport checks cover pause/resume, stop, rewind, 60/180 BPM, 32-beat looping, mute/solo, metronome, and playback count-in cancellation. Reload/navigation closes the old audio context. Human listening on the demo laptop remains required.
+
+### Optional interaction regression suite
+
+With Node 24+, Microsoft Edge, an existing Playwright installation, and `npm run dev` running, execute `node src/tests/browser/studio-interactions.mjs <path-to-playwright-package> [base-url]`. This suite does not add an app dependency. It checks right-click deletion/history, drag/resize, visible background drum lanes and selected-part operations, synthetic microphone capture/reveal, M/S hover/focus explanations, exclusive Solo and keyboard S, project migration/round trips, playback controls, MIDI export, and layout stability at 1280/390/320 px. Sample downloads are intercepted with delayed synthetic audio and controlled failures to exercise smplr loading/fallback/retry. Results and screenshots go to ignored `.test-build/`. Physical microphone accuracy, actual upstream availability, and human listening remain separate checks.
 
 ### Benchmarks, explicitly aspirational
 

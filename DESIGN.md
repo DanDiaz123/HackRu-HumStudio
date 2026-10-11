@@ -235,6 +235,7 @@ Square everywhere (0px radius): buttons, fields, clips, note bars, M/S marks, th
 Blunt, printed blocks; state is shown by inverting fill and ink, not by glow.
 - **Shape:** square (0px).
 - **Transport:** 36px squares, dark fill (#222, #2e2e2e on hover) with off-white icons; Play is inverted (off-white fill, ink icon).
+- **Mute/Solo:** keep compact M/S marks with named accessible labels and native titles. A small ink tooltip appears beside the button on hover or keyboard focus without taking layout space.
 - **Record:** the primary action inside a flooded spine. Ink block, off-white condensed caps (20px/800), Tally Red dot; 46px tall. While recording it inverts to off-white with an ink stop square and reads "Stop".
 - **Ghost (Demo hum):** 1.5px ink outline, ink 12px tracked caps; hover fills ink and the text takes the flood color.
 - **Export:** 1px Strong Hairline outline, 14px semibold, download icon; hover brightens the stroke to off-white.
@@ -246,6 +247,8 @@ Blunt, printed blocks; state is shown by inverting fill and ink, not by glow.
 - **Style:** 34px wells on Studio Black, 1px Hairline border, square, 15px/600 tabular values; label to the left in 11px tracked muted caps.
 - **Focus:** global 2px off-white outline.
 - **Track sound:** native select immediately beneath the expanded track title and above its hint, with a visible Sound label. Use flood fill, ink text/border/focus, square corners, and normal-width controls. Loading/error text and Retry sound sit beneath it. Keep the control within the spine at compact widths; its accessible name and title retain the full sound name.
+- **Sound status:** loading/failure feedback stays in that track's Sound section; no temporary sample notices above the ruler. Sound switching must preserve transport, ruler, and row-region positions.
+- **Drum lanes:** all five rows and their notes remain visible. Underline and lightly shade the selected row label; unselected notes retain 65% ink opacity. Only the selected lane has drag/resize handles, while any visible note can be deleted by right-click.
 - **Note sensitivity:** labeled native Low/Medium/High select beside Snap in the top transport menu. Selection swaps cached profiles immediately; Snap updates existing notes immediately. Hand-edited parts keep their edits when sensitivity changes. Use the existing square field styling; keep its label visible at compact widths, let the header squeeze as above, and disable changes while recording/generating.
 
 ### Navigation

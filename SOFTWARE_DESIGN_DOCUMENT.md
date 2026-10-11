@@ -252,6 +252,7 @@ A 1/16-note grid is `0.25` quarter-note beats; 1/8 is `0.5`, 1/4 is `1.0`. Snap 
 
 - Initialize audio **only in a user gesture handler**, awaiting `Tone.start()` before playback.
 - Instrument voices on one shared `Tone.getTransport()`: smplr presets on Tone's underlying audio context, with the existing `PolySynth`/percussion sounds retained as fallback. Expanded tracks select their own serializable `presetId` without changing notes. Lazy loading, stale-request guards, and shared buffer reuse live in `preset-manager.ts`/`smplr-backend.ts`. Unique per-attack stop handles preserve overlapping equal pitches. Kit-specific aliases play the same GM drum notes; regular note-offs leave one-shots intact. Mute/solo are applied at schedule time.
+- Studio keeps Solo exclusive in canonical state, independently of Mute; muted tracks stay silent even if soloed. Older multi-solo files keep the first soloed category in fixed instrument order without changing notes. Sample loading/failure feedback stays inside the relevant Sound section so it cannot move the ruler or track region.
 - Set transport BPM from the canonical studio BPM state; schedule track notes at their beat positions, converting beats to musical ticks/transport positions rather than hard-coding wall-clock seconds.
 - Schedule synth triggers with the **precise audio time argument** provided by the transport callback.
 - On project updates, stop or safely reschedule the old events. Track the scheduled event IDs and clear them; do not accumulate duplicated notes.
@@ -262,7 +263,7 @@ A 1/16-note grid is `0.25` quarter-note beats; 1/8 is `0.5`, 1/4 is `1.0`. Snap 
 ## 10. Track lanes and interaction design
 
 - **Arrangement view:** five rows share the viewport height; each row is a flood-colored header (name, M/S) plus a lane with a bar/beat grid. Generated parts render as solid flood clips with ink note bars; sample parts render outlined.
-- **Zoomed view:** clicking a row zooms it; the others collapse to 36 px strips. The zoomed lane fills with the instrument color, labels C rows (or drum names), and hosts recording, spectrogram, loading, and reveal. Drums expose a Kick/Snare/Closed hat/Open hat/Crash selector; recording and editing use the selected rhythm lane while the full kit remains playable.
+- **Zoomed view:** clicking a row zooms it; the others collapse to 36 px strips. The zoomed lane fills with the instrument color, labels C rows (or drum names), and hosts recording, spectrogram, loading, and reveal. Drums expose a Kick/Snare/Closed hat/Open hat/Crash selector; all five rows stay visible, recording/move/resize/add/Clear/Repeat use only the selected lane, and right-click can delete any visible note through the full-track owner. The full kit remains playable and saved.
 - Geometry is derived, never stored: x = `startBeat / 32` of lane width; y = `(instrument.hi - midi) / rows` of lane height (`src/lib/tracks.ts`).
 - 8 bars x 4 beats = 32 beats, fitted to the viewport width (no horizontal scroll yet).
 - Grid lines for bars/beats and labels for C notes.

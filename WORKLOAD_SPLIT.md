@@ -48,7 +48,7 @@ This split reflects the **existing repository**, not a blank project. At the tim
 - [x] Return notes appropriate for the selected instrument's range; drum/RMS mapping remains documented as a separate limitation.
 - [x] Ensure empty/failed recordings leave existing notes untouched.
 - [x] Add deterministic voiced/unvoiced, wobble, dropout, sensitivity, and generation fixtures; live pitch-to-note verification remains open.
-- [x] Split the Drums lane into Kick, Snare, Closed hat, Open hat, and Crash selectors; selected recording/editing uses onset rhythm only while hidden lanes remain playable.
+- [x] Split the Drums lane into Kick, Snare, Closed hat, Open hat, and Crash selectors; selected recording/editing uses onset rhythm only while all five lanes remain visible and playable.
 
 **Primary files:** `src/lib/hum.ts`, `src/lib/generate.ts`, and any small extracted pure pitch/segmentation/quantization helpers under `src/lib/audio/` or `src/lib/music/`. Coordinate changes to `src/components/Spectrogram.tsx` with Person 3.
 

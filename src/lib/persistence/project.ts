@@ -4,7 +4,7 @@ import { DEFAULT_NOTE_SENSITIVITY, type NoteSensitivity, isNoteSensitivity } fro
 import { presetForTrack } from "../audio/instrument-presets.ts";
 import { DEFAULT_HARMONY, type Harmony, inferHarmony } from "../music/harmony.ts";
 import type { Note, QuantizeDivision } from "../music/types.ts";
-import { DRUM_PARTS, INSTRUMENTS, QUANT_BEATS, TOTAL_BEATS, drumPart, type DrumPart, type Track } from "../tracks.ts";
+import { DRUM_PARTS, INSTRUMENTS, QUANT_BEATS, TOTAL_BEATS, drumPart, normalizeSoloTracks, type DrumPart, type Track } from "../tracks.ts";
 
 export const STORAGE_KEY = "humstudio:project:v2";
 export const MAX_PROJECT_CHARS = 2_000_000;
@@ -46,7 +46,7 @@ export function toProject(p: LoadedProject, now = new Date()): ProjectV2 {
     quantize: p.quantize,
     sensitivity: p.sensitivity,
     harmony: { tonic: p.harmony.tonic, mode: p.harmony.mode, bars: p.harmony.bars.map((chord) => [...chord]) },
-    tracks: p.tracks.map((t) => ({
+    tracks: normalizeSoloTracks(p.tracks).map((t) => ({
       instrumentId: t.instrument.id, presetId: t.presetId,
       ...(t.instrument.kind === "drums" ? { drumPart: drumPart(t.drumPart).id } : {}),
       notes: t.notes.map(({ id, midi, startBeat, durationBeats, velocity }) => ({ id, midi, startBeat, durationBeats, velocity })),
@@ -177,7 +177,7 @@ export function parseProject(input: string): LoadedProject {
     ...base,
     sensitivity: sensitivity as NoteSensitivity,
     harmony: harmony(raw.harmony),
-    tracks: INSTRUMENTS.map((i) => saved.get(i.id) ?? emptyTrack(i)),
+    tracks: normalizeSoloTracks(INSTRUMENTS.map((i) => saved.get(i.id) ?? emptyTrack(i))),
   };
 }
 
