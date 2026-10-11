@@ -4,7 +4,7 @@
 
 HumStudio is a browser-based music sketchpad for **HackRU Fall 2026**. It looks like a familiar multi-track editor: one track per instrument (Melody, Bass, Keys, Drums, Strings). Click a track to zoom into it, hum into your microphone while a live spectrogram prints your voice across the lane, and watch the track fill with generated notes. Then play the arrangement or export it as MIDI.
 
-> **Current repository status (2026-10-10):** The Next.js studio includes arrangement view, track zoom, live hum spectrogram, animated reveal, five-instrument playback, collision-aware note editing, and MIDI export. Low/Medium/High sensitivity profiles are generated and cached per take for immediate switching; Snap rebuilds from capture tempo and updates notes immediately. The zoomed Drums tab displays all five rhythm-only parts (Kick, Snare, Closed hat, Open hat, Crash); recording and editing target the selected lane while playback/export retain all lanes. Right-click deletion and exclusive Solo use the existing Undo/Redo history. Clear/Repeat, keyboard shortcuts, strict ProjectV2 save/open, autosave, and v1 migration are built. Regression tests and automated Edge checks cover the studio interactions. Generation uses deterministic DSP and instrument roles; no trained model is implemented. Physical-microphone tuning, listening, deployment, and demo rehearsal remain open. See [`WORKLOAD_SPLIT.md`](WORKLOAD_SPLIT.md) for ownership.
+> **Current repository status (2026-10-11):** The Next.js studio includes arrangement view, track zoom, live hum spectrogram, animated reveal, five-instrument playback, collision-aware note editing, and MIDI export. Per-track Low/Medium/High and Snap controls regenerate from musical sources at capture tempo, including after Save/Open. Rectangular region copy and atomic group paste support pitched tracks and multiple drum rows. The zoomed Drums tab displays all five rhythm-only parts (Kick, Snare, Closed hat, Open hat, Crash); recording and editing target the selected lane while playback/export retain all lanes. Right-click deletion and exclusive Solo use the existing Undo/Redo history. Clear/Repeat, keyboard shortcuts, strict ProjectV3 save/open, autosave, and v1/v2 migration are built. Regression tests and automated Edge checks cover the studio interactions. Generation uses deterministic DSP and instrument roles; no trained model is implemented. Physical-microphone tuning, listening, deployment, and demo rehearsal remain open. See [`WORKLOAD_SPLIT.md`](WORKLOAD_SPLIT.md) for ownership.
 
 ## What are we building?
 
@@ -35,7 +35,7 @@ Pick an instrument track
 - [x] **Generate:** stable pitch segmentation, harmony fitting, and Off/1/4/1/8/1/16 timing for melodic tracks.
 - [x] **Reveal:** shows the pipeline's real stages: detected notes print in, timing snaps when enabled, and the key/chords appear. Melody keeps confirmed pitches; other roles fit harmony. Skipped under reduced motion.
 - [x] **Learn:** chord names and roman numerals on the zoomed lane's bar grid (the current chord lights during playback), key and part role in the track panel, do-re-mi on notes, and a live pitch readout (note, degree, cents) while recording.
-- [x] **Note sensitivity:** Low, Medium, and High in the top menu; all three profiles are generated per take and swap immediately. Snap updates existing notes immediately. Hand edits opt a part out of automatic profile switching.
+- [x] **Note sensitivity:** Low, Medium, and High beneath each expanded track's Sound selector, alongside that instrument's Snap grid. All five tracks remember independent settings (Drums shares one pair across its five parts). Switching profiles regenerates the latest unedited take even after Save/Open or autosave reload. Hand edits opt a part out; older saves keep their notes and apply sensitivity to future takes.
 - [x] **Play:** Tone.js playback of all tracks with independent Mute, exclusive Solo, and BPM 60–180. M/S show their names on hover or keyboard focus.
 - [x] **Track sounds:** independent smplr preset dropdowns beneath expanded track titles, with lazy loading, retry, and the original synth fallback.
 - [x] **Playback count-in / metronome:** optional four-beat count-in and beat clicks; listening verification remains open.
@@ -67,7 +67,7 @@ The demo targets **clear, one-note-at-a-time humming** in a reasonably quiet roo
 | Transport / synth fallback | [Tone.js](https://tonejs.github.io/) v15; same underlying audio context as smplr |
 | MIDI export | [`@tonejs/midi`](https://github.com/Tonejs/Midi) |
 | State | React state in `src/components/Studio.tsx` (`Track[]`) |
-| Persistence | `localStorage` autosave + `.humstudio.json` files, schema v2 (`src/lib/persistence/project.ts`) |
+| Persistence | `localStorage` autosave + `.humstudio.json` files, schema v3 (`src/lib/persistence/project.ts`) |
 | Cloud / accounts | **None.** Audio never leaves the browser. |
 
 **Important:** Nothing in this repo is a trained AI model. Pitch detection is DSP (Pitchy), and note generation uses deterministic heuristics. Describe it accurately when presenting.
@@ -84,7 +84,7 @@ Edit the three `config` objects in [`src/lib/audio/note-sensitivity.ts`](src/lib
 | Medium (default) | 0.7 | 120 | 5 | 100 |
 | High | 0.5 | 60 | 3 | 60 |
 
-Smaller `pitchToleranceSemitones` makes smaller changes count; smaller `stableMs`/`medianWindow` reacts faster. Keep `minNoteMs` no larger than `stableMs`. Valid tolerance is 0.5..3 semitones. Silence hold, re-attack ratio and octave hold are shared by all profiles. Melody retains confirmed pitches at every level. Studio caches all three profiles plus analysis frames and the capture BPM in memory. **Sensitivity** swaps profiles; **Snap** rebuilds timing at the original BPM, so later tempo changes do not move notes. Off restores original timing. A selected key survives both settings until a new Melody take. A hand edit drops that part's take; Snap still works on edited/sample notes without discarding deliberate overlaps.
+Smaller `pitchToleranceSemitones` makes smaller changes count; smaller `stableMs`/`medianWindow` reacts faster. Keep `minNoteMs` no larger than `stableMs`. Valid tolerance is 0.5..3 semitones. Silence hold, re-attack ratio and octave hold are shared by all profiles. Melody retains confirmed pitches at every level. Studio retains three note-only detection sources, phrase boundaries, and capture BPM. No capture frames are required for later regeneration. **Sensitivity** swaps that instrument's profiles; **Snap** rebuilds that track at the original capture BPM, so later tempo changes do not move notes. Independent settings are undoable. Melody/Keys may refit shared harmony using every dependent track's own settings. Off restores original timing. A selected key survives both settings until a new Melody take. A hand edit drops that part's take; Snap still works on edited/sample notes without discarding deliberate overlaps.
 
 ## Getting started
 
@@ -121,7 +121,7 @@ npm run build
 npm test
 ```
 
-`npm test` runs playback, preset, harmony, segmentation, capture, generation, persistence, editing, track-control, and MIDI regression tests using TypeScript and Node's built-in test runner, without adding a testing dependency. Fixtures cover held-note wobbles, short dropouts across frame rates and tempos, genuine rests, all sensitivity profiles, rhythm-only Drum parts, harmony merging, Off timing, sample switching, stale loads, fallback/retry, strict project validation and v1 migration, collision-aware edits, single-note deletion, selected-lane replacement, exclusive Solo and legacy multi-solo normalization, velocity conversion, and independent note stops. Real browser listening and physical microphone tests are still necessary. The production build downloads the existing Archivo font from Google Fonts when it is not cached. Lint ignores the legacy generated `.test-build/` directory.
+`npm test` runs playback, preset, harmony, segmentation, capture, generation, persistence, editing, track-control, and MIDI regression tests using TypeScript and Node's built-in test runner, without adding a testing dependency. Fixtures cover held-note wobbles, short dropouts across frame rates and tempos, genuine rests, all sensitivity profiles, rhythm-only Drum parts, harmony merging, Off timing, sample switching, stale loads, fallback/retry, strict project validation and v1/v2 migration, collision-aware edits, single-note deletion, selected-lane replacement, exclusive Solo and legacy multi-solo normalization, velocity conversion, and independent note stops. Real browser listening and physical microphone tests are still necessary. The production build downloads the existing Archivo font from Google Fonts when it is not cached. Lint ignores the legacy generated `.test-build/` directory.
 
 The optional [studio interaction suite](src/tests/browser/studio-interactions.mjs) uses an existing Playwright installation and Microsoft Edge, with Node 24+ and `npm run dev` running. No application dependency is added:
 
@@ -130,6 +130,19 @@ node src/tests/browser/studio-interactions.mjs <path-to-playwright-package> [htt
 ```
 
 It checks right-click/keyboard deletion and history, drag/resize, all drum lanes and selected-part edits, synthetic microphone capture and reveal, hover/focus tooltips, exclusive Solo and keyboard S, Save/Open/autosave, MIDI export, and playback controls at 1280/390/320 px. Delayed synthetic samples exercise real smplr decoding, rapid switching, fallback/retry, and fixed transport/ruler/track positions without depending on upstream downloads. Screenshots and results are written to ignored `.test-build/`; physical microphone accuracy and real instrument timbre are not measured.
+
+## Copy a region and reuse a phrase
+
+Open an instrument and press **Ctrl+C** (or Cmd+C) while outside a text field/dropdown. Drag a rectangle in any direction; notes intersecting it are selected whole. Release the mouse, then drag the highlighted group horizontally and drop to insert copies. Original notes remain; pitches, durations, velocities and relative timing are preserved. Drums can copy across all visible rows without changing the selected part. Only the group's anchor uses that track's Snap setting.
+
+Escape cancels selection or a preview. Ctrl+V pastes at the current playhead (beat 1 when stopped). Each successful paste is one Undo/Redo step. Out-of-song placement, same-pitch collisions, and the 10,000-note project limit reject the entire group. The clipboard works within one instrument and is never saved.
+
+New saves/autosaves use **schema v3** and restore each track's settings and note-only regeneration sources. v2 imports apply their old global Snap/Sensitivity to every instrument; v1 imports put notes on Melody and use Medium sensitivity. Legacy autosaves are read without deleting their storage entries. Older or hand-edited notes remain intact when Sensitivity changes because their missing original detection variants cannot be recovered.
+
+The new optional browser regression suite uses the same existing Playwright setup:
+```bash
+node src/tests/browser/per-track-copy.mjs <path-to-playwright-package> [http://localhost:3000]
+```
 
 ## File structure
 
@@ -155,7 +168,7 @@ src/
   tests/                 # playback, presets, harmony, segmentation, generation + synthetic fixtures
 ```
 
-Note editing lives in `TrackRow.tsx` with pure rules in `src/lib/note-edit.ts`; settings updates use `src/lib/music/arrangement-settings.ts`, and persistence is `src/lib/persistence/project.ts`. Exact contracts are in [`TECHNICAL_SPEC.md`](TECHNICAL_SPEC.md).
+Note editing lives in `EditableNotes.tsx` (rendered by `TrackRow.tsx`) with pure rules in `src/lib/note-edit.ts` and region operations in `src/lib/note-clipboard.ts`; settings updates use `src/lib/music/arrangement-settings.ts`, and persistence is `src/lib/persistence/project.ts`. Exact contracts are in [`TECHNICAL_SPEC.md`](TECHNICAL_SPEC.md).
 
 ## Key design choices
 
@@ -190,7 +203,7 @@ If the room or mic fails, use **Demo hum** and say it is a demo hum.
 
 ## Privacy and data
 
-Microphone samples are analyzed locally and discarded. Latest-take analysis features and sensitivity caches remain in memory only; hand edits remove that part's take cache. Saved projects and autosave contain notes and settings, never audio or analysis frames. Nothing is uploaded.
+Microphone samples are analyzed locally and discarded. Project v3 saves independent track settings and bounded note-only Low/Medium/High detections, phrase IDs, original capture BPM, and unsnapped timing sources. Hand edits remove the applicable take source. Clipboard selection and preview remain in memory. Saved projects and autosave contain no microphone samples, buffers, full analysis frames or device information. Nothing is uploaded.
 
 ## Documentation
 

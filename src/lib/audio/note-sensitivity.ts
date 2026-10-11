@@ -4,6 +4,13 @@ export const NOTE_SENSITIVITY_LEVELS = ["low", "medium", "high"] as const;
 export type NoteSensitivity = typeof NOTE_SENSITIVITY_LEVELS[number];
 export const DEFAULT_NOTE_SENSITIVITY: NoteSensitivity = "medium";
 
+/** Absolute RMS gate and rise above the recent floor; Medium retains the original onset thresholds. */
+export const DRUM_ONSET_PRESETS: Readonly<Record<NoteSensitivity, { minRms: number; riseRatio: number }>> = {
+  low: { minRms: 0.04, riseRatio: 2.5 },
+  medium: { minRms: 0.02, riseRatio: 2 },
+  high: { minRms: 0.01, riseRatio: 1.5 },
+};
+
 /**
  * Fine-tune hum-to-note response here. A smaller pitch tolerance detects smaller
  * shifts; shorter stability/minimum durations and median windows react faster.

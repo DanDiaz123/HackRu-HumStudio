@@ -139,7 +139,7 @@ test("selected sensitivity reaches generated melody notes across BPM and Snap se
   assert.deepEqual(frames, before);
 });
 
-test("pitch sensitivity does not alter drum onsets, pitches, or rhythm snapping", () => {
+test("strong drum hits retain pitches and rhythm snapping across onset sensitivity levels", () => {
   const frames = shiftedHum(0.6);
   for (const quantize of ["off", "1/4", "1/8", "1/16"] as const) {
     const expected = values(generateNotes(instrument("drums"), frames, 120, quantize, DEFAULT_HARMONY));

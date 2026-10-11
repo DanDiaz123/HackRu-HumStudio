@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { generateTrackVariants } from "../lib/generate.ts";
+import { detectTrackProfiles, renderTrackProfiles, generateTrackVariants } from "../lib/generate.ts";
 import { applyNoteSettings, captureArrangementSnapshot, projectArrangementSnapshot, type ArrangementSnapshot, type NoteSettingsInput, type RecordedTake } from "../lib/music/arrangement-settings.ts";
 import { MAX_PROJECT_NOTES, newProjectMeta, serializeProject } from "../lib/persistence/project.ts";
 import { DEFAULT_HARMONY, fitToHarmony, inferHarmony } from "../lib/music/harmony.ts";
@@ -12,12 +12,13 @@ const values = (notes: Note[]) => notes.map(({ midi, startBeat, durationBeats, v
 const note = (midi: number, startBeat = 0.28, durationBeats = 0.71): Note =>
   ({ id: `manual-${midi}`, midi, startBeat, durationBeats, velocity: 0.8 });
 const input = (patch: Partial<NoteSettingsInput> = {}): NoteSettingsInput => ({
-  tracks: initialTracks(), harmony: DEFAULT_HARMONY, takes: {}, snapSources: {},
+  tracks: initialTracks().map(track => ({ ...track, quantize: "off" })), trackId: "melody", harmony: DEFAULT_HARMONY, takes: {}, snapSources: {},
   sensitivity: "medium", quantize: "off", harmonyDriver: null, keyOverride: null, ...patch,
 });
 function take(id: string, bpm = 120): RecordedTake {
   const frames = pitchFrames([{ midi: 64, durationSec: 0.83 }, { midi: 64.6, durationSec: 0.79 }]);
-  return { frames, bpm, variants: generateTrackVariants(inst(id), frames, bpm, "off", DEFAULT_HARMONY) };
+  const sources = detectTrackProfiles(inst(id), frames, bpm);
+  return { sources, bpm, variants: renderTrackProfiles(inst(id), sources, bpm, "off", DEFAULT_HARMONY) };
 }
 
 test("profile switching uses precomputed note IDs and leaves original input/cache intact", () => {
@@ -35,7 +36,7 @@ test("Snap regenerates each take at its capture tempo and Off returns original b
   const melody = take("melody", 90);
   const state = input({ takes: { melody }, sensitivity: "high", quantize: "1/16", resnap: true });
   const snapped = applyNoteSettings(state);
-  const expected = generateTrackVariants(inst("melody"), melody.frames, 90, "1/16", DEFAULT_HARMONY).high;
+  const expected = renderTrackProfiles(inst("melody"), melody.sources, 90, "1/16", DEFAULT_HARMONY).high;
   assert.deepEqual(values(snapped.tracks.find(track => track.instrument.id === "melody")!.notes), values(expected));
   const restored = applyNoteSettings({ ...state, tracks: snapped.tracks, takes: snapped.takes,
     snapSources: snapped.snapSources, quantize: "off" });
@@ -58,7 +59,7 @@ test("Keys harmony changes preserve hand-edited Melody semitones and timing", ()
   const keys = take("keys");
   const cMajor = [note(60, 0, 3), note(64, 0, 3), note(67, 0, 3)];
   keys.variants = { low: cMajor, medium: cMajor, high: cMajor };
-  const next = applyNoteSettings(input({ tracks, takes: { keys }, harmonyDriver: "keys" }));
+  const next = applyNoteSettings(input({ tracks, takes: { keys }, trackId: "keys", harmonyDriver: "keys" }));
   assert.notDeepEqual(next.harmony, DEFAULT_HARMONY);
   assert.deepEqual(next.tracks.find(track => track.instrument.id === "melody")!.notes, [note(61)]);
 });
@@ -66,13 +67,13 @@ test("Keys harmony changes preserve hand-edited Melody semitones and timing", ()
 test("Snap updates overlapping manual chord notes, retains IDs, and restores unsnapped timing", () => {
   const chord = [note(60), note(64), note(67)];
   const tracks = initialTracks().map(track => track.instrument.id === "keys" ? { ...track, notes: chord, sample: false } : track);
-  const snapped = applyNoteSettings(input({ tracks, quantize: "1/4", resnap: true }));
+  const snapped = applyNoteSettings(input({ tracks, trackId: "keys", quantize: "1/4", resnap: true }));
   const snappedChord = snapped.tracks.find(track => track.instrument.id === "keys")!.notes;
   assert.equal(snappedChord.length, 3);
   assert.ok(snappedChord.every(n => n.startBeat === 0 && n.durationBeats === 1));
   assert.deepEqual(snappedChord.map(n => n.id), chord.map(n => n.id));
-  const finer = applyNoteSettings(input({ tracks: snapped.tracks, snapSources: snapped.snapSources, quantize: "1/16", resnap: true }));
-  const restored = applyNoteSettings(input({ tracks: finer.tracks, snapSources: finer.snapSources, quantize: "off", resnap: true }));
+  const finer = applyNoteSettings(input({ tracks: snapped.tracks, snapSources: snapped.snapSources, trackId: "keys", quantize: "1/16", resnap: true }));
+  const restored = applyNoteSettings(input({ tracks: finer.tracks, snapSources: finer.snapSources, trackId: "keys", quantize: "off", resnap: true }));
   assert.deepEqual(restored.tracks.find(track => track.instrument.id === "keys")!.notes, chord);
   assert.equal(restored.tracks.find(track => track.instrument.id === "drums")!.sample, true);
 });
@@ -81,9 +82,9 @@ test("Snap rebuilds a selected Drum part without dropping the other rhythm lanes
   const drums = inst("drums");
   const frames = pitchFrames([{ midi: null, durationSec: 0.18, rms: 0.2 }, { midi: null, durationSec: 0.32, rms: 0.003 },
     { midi: null, durationSec: 0.18, rms: 0.2 }]);
-  const take = { frames, bpm: 120, drumPart: "snare" as const,
+  const take = { sources: detectTrackProfiles(drums, frames, 120, "snare"), bpm: 120, drumPart: "snare" as const,
     variants: generateTrackVariants(drums, frames, 120, "off", DEFAULT_HARMONY, "medium", undefined, "snare") };
-  const next = applyNoteSettings(input({ takes: { drums: take }, quantize: "1/4", resnap: true }));
+  const next = applyNoteSettings(input({ takes: { drums: take }, trackId: "drums", quantize: "1/4", resnap: true }));
   const notes = next.tracks.find(track => track.instrument.id === "drums")!.notes;
   assert.ok(notes.some(note => note.midi === 36), "existing kick lane survives");
   assert.ok(notes.some(note => note.midi === 38), "selected snare lane is generated");
@@ -104,17 +105,17 @@ test("dependent captured Bass roles regenerate under the newly selected Melody h
   const bass = take("bass");
   const next = applyNoteSettings(input({ takes: { melody, bass }, sensitivity: "high", harmonyDriver: "melody" }));
   assert.deepEqual(next.harmony, inferHarmony(melody.variants.high));
-  const expected = generateTrackVariants(inst("bass"), bass.frames, bass.bpm, "off", next.harmony).high;
+  const expected = renderTrackProfiles(inst("bass"), bass.sources, bass.bpm, "off", next.harmony).medium;
   assert.deepEqual(values(next.tracks.find(track => track.instrument.id === "bass")!.notes), values(expected));
 });
 
 test("explicit key changes keep the override while Keys remains the chord driver", () => {
   const keys = take("keys");
-  const next = applyNoteSettings(input({ takes: { keys }, harmonyDriver: "keys", keyOverride: { tonic: 2, mode: "minor" }, fitEditedMelody: true }));
+  const next = applyNoteSettings(input({ takes: { keys }, trackId: "keys", harmonyDriver: "keys", keyOverride: { tonic: 2, mode: "minor" }, fitEditedMelody: true }));
   assert.equal(next.harmony.tonic, 2);
   assert.equal(next.harmony.mode, "minor");
   const switched = applyNoteSettings(input({ tracks: next.tracks, harmony: next.harmony, takes: next.takes,
-    snapSources: next.snapSources, sensitivity: "high", harmonyDriver: "keys", keyOverride: { tonic: 2, mode: "minor" } }));
+    snapSources: next.snapSources, trackId: "keys", sensitivity: "high", harmonyDriver: "keys", keyOverride: { tonic: 2, mode: "minor" } }));
   assert.equal(switched.harmony.tonic, 2);
   assert.equal(switched.harmony.mode, "minor");
 });
@@ -136,7 +137,7 @@ test("history retains captured profiles, capture BPM and Snap sources after a ha
 
 test("project Open resets analysis caches while retaining metadata/settings and unrounded manual note sources", () => {
   const tracks = initialTracks().map(track => track.instrument.id === "melody" ? { ...track, notes: [note(61)], sample: false } : track);
-  const project = { tracks, harmony: DEFAULT_HARMONY, bpm: 87, quantize: "1/16" as const, sensitivity: "high" as const,
+  const project = { tracks: tracks.map(track => ({ ...track, quantize: "1/16" as const, sensitivity: "high" as const })), harmony: DEFAULT_HARMONY, bpm: 87,
     meta: { id: "opened-id", name: "Opened tune", createdAt: "2026-10-10T12:00:00.000Z" } };
   const loaded = projectArrangementSnapshot(project);
   assert.deepEqual(loaded.takes, {});
@@ -144,8 +145,8 @@ test("project Open resets analysis caches while retaining metadata/settings and 
   assert.equal(loaded.harmonyDriver, null);
   assert.deepEqual(loaded.meta, project.meta);
   assert.equal(loaded.bpm, 87);
-  assert.equal(loaded.quantize, "1/16");
-  assert.equal(loaded.sensitivity, "high");
+  assert.equal(loaded.tracks[0].quantize, "1/16");
+  assert.equal(loaded.tracks[0].sensitivity, "high");
   const snapped = applyNoteSettings({ ...input(), ...loaded, keyOverride: loaded.pickedKey, quantize: "1/4", resnap: true });
   const off = applyNoteSettings({ ...input(), ...snapped, sensitivity: "low", quantize: "off", resnap: true });
   assert.deepEqual(off.tracks.find(track => track.instrument.id === "melody")!.notes, [note(61)]);
@@ -154,7 +155,7 @@ test("project Open resets analysis caches while retaining metadata/settings and 
 
 test("saving a history snapshot excludes analysis/cache fields from project JSON", () => {
   const state: ArrangementSnapshot = { tracks: initialTracks(), harmony: DEFAULT_HARMONY, bpm: 120,
-    quantize: "off", sensitivity: "medium", meta: newProjectMeta(), takes: { melody: take("melody") },
+    meta: newProjectMeta(), takes: { melody: take("melody") },
     snapSources: { keys: [note(60)] }, pickedKey: { tonic: 0, mode: "major" }, harmonyDriver: "melody" };
   const saved = captureArrangementSnapshot(state);
   state.meta.name = "Changed later";

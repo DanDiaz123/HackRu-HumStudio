@@ -12,7 +12,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 This file is for **AI coding agents and human contributors** working in the HumStudio repository. Read it **before** writing or changing implementation code.
 
-**Project status:** The Next.js app is scaffolded and the multi-track studio UI is built (`src/components/Studio.tsx`, `TrackRow.tsx`, `Spectrogram.tsx`). Playback has a regression suite, metronome, and four-beat playback count-in. Melodic generation uses tested deterministic segmentation in `src/lib/audio/segment-notes.ts`, followed by instrument/harmony fitting, merging, and quantization in `src/lib/generate.ts`; Drums support five rhythm-only selectable lanes. Note editing (collision-aware, `src/lib/note-edit.ts`), undo/redo, Clear/Repeat, keyboard shortcuts, and persistence (autosave + `.humstudio.json` schema v2, `src/lib/persistence/project.ts`) are built. Real-microphone and audible playback verification remain open. Still inspect the repository before assuming a feature works.
+**Project status:** The Next.js app is scaffolded and the multi-track studio UI is built (`src/components/Studio.tsx`, `TrackRow.tsx`, `Spectrogram.tsx`). Playback has a regression suite, metronome, and four-beat playback count-in. Melodic generation uses tested deterministic segmentation in `src/lib/audio/segment-notes.ts`, followed by instrument/harmony fitting, merging, and quantization in `src/lib/generate.ts`; Drums support five rhythm-only selectable lanes. Note editing (collision-aware, `src/lib/note-edit.ts`), undo/redo, Clear/Repeat, keyboard shortcuts, and persistence (autosave + `.humstudio.json` schema v3, `src/lib/persistence/project.ts`) are built. Real-microphone and audible playback verification remain open. Still inspect the repository before assuming a feature works.
 **Project aim:** Browser-based **multi-track hum-to-music sketchpad** for HackRU: pick an instrument track, hum, see a live spectrogram, get notes for that instrument, play the arrangement, export MIDI.
 **Working product name:** HumStudio.
 **Documentation precedence:** `PRODUCT.md` (product scope) > `TECHNICAL_SPEC.md` (shared interfaces, algorithms, acceptance) > `SOFTWARE_DESIGN_DOCUMENT.md` (rationale) > `README.md` (onboarding). Visual decisions follow `DESIGN.md`; file ownership follows `WORKLOAD_SPLIT.md`. If documents conflict, correct the documentation as part of the change and tell the team.
@@ -53,7 +53,7 @@ Only claim a command passed if it actually ran and passed. If no `package.json` 
 
 ## 3. Immutable shared contracts
 
-The canonical types are defined in `TECHNICAL_SPEC.md` section 3; `Note` and `QuantizeDivision` live in `src/lib/music/types.ts` (re-exported by `src/lib/tracks.ts`). The legacy `Project` v1 shape remains a compatibility contract; current multi-track persistence is `ProjectV2` in `src/lib/persistence/project.ts`.
+The canonical types are defined in `TECHNICAL_SPEC.md` section 3; `Note` and `QuantizeDivision` live in `src/lib/music/types.ts` (re-exported by `src/lib/tracks.ts`). The legacy `Project` v1 shape remains a compatibility contract; current multi-track persistence is `ProjectV3` in `src/lib/persistence/project.ts`.
 
 The legacy v1 shape is retained for import compatibility:
 
@@ -82,7 +82,7 @@ export interface Project {
 
 Valid notes satisfy: integer MIDI 0..127; finite startBeat >= 0; finite durationBeats > 0; finite velocity 0..1. Tempo input is constrained to 60..180; the UI defaults to **BPM 120 and quantization `"1/4"`**. Fixed 4/4, 8 bars.
 
-**Multi-track contracts** (`src/lib/tracks.ts`, see `TECHNICAL_SPEC.md` 3.1-3.3): `Instrument`, `Track { instrument, presetId, drumPart?, notes, muted, solo, sample }`, `INSTRUMENTS` (Melody, Bass, Keys, Drums, Strings), `HumFrame`, and the generation seam. `drumPart` is one of `kick`, `snare`, `hat`, `openHat`, or `crash`; it selects the recording/editing lane while all five drum lanes remain visible and stored for playback/export. Part-edit callbacks carry only selected-lane notes; the dedicated deletion callback can remove any visible note by ID. Solo is exclusive; older multi-solo projects keep the first soloed category in fixed instrument order.
+**Multi-track contracts** (`src/lib/tracks.ts`, see `TECHNICAL_SPEC.md` 3.1-3.3): `Instrument`, `Track { instrument, presetId, sensitivity, quantize, drumPart?, notes, muted, solo, sample }`, `INSTRUMENTS` (Melody, Bass, Keys, Drums, Strings), `HumFrame`, and the generation seam. `drumPart` is one of `kick`, `snare`, `hat`, `openHat`, or `crash`; it selects the recording/editing lane while all five drum lanes remain visible and stored for playback/export. Part-edit callbacks carry only selected-lane notes; the dedicated deletion callback can remove any visible note by ID. Solo is exclusive; older multi-solo projects keep the first soloed category in fixed instrument order.
 
 ```ts
 generateTrack(inst: Instrument, frames: HumFrame[], bpm: number, quantize: QuantizeDivision, harmony: Harmony, sensitivity?: NoteSensitivity): Promise<Note[]>
@@ -94,6 +94,7 @@ The song has one shared `Harmony` (`src/lib/music/harmony.ts`, `TECHNICAL_SPEC.m
 
 ```text
 src/components/Studio.tsx        # shell, canonical Track[] state, record/generate/reveal flow   (Person 4)
+src/components/EditableNotes.tsx # editable notes, region selection and group paste             (Person 3)
 src/components/TrackRow.tsx      # one track: arrangement row / zoomed lane / note UI           (Person 3)
 src/components/Spectrogram.tsx   # halftone display of HumFrame[]                               (Person 1 + 3)
 src/lib/tracks.ts                # Instrument, Track, INSTRUMENTS, lane geometry                 (shared)
@@ -112,7 +113,7 @@ src/lib/audio/click-track.ts     # metronome/count-in                           
 src/lib/midi.ts                  # @tonejs/midi export                                           (Person 4)
 src/lib/audio/segment-notes.ts   # implemented: gated HumFrame -> SegmentedNote[] + rest boundary (Person 1)
 src/lib/audio/note-sensitivity.ts # Low/Medium/High tuning profiles and validated selection      (Person 1, shared)
-src/lib/persistence/project.ts   # ProjectV2: validate/parse/serialize, v1 import, autosave key    (Person 4)
+src/lib/persistence/project.ts   # ProjectV3: validate/parse/serialize, v1 import, autosave key    (Person 4)
 src/lib/note-edit.ts             # pure editing rules: no same-pitch overlap, stretch, repeat      (Person 3)
 src/tests/                       # playback, harmony, segmentation, generation regression suites
 ```
@@ -184,7 +185,7 @@ MIDI export at 120 BPM maps beat 2 to 1.0 second
 Repeated Tone scheduling does not create duplicated playback
 generateTrack returns notes inside the instrument's range, and [] for silence
 detectKey: C-E-G-C melody -> C major; inferHarmony: C|F|G|C melody -> C F G C chords
-ProjectV2 rejects unknown fields, invalid notes, duplicate IDs, and oversized input
+ProjectV3 rejects unknown fields, invalid notes, duplicate IDs, and oversized input
 Drum part selection maps onset rhythm to one of five saved MIDI lanes
 MIDI encoding separates melodic channels and uses channel 10 for drums
 ```

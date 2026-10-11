@@ -45,6 +45,8 @@ HumStudio turns a hum into a **multitrack instrumental arrangement** that can be
 - Five fixed instrument tracks: Melody, Bass, Keys, Drums, Strings, over eight bars of 4/4.
 - All five drum rows stay visible; the selected part controls recording, adding, moving/resizing, Clear, and Repeat. Right-click deletes any visible note, including an unselected drum part, with Undo/Redo support.
 - Mute is independent; Solo selects exactly one track, or clears when clicked again. Older multi-solo projects keep the first soloed track in fixed instrument order without dropping notes.
+- Each instrument owns **Sensitivity** (Low/Medium/High) and **Snap** (Off/1/4/1/8/1/16), shown beneath Sound when expanded. Drums shares these settings across all five lanes. Changes are undoable; BPM and harmony remain shared.
+- **Copy Region:** Ctrl+C arms a rectangular whole-note selection, then dragging the group pastes fresh copies within that instrument. Chords and multiple visible drum rows are supported. Only the placement anchor snaps; collisions, timeline overflow and the project note limit reject the complete operation. Escape cancels, Ctrl+V pastes at the current playhead, and each paste is one history step.
 - Click a track to expand it, choose its sampled **Sound**, record a hum while a live spectrogram fills the lane, and watch the resulting notes reveal.
 - **Generation is not guaranteed to be a literal transcription.** Pitchy plus deterministic DSP estimates and segments pitches, then instrument-role and harmony heuristics may alter pitches, timing, or voices. Melody retains confirmed pitches unless a user explicitly changes the key; Bass, Keys, and Strings generate parts according to their roles. Drums capture the timing of onsets in one chosen kit lane.
 - MIDI notes use `Note { id, midi, startBeat, durationBeats, velocity }` in quarter-note beats. A shared `Harmony` stores a key and one chord per bar.
@@ -70,7 +72,7 @@ HackRU is a short live demo on an unfamiliar microphone, with room noise and pot
 
 **Technology:** Next.js/React/TypeScript; local Web Audio + Pitchy; deterministic segmentation and rule-based harmony; Tone.js transport with smplr sound presets and synth fallback; `@tonejs/midi`. No trained model, generative AI service, authentication, or music-learning backend is implemented.
 
-**Privacy:** Mic audio stays on device and is not uploaded or saved. Latest-take pitch-analysis caches remain in memory. Project files/autosave include note data, selected sounds, chords, tempo, Snap, and Sensitivity, not recordings. Sample instruments download sound assets from documented third-party hosts; they do not receive microphone recordings.
+**Privacy:** Mic audio stays on device and is not uploaded or saved. Schema v3 project files/autosave include independent track settings and bounded note-derived Low/Medium/High detections, phrase boundaries, capture tempo, and unsnapped timing sources. Full analysis streams, audio buffers, device information and copy previews are excluded. v1/v2 imports preserve notes and migrate old settings; unavailable or hand-edited sensitivity sources apply only to future takes. Sample instruments download sound assets from documented third-party hosts; they do not receive microphone recordings.
 
 ## Demo story for Education Track (90 seconds)
 

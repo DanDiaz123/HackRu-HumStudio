@@ -198,7 +198,7 @@ automated scheduling tests do not establish audible quality.
 - [ ] Review label legibility, small screens, keyboard focus and high-contrast states for a novice during a judged demonstration; keep `LivePitch` visual-only accessibility limitation documented (it is currently `aria-hidden`).
 - [ ] Add short in-context explanations only if needed for the demo; do **not** build an unrelated tutorial system or automatic grading flow.
 
-**Primary files:** `src/components/TrackRow.tsx`, a new `src/components/PianoRoll.tsx` if helpful, and presentation/geometry helpers. Coordinate spectrogram changes with Person 1. Person 4 owns global CSS/design tokens; request a style change rather than independently restyling all of `globals.css`.
+**Primary files:** `src/components/TrackRow.tsx`, `src/components/EditableNotes.tsx`, `src/lib/note-clipboard.ts`, a new `src/components/PianoRoll.tsx` if helpful, and presentation/geometry helpers. Coordinate spectrogram changes with Person 1. Person 4 owns global CSS/design tokens; request a style change rather than independently restyling all of `globals.css`.
 
 **Handoff to Person 4:** A track editor that accepts the selected track's notes and emits valid immutable note edits to parent state. Agree on callback props before implementing them.
 

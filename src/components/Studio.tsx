@@ -1,13 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { type GenTrace, generateTrackVariants } from "@/lib/generate";
-import { DEFAULT_NOTE_SENSITIVITY, NOTE_SENSITIVITY_LEVELS, NOTE_SENSITIVITY_PRESETS, isNoteSensitivity, type NoteSensitivity } from "@/lib/audio/note-sensitivity";
+import { type GenTrace, detectTrackProfiles, renderTrackProfiles } from "@/lib/generate";
+import { DRUM_ONSET_PRESETS, type NoteSensitivity } from "@/lib/audio/note-sensitivity";
 import { type HumFrame, micErrorMessage, startDemoHum, startMic } from "@/lib/hum";
 import { download } from "@/lib/download";
 import { exportMidi } from "@/lib/midi";
+import { pasteCopiedNotes, type NoteClipboard } from "@/lib/note-clipboard";
 import { deleteNoteById, repeatFirstHalf, replaceDrumPartNotes } from "@/lib/note-edit";
-import { type LoadedProject, MAX_PROJECT_CHARS, MAX_PROJECT_NOTES, STORAGE_KEY, newProjectMeta, parseProject, serializeProject } from "@/lib/persistence/project";
+import { type LoadedProject, MAX_PROJECT_CHARS, MAX_PROJECT_NOTES, STORAGE_KEY, readAutosave, newProjectMeta, parseProject, serializeProject } from "@/lib/persistence/project";
 import {
   DEFAULT_HARMONY,
   type Key,
@@ -49,7 +50,9 @@ const SHORTCUTS: [string, string][] = [
   ["Space", "Play / pause"],
   ["R", "Record or stop (open track)"],
   ["1 – 5", "Open a track"],
-  ["Esc", "Back to all tracks"],
+  ["Esc", "Cancel copy / back to all tracks"],
+  ["Ctrl C", "Select a region, then drag copies to paste"],
+  ["Ctrl V", "Paste copied region at the playhead"],
   ["M / S", "Mute / solo the open track"],
   ["K", "Metronome"],
   ["L", "Learn"],
@@ -80,8 +83,8 @@ export default function Studio() {
   const [harmony, setHarmony] = useState(DEFAULT_HARMONY);
   const [learn, setLearn] = useState(true);
   const [bpm, setBpm] = useState(120);
-  const [quantize, setQuantize] = useState<QuantizeDivision>("1/4");
-  const [sensitivity, setSensitivity] = useState<NoteSensitivity>(DEFAULT_NOTE_SENSITIVITY);
+  const [editorEpoch, setEditorEpoch] = useState(0);
+  const [profileTracks, setProfileTracks] = useState<string[]>([]);
   const [zoomedId, setZoomedId] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState("");
@@ -109,7 +112,7 @@ export default function Studio() {
   const stopRef = useRef<(() => void) | null>(null);
   // Re-record clears the part up front; a failed take puts it back (never lose a part to an empty take).
   const clearedRef = useRef<{ id: string; notes: Note[] } | null>(null);
-  // Cache all profiles and capture tempo; these local analysis features contain no microphone samples.
+  // Musical detections and profile caches support regeneration without persisting capture frames.
   const takesRef = useRef<RecordedTakes>({});
   const snapSourcesRef = useRef<SnapSources>({});
   const harmonyDriverRef = useRef<"melody" | "keys" | null>(null);
@@ -137,6 +140,7 @@ export default function Studio() {
     const normalized = normalizeSoloTracks(next);
     arrangementRef.current = { ...arrangementRef.current, tracks: normalized };
     setTracks(normalized);
+    setProfileTracks(Object.keys(takesRef.current));
   }, []);
   const pushHistory = useCallback((s: Snapshot) => {
     const h = historyRef.current;
@@ -345,7 +349,8 @@ export default function Studio() {
       stopRef.current = null;
       if (!zoomed) return;
       // Beatbox hits are mostly unvoiced, so drums count loud frames instead of pitched ones.
-      const heard = zoomed.instrument.kind === "drums" ? (f: HumFrame) => f.rms > 0.02 : (f: HumFrame) => f.hz !== null;
+      const { quantize, sensitivity } = zoomed;
+      const heard = zoomed.instrument.kind === "drums" ? (f: HumFrame) => f.rms > DRUM_ONSET_PRESETS[sensitivity].minRms : (f: HumFrame) => f.hz !== null;
       if (taken.filter(heard).length < 10) {
         restoreCleared();
         setPhase("error");
@@ -362,16 +367,17 @@ export default function Studio() {
         const inst = zoomed.instrument;
         const trace = {} as GenTrace;
         const selectedDrumPart = inst.kind === "drums" ? drumPart(zoomed.drumPart).id : undefined;
-        const variants = generateTrackVariants(inst, taken, bpm, quantize, harmony, sensitivity, trace, selectedDrumPart);
+        const sources = detectTrackProfiles(inst, taken, bpm, selectedDrumPart);
+        const variants = renderTrackProfiles(inst, sources, bpm, quantize, harmony, sensitivity, trace, selectedDrumPart);
+        trace.voicedFrames = taken.filter(frame => frame.hz !== null && Number.isFinite(frame.hz) && frame.hz >= 80 && frame.hz <= 1000 && frame.rms >= 0.01).length;
+        if (!variants[sensitivity].length) throw new Error("empty");
+        let notes = variants[sensitivity];
         if (selectedDrumPart) {
           const selectedMidi = drumPart(selectedDrumPart).midi;
           const existing = arrangementRef.current.tracks.find(track => track.instrument.id === inst.id)?.notes ?? [];
           const otherParts = existing.filter(note => note.midi !== selectedMidi);
-          for (const level of NOTE_SENSITIVITY_LEVELS) {
-            variants[level] = [...otherParts, ...variants[level]].sort((a, b) => a.startBeat - b.startBeat || a.midi - b.midi || a.id.localeCompare(b.id));
-          }
+          notes = [...otherParts, ...notes].sort((a, b) => a.startBeat - b.startBeat || a.midi - b.midi || a.id.localeCompare(b.id));
         }
-        const notes = variants[sensitivity];
         if (!notes.length) throw new Error("empty");
         // A Melody take sets the key and chords, a Keys take re-picks the chords; other pitched parts
         // are re-fitted (moved, never deleted).
@@ -403,12 +409,22 @@ export default function Studio() {
         }
         const pickedKey = inst.id === "melody" ? null : pickedKeyRef.current;
         const driver = inst.id === "melody" || inst.id === "keys" ? inst.id : harmonyDriverRef.current;
-        const takes = { ...takesRef.current, [inst.id]: { frames: taken.map(frame => ({ ...frame })), bpm, variants,
+        const takes = { ...takesRef.current, [inst.id]: { sources, bpm, variants,
           ...(selectedDrumPart ? { drumPart: selectedDrumPart } : {}) } };
         const snapSources = { ...snapSourcesRef.current };
-        delete snapSources[inst.id];
+        if (selectedDrumPart) {
+          const selectedMidi = drumPart(selectedDrumPart).midi;
+          const oldTake = takesRef.current[inst.id];
+          let source = snapSources[inst.id] ?? arrangementRef.current.tracks.find(track => track.instrument.id === inst.id)!.notes;
+          if (oldTake?.drumPart && oldTake.drumPart !== selectedDrumPart) {
+            const oldMidi = drumPart(oldTake.drumPart).midi;
+            const unsnapped = renderTrackProfiles(inst, oldTake.sources, oldTake.bpm, "off", harmony, sensitivity, undefined, oldTake.drumPart)[sensitivity];
+            if (unsnapped.length) source = [...source.filter(note => note.midi !== oldMidi), ...unsnapped];
+          }
+          snapSources[inst.id] = source.filter(note => note.midi !== selectedMidi);
+        } else delete snapSources[inst.id];
         const next = applyNoteSettings({ tracks: arrangementRef.current.tracks, harmony, takes, snapSources,
-          sensitivity, quantize, harmonyDriver: driver, keyOverride: pickedKey });
+          trackId: inst.id, harmonyDriver: driver, keyOverride: pickedKey });
         if (takeUndoRef.current) pushHistory(takeUndoRef.current);
         takeUndoRef.current = null;
         pickedKeyRef.current = pickedKey;
@@ -427,7 +443,7 @@ export default function Studio() {
         setPhase("error"); // the cleared part comes back
         setError(cause instanceof RangeError ? cause.message : "No notes came out of that take. Try a longer, steadier hum.");
       }
-  }, [zoomed, bpm, quantize, harmony, sensitivity, commitTracks, restoreCleared, pushHistory]);
+  }, [zoomed, bpm, harmony, commitTracks, restoreCleared, pushHistory]);
 
   async function record(useDemo: boolean) {
     if (!zoomed || busy) return;
@@ -522,7 +538,7 @@ export default function Studio() {
     const before = snapshot();
     const previousKey = pickedKeyRef.current;
     pickedKeyRef.current = key;
-    if (regenerate(sensitivity, quantize, false, true, false)) pushHistory(before);
+    if (regenerate(undefined, undefined, undefined, true, false)) pushHistory(before);
     else pickedKeyRef.current = previousKey;
   }
 
@@ -541,6 +557,20 @@ export default function Studio() {
     commitTracks(arrangementRef.current.tracks.map((t) => (t.instrument.id === id ? { ...t, notes, sample: false } : t)));
   }
 
+  /** Insert all copied drum/pitched rows in one history step; never use selected-lane replacement. */
+  function pasteNotes(id: string, clipboard: NoteClipboard, anchorBeat: number): string | null {
+    if (busy) return "Finish the current operation before pasting.";
+    const current = arrangementRef.current.tracks;
+    const track = current.find(t => t.instrument.id === id);
+    if (!track) return "Open the source instrument to paste.";
+    try {
+      const notes = pasteCopiedNotes(track, clipboard, anchorBeat,
+        current.reduce((count, t) => count + t.notes.length, 0), current.flatMap(t => t.notes.map(note => note.id)));
+      editNotes(id, notes);
+      return null;
+    } catch (cause) { return cause instanceof Error ? cause.message : "The copied group could not be pasted."; }
+  }
+
   /** Deletion spans visible drum lanes, so it bypasses the selected-part replacement contract. */
   function deleteNote(id: string, noteId: string) {
     if (busy) return;
@@ -557,7 +587,7 @@ export default function Studio() {
 
   // Undo / redo
   const snapshot = (): Snapshot => captureArrangementSnapshot({ tracks: arrangementRef.current.tracks, harmony,
-    bpm: arrangementRef.current.bpm, quantize, sensitivity, meta: metaRef.current,
+    bpm: arrangementRef.current.bpm, meta: metaRef.current,
     takes: takesRef.current, snapSources: snapSourcesRef.current, pickedKey: pickedKeyRef.current,
     harmonyDriver: harmonyDriverRef.current });
   /** Call before any change worth undoing (edits, takes, key, regeneration, clear/repeat, open). */
@@ -571,15 +601,14 @@ export default function Studio() {
     takeUndoRef.current = null;
     metaRef.current = { ...s.meta };
     arrangementRef.current = { tracks: s.tracks, bpm: s.bpm };
-    commitTracks(s.tracks);
     setHarmony(s.harmony);
     setBpm(s.bpm);
-    setQuantize(s.quantize);
-    setSensitivity(s.sensitivity);
+    setEditorEpoch(epoch => epoch + 1);
     takesRef.current = { ...s.takes };
     snapSourcesRef.current = { ...s.snapSources };
     pickedKeyRef.current = s.pickedKey;
     harmonyDriverRef.current = s.harmonyDriver;
+    commitTracks(s.tracks);
     setFrames([]);
     setReveal(null);
     setError("");
@@ -624,7 +653,9 @@ export default function Studio() {
   }
 
   // Project files: autosave to this browser, Save/Open as .humstudio.json
-  const current = (): LoadedProject => ({ meta: metaRef.current, bpm, quantize, sensitivity, harmony, tracks });
+  const current = (): LoadedProject => ({ meta: metaRef.current, bpm, harmony, tracks,
+    regeneration: { takes: takesRef.current, snapSources: snapSourcesRef.current,
+      pickedKey: pickedKeyRef.current, harmonyDriver: harmonyDriverRef.current } });
   function applyProject(p: LoadedProject) {
     restore(projectArrangementSnapshot(p));
     setZoomedId(null);
@@ -634,9 +665,9 @@ export default function Studio() {
   // Restore the autosave once, after mount (localStorage is browser-only). A bad save is ignored, not loaded.
   useEffect(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
+      const saved = readAutosave(localStorage);
       // eslint-disable-next-line react-hooks/set-state-in-effect -- browser storage is only readable after hydration
-      if (saved) applyProject(parseProject(saved));
+      if (saved) applyProject(saved);
     } catch {}
     setRestored(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount only
@@ -654,10 +685,13 @@ export default function Studio() {
     }, 400);
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- current() reads exactly these
-  }, [restored, busy, tracks, harmony, bpm, quantize, sensitivity]);
+  }, [restored, busy, tracks, harmony, bpm]);
 
   function saveProject() {
-    download(serializeProject(current()), "application/json", "humstudio-project.humstudio.json");
+    try {
+      download(serializeProject(current()), "application/json", "humstudio-project.humstudio.json");
+      setFileError("");
+    } catch (cause) { setFileError(cause instanceof Error ? cause.message : "The project could not be saved."); }
   }
   async function openProject(file: File | undefined) {
     if (!file || (busy && !openingProject)) return;
@@ -687,7 +721,7 @@ export default function Studio() {
 
   useEffect(() => {
     keyRef.current = (e: KeyboardEvent) => {
-      if (help || e.repeat) return;
+      if (help || e.repeat || e.defaultPrevented) return;
       const el = e.target as HTMLElement | null;
       if (el && (el.isContentEditable || ["INPUT", "SELECT", "TEXTAREA"].includes(el.tagName))) return;
       const mod = e.ctrlKey || e.metaKey;
@@ -732,11 +766,11 @@ export default function Studio() {
   const noteLabel = (m: number) => `${midiName(m).replace(/-?\d+$/, "")} ${solfege(m, harmony) ?? ""}`;
 
   /** Swap cached profiles; grid changes regenerate at each take's capture tempo, without rounding twice. */
-  function regenerate(level: NoteSensitivity, division: QuantizeDivision, resnap = false, fitEditedMelody = false, recordHistory = true) {
+  function regenerate(trackId?: string, level?: NoteSensitivity, division?: QuantizeDivision, fitEditedMelody = false, recordHistory = true) {
     try {
       const next = applyNoteSettings({ tracks: arrangementRef.current.tracks, harmony, takes: takesRef.current,
-        snapSources: snapSourcesRef.current, sensitivity: level, quantize: division,
-        harmonyDriver: harmonyDriverRef.current, keyOverride: pickedKeyRef.current, resnap, fitEditedMelody });
+        snapSources: snapSourcesRef.current, trackId, sensitivity: level, quantize: division,
+        harmonyDriver: harmonyDriverRef.current, keyOverride: pickedKeyRef.current, resnap: division !== undefined, fitEditedMelody });
       if (recordHistory) remember();
       takesRef.current = next.takes;
       snapSourcesRef.current = next.snapSources;
@@ -807,26 +841,6 @@ export default function Studio() {
             </select>
             <output className="position harmony-value" aria-label="Song chords" aria-live="polite">{harmony.bars.slice(0, 4).map(chordName).join(" ")}</output>
           </div>
-          <label className="field">
-            <span>Snap</span>
-            <select aria-label="Snap" value={quantize} onChange={(e) => { const d = e.target.value as QuantizeDivision; if (regenerate(sensitivity, d, true)) setQuantize(d); }} disabled={busy}>
-              <option value="off">Off</option>
-              <option value="1/4">1/4</option>
-              <option value="1/8">1/8</option>
-              <option value="1/16">1/16</option>
-            </select>
-          </label>
-          <label className="field sensitivity-field">
-            <span>Sensitivity</span>
-            <select aria-label="Note sensitivity" value={sensitivity} disabled={busy}
-              title={`${NOTE_SENSITIVITY_PRESETS[sensitivity].description} Every take has three cached profiles; hand-edited parts are kept.`} onChange={event => {
-                if (isNoteSensitivity(event.target.value) && regenerate(event.target.value, quantize)) setSensitivity(event.target.value);
-              }}>
-              {NOTE_SENSITIVITY_LEVELS.map(level => (
-                <option key={level} value={level}>{NOTE_SENSITIVITY_PRESETS[level].label}</option>
-              ))}
-            </select>
-          </label>
         </div>
         <div className="file-group">
           <button className="t-btn" aria-label="Undo" title="Undo (Ctrl+Z)" disabled={busy || !history.undo} onClick={() => step("past")}>
@@ -887,7 +901,11 @@ export default function Studio() {
             noteLabel={learn ? noteLabel : undefined}
             learn={learn}
             harmony={harmony}
-            quantize={quantize}
+            editorEpoch={editorEpoch}
+            onSettingsChange={(level, division) => regenerate(t.instrument.id, level, division)}
+            sensitivityAvailable={profileTracks.includes(t.instrument.id)}
+            onPasteNotes={(clipboard, anchorBeat) => pasteNotes(t.instrument.id, clipboard, anchorBeat)}
+            pasteBeat={() => playback.getEngine()?.positionBeats() ?? 0}
             onEditNotes={(notes) => editNotes(t.instrument.id, notes, t.drumPart)}
             onDeleteNote={(noteId) => deleteNote(t.instrument.id, noteId)}
             onClear={() => clearPart(t.instrument.id, t.drumPart)}
@@ -920,7 +938,7 @@ export default function Studio() {
             </div>
           ))}
         </dl>
-        <p>In an open track: click to add a note, drag to move, drag either edge to stretch, double-click or Delete to remove, arrows to nudge (Shift+arrows stretch).</p>
+        <p>Ctrl+C arms region selection. Draw a box, release, then drag the highlighted group to paste. Ctrl+V pastes at the current playhead (beat 1 when stopped). Escape cancels. In an open track: click to add a note, drag to move, drag either edge to stretch, double-click or Delete to remove, arrows to nudge (Shift+arrows stretch).</p>
         <button className="ghost-btn" onClick={() => setHelp(false)}>Close</button>
       </dialog>
     </div>

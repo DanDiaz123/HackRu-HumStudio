@@ -157,7 +157,7 @@ flowchart TD
 | `src/lib/generate.ts` | `generateTrack(instrument, frames, bpm, quantize, harmony) → Promise<Note[]>`; pure `generateNotes` for fixtures. | Built (DSP heuristics; real-device tuning pending) |
 | `src/lib/playback.ts` | Browser-only facade for scheduling, play/pause/stop/rewind/position, metronome, count-in, and teardown; delegates to `src/lib/audio/`. | Built (playback regression tests; listening pending) |
 | `src/lib/midi.ts` | `Track[]` → multi-track `.mid` download. | Built |
-| `src/lib/music/types.ts` | Shared `Note`/`QuantizeDivision` contract. The legacy `Project` shape remains a compatibility contract; current saved projects use `ProjectV2` in `src/lib/persistence/project.ts`. | Built |
+| `src/lib/music/types.ts` | Shared `Note`/`QuantizeDivision` contract. The legacy `Project` shape remains a compatibility contract; current saved projects use `ProjectV3` in `src/lib/persistence/project.ts`. | Built |
 | `src/lib/audio/segment-notes.ts` | Stabilize gated `HumFrame` pitch into second-based segments with rest boundaries. | Built (synthetic regression fixtures; real-device tuning pending) |
 | `src/lib/persistence/project.ts` | Validate/store/reopen multi-track project JSON, with v1 migration. | Built |
 | `src/lib/music/harmony.ts` | Key inference/override, chord naming, Roman numerals, scale degrees, movable-do solfège. | Built; harmony remains a heuristic |
@@ -236,7 +236,7 @@ interface Track { instrument: Instrument; presetId: string; notes: Note[]; muted
 
 **Learn state:** `Studio.tsx` initializes `learn=true` as an ephemeral view toggle; note and chord labels are **derived** from MIDI and `Harmony`, not independent saved grades or lesson progress. `LivePitch` reads the newest voiced `HumFrame.hz` and does not persist pitch samples.
 
-**Saved format:** schema v2 stores all tracks, sounds, notes, mute/solo/sample flags, BPM, Snap, Sensitivity, harmony, and metadata. The original v1 note list migrates to Melody. Missing legacy preset IDs receive category defaults; invalid selections and unexpected fields reject. Runtime take/profile caches are not serialized. See `src/lib/persistence/project.ts` and `TECHNICAL_SPEC.md` §3.1.
+**Saved format:** schema v3 stores all tracks, sounds, notes, flags, per-instrument Snap/Sensitivity, shared BPM/harmony, metadata, and bounded note-only regeneration sources. v1 notes migrate to Melody; v2 global settings apply to every instrument. Missing preset IDs get defaults. Unknown or malformed fields reject. Musical detections, phrase boundaries and capture BPM restore sensitivity/grid regeneration without full analysis frames or audio. Edited/older parts keep their notes when sensitivity sources are unavailable. See `src/lib/persistence/project.ts` and `TECHNICAL_SPEC.md` §3.1.
 
 ## 8. Audio analysis design
 
@@ -265,7 +265,7 @@ interface Track { instrument: Instrument; presetId: string; notes: Note[]; muted
 5. Melody retains confirmed rounded pitches and defines harmony after the take; other melodic parts fit that harmony. Merge identical pitches within the same phrase before snapping. Confirmed rests still separate notes. Reject fragments shorter than 100 ms in Medium.
 6. Preserve the first and last observed voiced timestamps within the recording window.
 
-These constants are **starting heuristics**, configured as the Medium profile in `src/lib/audio/note-sensitivity.ts` (`SEGMENTATION_DEFAULTS`). A level dip and return on one pitch re-strikes the note (1.8x RMS), but near-silence <= 150 ms is bridged and fast pitch changes can be suppressed. Real-device tuning uses scored takes in `src/tests/takes/`. Low uses a 1.5-semitone hold, 200 ms stability, and seven-frame median; High uses 0.5 semitones, 60 ms stability/minimum note, and three frames. All profiles are cached per take for immediate switching. Snap rebuilds using the capture BPM, preserving beat positions after tempo changes and original timing for Off. Manual edits opt out of profile swaps; a picked key persists until a new Melody take.
+These constants are **starting heuristics**, configured as the Medium profile in `src/lib/audio/note-sensitivity.ts` (`SEGMENTATION_DEFAULTS`). A level dip and return on one pitch re-strikes the note (1.8x RMS), but near-silence <= 150 ms is bridged and fast pitch changes can be suppressed. Real-device tuning uses scored takes in `src/tests/takes/`. Low uses a 1.5-semitone hold, 200 ms stability, and seven-frame median; High uses 0.5 semitones, 60 ms stability/minimum note, and three frames. All profiles are retained as note-only musical sources per latest take for independent track switching and Save/Open regeneration. Drum onset sensitivity uses distinct RMS gates and rise ratios; Medium retains the prior tuning. Snap rebuilds using the capture BPM, preserving beat positions after tempo changes and original timing for Off. Manual edits opt out of profile swaps; a picked key persists until a new Melody take.
 
 ### 8.4 Beat conversion and quantization
 
@@ -319,7 +319,7 @@ Education is a **view and exploration layer** over the same note/harmony state, 
 
 ### Current state ownership and future refactor
 
-Today `Studio.tsx` owns tracks and settings in React state, replaces arrays immutably, and synchronizes an arrangement ref for asynchronous operations. Undo/redo snapshots also preserve metadata, key decisions, capture tempo, cached sensitivity variants, and original Snap sources. Open validates before applying and clears capture caches. A future reducer may consolidate these track-scoped mutations. Audio objects/streams/timers stay in refs or service modules, **not** in serializable state.
+Today `Studio.tsx` owns tracks and settings in React state, replaces arrays immutably, and synchronizes an arrangement ref for asynchronous operations. Undo/redo snapshots also preserve metadata, key decisions, capture tempo, cached sensitivity variants, and original Snap sources. Open validates before applying, restores saved note-only sources, and clears transient copy previews. A future reducer may consolidate these track-scoped mutations. Audio objects/streams/timers stay in refs or service modules, **not** in serializable state.
 
 ## 11. Persistence and export
 

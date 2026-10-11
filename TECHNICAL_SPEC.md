@@ -62,13 +62,15 @@ src/
   components/
     Studio.tsx               # implemented: shell, Track[] state, record/generate/reveal flow
     TrackRow.tsx             # implemented: arrangement row / zoomed lane
+    EditableNotes.tsx        # implemented: note gestures, region selection and group paste
     Spectrogram.tsx          # implemented: halftone canvas
     icons.tsx                # implemented: SVG icons
     PianoRoll.tsx            # target (optional): note editing for the zoomed track
   lib/
     tracks.ts                # implemented: Instrument, Track, INSTRUMENTS, geometry
     hum.ts                   # implemented: mic + Pitchy + demo hum -> HumFrame
-    generate.ts              # implemented: generateTrack() / pure generateNotes()
+    generate.ts              # implemented: detection sources + fitting/quantization
+    note-clipboard.ts        # implemented: geometry and atomic full-track paste
     playback.ts              # implemented: browser-only playback facade
     midi.ts                  # implemented: multi-track export
     music/
@@ -88,7 +90,7 @@ src/
       segment-notes.ts       # implemented: segmentPitchFrames(), tunable configuration
       note-sensitivity.ts    # implemented: centralized Low/Medium/High tuning profiles
     persistence/
-      project.ts             # implemented: strict v2 validation/save/load and v1 migration
+      project.ts             # implemented: strict v3 validation/save/load and v1/v2 migration
   tests/                     # implemented: playback, harmony, segmentation, generation fixtures
 ```
 
@@ -96,7 +98,7 @@ The earlier plan's `StudioClient`/`TransportControls`/`RecordPanel`/`useRecorder
 
 ## 3. Shared TypeScript contracts
 
-`src/lib/music/types.ts` exists and is the source of truth for **two actual exports: `Note` and `QuantizeDivision`**. `src/lib/tracks.ts` re-exports them. The legacy `Project`, `PitchFrame`, `NoteSegment`, and `DetectorConfig` shapes shown below describe historical v1 or target contracts and are **not** exported from this file; use `ProjectV2` in `src/lib/persistence/project.ts` and the implemented `HumFrame`/segmentation types for current code. Do not create competing `Note` interfaces.
+`src/lib/music/types.ts` exists and is the source of truth for **two actual exports: `Note` and `QuantizeDivision`**. `src/lib/tracks.ts` re-exports them. The legacy `Project`, `PitchFrame`, `NoteSegment`, and `DetectorConfig` shapes shown below describe historical v1 or target contracts and are **not** exported from this file; use `ProjectV3` in `src/lib/persistence/project.ts` and the implemented `HumFrame`/segmentation types for current code. Do not create competing `Note` interfaces.
 
 ```ts
 export type QuantizeDivision = "off" | "1/4" | "1/8" | "1/16";
@@ -167,6 +169,8 @@ export interface Instrument {
 export interface Track {
   instrument: Instrument;
   presetId: string;           // Stable category-specific sound ID; never an audio node or URL
+  sensitivity: NoteSensitivity; // default medium, shared across Drum parts
+  quantize: QuantizeDivision;   // default 1/4, independent per instrument
   drumPart?: "kick" | "snare" | "hat" | "openHat" | "crash"; // selected rhythm lane for Drums
   notes: Note[];
   muted: boolean;
@@ -188,20 +192,34 @@ export const MAX_RECORD_SEC = 15;
 
 Lane geometry is derived in percent: `beatX(beat) = beat / 32 * 100`, `noteY(midi, inst) = (hi - midi) / rows * 100`. Never store pixel coordinates.
 
-**Saved format (implemented, `src/lib/persistence/project.ts`).** `Project` v1 cannot hold tracks, so files are schema v2:
+**Saved format (implemented, `src/lib/persistence/project.ts`).** New files use schema v3; v1/v2 contracts remain accepted import formats.
 
 ```ts
-interface ProjectV2 {
-  schemaVersion: 2;
-  id: string; name: string; bpm: number; quantize: QuantizeDivision;
-  sensitivity: NoteSensitivity; // optional on read; defaults to Medium
-  harmony: Harmony;             // key + 8 triads
-  tracks: { instrumentId: string; presetId: string; drumPart?: "kick" | "snare" | "hat" | "openHat" | "crash"; notes: Note[]; muted: boolean; solo: boolean; sample: boolean }[];
+interface ProjectV3 {
+  schemaVersion: 3;
+  id: string; name: string; bpm: number;
+  harmony: Harmony;
+  tracks: { instrumentId: string; presetId: string; drumPart?: DrumPart;
+    sensitivity: NoteSensitivity; quantize: QuantizeDivision;
+    notes: Note[]; muted: boolean; solo: boolean; sample: boolean }[];
+  regeneration?: {
+    takes: Record<string, { bpm: number; drumPart?: DrumPart;
+      sources: Record<NoteSensitivity, { notes: Note[]; phraseIds: number[] }> }>;
+    snapSources: Record<string, Note[]>;
+    pickedKey: Key | null;
+    harmonyDriver: "melody" | "keys" | null;
+  };
   createdAt: string; updatedAt: string;
 }
 ```
 
-A v1 file loads as the Melody track (other tracks empty, harmony inferred from it). Missing tracks load empty; a missing `presetId` gets the default sound.
+Sources are unsnapped, octave-fitted musical detections with phrase IDs, not analysis streams or audio. Each latest unedited instrument take keeps all three profiles and capture BPM; for Drums this is the latest recorded lane. Other drum lanes keep available unsnapped timing sources. Open rebuilds runtime variants through the same fitting, alignment, quantization and role pipeline. Editing, deletion, Clear, Repeat and Paste discard that instrument's sensitivity source while retaining settings. Snap still uses the edited timing source.
+
+v2 global Snap/Sensitivity migrate to every track, including missing tracks. v1 notes load into Melody; all tracks inherit its Snap and Medium sensitivity. Notes, sounds, drum part, tempo, harmony, flags and metadata are preserved, with existing exclusive Solo normalization. Missing tracks load empty; missing preset IDs get defaults. Older notes without detection sources stay intact when Sensitivity changes; that selection applies to future takes.
+
+### 3.1.1 Independent settings and history
+
+Controls sit beneath Sound in the expanded panel. `applyNoteSettings` targets one instrument. Snap rebuilds its latest take at capture BPM or snaps its immutable manual source; Off restores available original timing. Drums also snaps every other visible lane without losing its Off source. Polyphonic overlaps survive. Melody/Keys may refit shared harmony using dependent tracks' own profiles and grids; manual/sample timing and every track's independent selections remain intact. Each setting change is one Undo/Redo step.
 
 ### 3.2 Capture frame (implemented, `src/lib/hum.ts`)
 
@@ -230,13 +248,13 @@ export async function generateTrack(
 ): Promise<Note[]>;
 ```
 
-The facade delegates to pure `generateNotes(inst, frames, bpm, quantize, harmony, sensitivity?, trace?, drumPart?): Note[]`; the legacy `(trace?, sensitivity?)` argument order also works. Duplicate or malformed options reject. `sensitivity` (`NoteSensitivity`, default Medium) picks segmentation thresholds and does not affect drums. An optional `drumPart` maps every detected onset to one rhythm-only MIDI lane. `generateTrackVariants(...)` computes all three profiles for the UI, retaining unsnapped sources for timing changes. Melodic generation segments frames in seconds, octave-fits the instrument, applies its harmony role, merges identical pitches within a phrase, and converts/snaps beat boundaries. Off preserves raw beat timing. A confirmed rest changes the phrase ID so correction or snapping cannot merge separate attacks. Roles are covered by `src/tests/roles.test.ts`:
+The facade delegates to pure `generateNotes(inst, frames, bpm, quantize, harmony, sensitivity?, trace?, drumPart?): Note[]`; the legacy `(trace?, sensitivity?)` argument order also works. Duplicate or malformed options reject. `sensitivity` (`NoteSensitivity`, default Medium) picks melodic segmentation thresholds and drum onset gates. An optional `drumPart` maps every detected onset to one rhythm-only MIDI lane. Studio uses `detectTrackProfiles(...)` and `renderTrackProfiles(...)` to retain musical sources for later settings and harmony changes; `generateTrackVariants(...)` remains available. Melodic generation segments frames in seconds, octave-fits the instrument, applies its harmony role, merges identical pitches within a phrase, and converts/snaps beat boundaries. Off preserves raw beat timing. A confirmed rest changes the phrase ID so correction or snapping cannot merge separate attacks. Roles are covered by `src/tests/roles.test.ts`:
 
 - **Melody:** confirmed integer pitches are kept at every sensitivity so chromatic steps survive. An explicit Key pick can correct them. A short note 10+ semitones from both neighbours in the same direction is an octave error and folds back; velocity accents beat 1 > beat 3 > other beats > off-beats.
 - **Bass:** root/fifth of each bar's chord; notes are split at barlines so a held note re-strikes on the new root, and a bar's first note within beat 1 is pulled onto the downbeat as the root.
 - **Keys:** the hum is snapped to the song's scale and picks the chords: per bar, `pickChords` takes the diatonic triad covering the hummed notes best (+0.5 toward the current chord; unhummed bars keep theirs). Each hummed note becomes that triad, hummed pitch on top, the other tones within the octave below.
 - **Strings:** a pad. Each note is held into the next (through breaths up to 2 beats, otherwise to its barline), split at barlines and re-fitted to chord tones, and doubled by the next chord tone below.
-- **Drums:** onset = RMS above 0.02 and at least double its recent floor, at most one per 80 ms. When a Drum part is selected, every detected onset maps to that lane (Kick, Snare, Closed hat, Open hat, or Crash); vocal pitch and spectral shape never change the selected lane. The compatibility API without a selected lane retains the full-kit kick/hat/snare classifier and optional eighth-note hat fill.
+- **Drums:** Low/Medium/High RMS onset gates are 0.04/0.02/0.01 and rise ratios are 2.5/2/1.5. Medium retains prior thresholds. At most one onset per 80 ms. When a Drum part is selected, every detected onset maps to that lane (Kick, Snare, Closed hat, Open hat, or Crash); vocal pitch and spectral shape never change the selected lane. The compatibility API without a selected lane retains the full-kit kick/hat/snare classifier and optional eighth-note hat fill.
 - **Timing (all tracks):** before snapping, the take is shifted by the constant offset (within +/-80 ms, 5 ms steps, smallest on ties) that puts its onsets closest to the grid (`alignmentSec`; needs 3+ onsets, skipped for Off). This absorbs unmeasured mic latency and singing consistently ahead of or behind the click. It can only resolve offsets under half a grid step.
 
  Tempo outside 60..180, unknown grid values, and more than 10,000 frames throw; unusable melodic input returns `[]` (the UI keeps existing notes). Unknown sensitivity or Drum part values throw. Canonical note fields are unchanged; `generateTrack` accepts optional trailing `sensitivity` and selected `drumPart` arguments.
@@ -261,7 +279,7 @@ export const DEFAULT_HARMONY: Harmony; // C major, Am F C G x2 (the Keys sample)
 
 ### 3.5 Learn-mode music-theory contract (implemented; no schema changes)
 
-`src/lib/music/harmony.ts` owns the theory used for education labels. `Studio.tsx` owns a simple `learn` Boolean view toggle (`useState(true)`); `TrackRow.tsx` receives `learn`, `harmony` and `noteLabel`. **Do not add `learn`, a score, or pitch-analysis frames to `ProjectV2` solely to implement this presentation.** On reload, Learn reverts to its UI default; key/chords and notes persist through the existing project format.
+`src/lib/music/harmony.ts` owns the theory used for education labels. `Studio.tsx` owns a simple `learn` Boolean view toggle (`useState(true)`); `TrackRow.tsx` receives `learn`, `harmony` and `noteLabel`. **Do not add `learn`, a score, or pitch-analysis frames to `ProjectV3` solely to implement this presentation.** On reload, Learn reverts to its UI default; key/chords and notes persist through the existing project format.
 
 Relevant **existing** interfaces:
 
@@ -525,7 +543,7 @@ Do **not** label a DSP pitch detector as a trained neural model unless a model i
 
 ### 8.2 Transport and recording controls
 
-- **Transport bar (implemented):** wordmark, Rewind, Play/Pause, Stop, metronome, count-in, **Learn**, position, BPM, Key/chords, Snap (Off/1/4/1/8/1/16), Sensitivity (Low/Medium/High), Undo, Redo, Open project, Save project, keyboard shortcut help, and Export MIDI.
+- **Transport bar (implemented):** wordmark, Rewind, Play/Pause, Stop, metronome, count-in, **Learn**, position, BPM, Key/chords, Undo, Redo, Open project, Save project, keyboard shortcut help, and Export MIDI.
 - **Zoomed header (implemented):** All tracks (back), instrument name, hint, Record / Stop / Re-record, Demo hum, and a status line with a filled-or-hollow mark plus text (e.g. "Demo hum 0:05.2", "Generating", "8 notes").
 - **Drums selector (implemented):** The zoomed Drums header includes Kick, Snare, Closed hat, Open hat, and Crash. All five lanes remain visible through recording and reveal; the selected row is emphasized. Recording, click-to-add, moving/resizing, Clear, and Repeat target only the selected lane. Part-edit callbacks contain only that lane's notes; a separate `onDeleteNote(noteId)` callback can delete any visible note from the full track. Switching parts never changes note data.
 - A first Play or Record gesture awaits `Tone.start()`. Recording shares Tone's audio context and click clock; microphone analysis never connects to the speakers.
@@ -559,7 +577,15 @@ Expected separation of concerns: the UI should call `romanNumeral`, `scaleDegree
 - [ ] Accessibility: Verify visible text, focus/contrast and reduced motion; improve nonvisual live pitch in a future scoped accessibility task.
 - [ ] Human: Ask a music beginner to locate a note, name one degree/chord, and hear a note edit. Record observations rather than claiming demonstrated learning impact.
 
-**No new data-model migration is required** for Learn display. The existing v2 schema saves `Harmony`, notes and track settings; there is no quiz/progress schema.
+**No new data-model migration is required** for Learn display. The current v3 schema saves `Harmony`, notes and track settings; there is no quiz/progress schema.
+
+### 8.1 Copy Region and full-track paste
+
+`EditableNotes.tsx` owns armed, rectangle, ready and drag states with pointer capture. Ctrl+C arms an idle zoomed editor outside input/select/contenteditable fields or help dialogs. Key release before drawing leaves it armed; releasing the mouse or shortcut after drawing completes selection. Escape, pointercancel, Open, track switching and unmount discard transient previews without project changes. Escape is handled before the studio's Back shortcut.
+
+`note-clipboard.ts` intersects whole rendered notes in beat/row coordinates, including CSS minimum sizes. Clipboard notes keep relative musical timing and remain in memory. All visible drum rows can be selected. Dragging changes only the horizontal placement anchor; Snap rounds that anchor once. Pitches, internal offsets, lengths and velocities remain exact.
+
+The complete paste is validated before fresh project-wide IDs are allocated. It rejects cross-instrument placement, count overflow, notes outside beats 0..32 and same-pitch collisions with existing notes or other copies. Touching endpoints and different-pitch chords are allowed. Sorting intervals per pitch bounds collision work. Studio commits a complete track in one history step, bypassing single-drum-part replacement, protects pasted edits from old sensitivity variants, and reschedules playback through the existing effect. Save/Open and MIDI use the canonical notes. Ctrl+V pastes at the current playhead (zero while stopped) with the same validation/history. Selection and preview create no history entries.
 
 ## 9. Tone.js playback service
 
@@ -626,7 +652,9 @@ Sample resources are leased by independent voices and disposed only after their 
 
 ## 10. Project persistence
 
-**Status: implemented in `src/lib/persistence/project.ts`.** `parseProject(text)` validates the whole file or throws a user-facing message, and the studio only changes after it succeeds: size <= 2,000,000 chars, BPM 60..180, known Snap/Sensitivity, harmony shape with distinct chord tones, known instruments (no duplicates), known sounds per category, <= 10,000 notes, unique note IDs, `isValidNote` including `startBeat + durationBeats <= 32`, strings <= 200 chars, parseable timestamps. Unexpected fields reject at project, track, harmony, and note boundaries; values are never coerced to sound IDs. Save snapshots copy note/harmony arrays and omit capture analysis. `serializeProject` writes v2. Studio autosaves to `localStorage["humstudio:project:v2"]` 400 ms after a change (skipped mid-take, when the part being re-recorded is briefly empty), restores it once after mount (a bad save is ignored), shows a notice if storage is blocked, and offers Save (download) and Open (file picker; undoable). Generation, profile swaps, Add, and Repeat enforce the same note-count limit. The earlier single-track contract below is kept for reference; v1 files still load.
+**Status: implemented in `src/lib/persistence/project.ts`.** The importer validates the whole file before application: <= 2,000,000 characters; BPM/capture BPM 60..180; fixed track settings; eight distinct-tone triads; known instruments, sounds and drum parts; <= 10,000 active notes with project-wide unique IDs and valid beats/pitches/velocity; text <= 200 characters and parseable dates. Every object boundary rejects unexpected fields, including regeneration, take, profile and picked-key objects. Each profile allows <= 10,000 notes with unique IDs; all alternatives allow <= 30,000 notes combined; manual timing sources share the <= 10,000-note bound. Phrase IDs are ordered nonnegative bounded integers, one per source note. Source pitches and onset ordering are validated for the instrument/lane. No types are coerced.
+
+`serializeProject` explicitly copies musical fields into v3 and rejects oversized exports. Autosave writes `localStorage["humstudio:project:v3"]` after 400 ms, skips in-progress takes, and reads v3 then legacy v2/v1 entries on mount. Corrupt new entries may fall back to valid older saves; legacy entries are never deleted. Storage errors are nonfatal. Open is undoable and resets transient copy state. Generation, settings, Add, Repeat and Paste enforce the active note-count limit. Saves exclude microphone samples, buffers, full `HumFrame[]` streams, device information, clipboard and previews.
 
 ### Storage contract
 
@@ -703,7 +731,7 @@ The reference above describes the original v1 seconds mapping; the implemented m
 
 ## 12. State mutations and concurrency
 
-**Today:** `Studio.tsx` owns immutable tracks and settings with a synchronized arrangement ref. Undo/redo snapshots include project metadata, key decisions, capture tempo, all three profile variants, and original Snap sources; only validated project data reaches JSON/autosave. Open resets capture caches and uses imported notes as Snap sources. A future reducer can consolidate the existing track-scoped mutations:
+**Today:** `Studio.tsx` owns immutable tracks and settings with a synchronized arrangement ref. Undo/redo snapshots include project metadata, key decisions, capture tempo, all three profile variants, and original Snap sources; only validated project data reaches JSON/autosave. Open restores validated note-only sources and independent settings, using imported final notes as the timing source only when older data lacks original sources. A future reducer can consolidate the existing track-scoped mutations:
 
 ```ts
 type ProjectAction =
@@ -713,7 +741,7 @@ type ProjectAction =
   | { type: "UPDATE_NOTE"; trackId: string; id: string; patch: Partial<Pick<Note, "midi" | "startBeat" | "durationBeats" | "velocity">> }
   | { type: "DELETE_NOTE"; trackId: string; id: string }
   | { type: "TOGGLE_MUTE" | "TOGGLE_SOLO"; trackId: string }
-  | { type: "LOAD_PROJECT"; project: ProjectV2 };
+  | { type: "LOAD_PROJECT"; project: ProjectV3 };
 ```
 
 - All actions validate/clamp values and preserve structural sharing when sensible.

@@ -546,6 +546,67 @@ button.lane:focus-visible {
   font-size: 12px;
   font-weight: 600;
 }
+.note-settings {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 10px;
+}
+.note-settings label {
+  min-width: 0;
+  margin: 0;
+  letter-spacing: 0.02em;
+}
+.note-settings label span {
+  display: block;
+  margin-bottom: 4px;
+}
+.settings-feedback {
+  margin: 6px 0 0;
+  min-height: 3.6em;
+  font-size: 11px;
+  line-height: 1.2;
+}
+@container (max-width: 130px) {
+  .note-settings { grid-template-columns: 1fr; gap: 6px; }
+  .settings-feedback { min-height: 6em; }
+}
+.notes-area.copying {
+  overflow: hidden;
+  cursor: crosshair;
+}
+.copy-rect {
+  position: absolute;
+  z-index: 3;
+  border: 2px solid var(--ink);
+  background: rgb(242 241 236 / 0.2);
+  pointer-events: none;
+}
+.copy-group { cursor: grab; pointer-events: auto; }
+.note.copy-selected { outline: 2px solid var(--text); outline-offset: -2px; opacity: 1; }
+.notes-area.editable.on .note.copy-selected { cursor: grab; }
+.note.copy-ghost {
+  z-index: 4;
+  opacity: 0.45;
+  outline: 2px dashed var(--ink);
+  outline-offset: -2px;
+  pointer-events: none;
+}
+.copy-feedback {
+  position: absolute;
+  z-index: 5;
+  bottom: 6px;
+  left: 8px;
+  right: 8px;
+  margin: 0;
+  width: fit-content;
+  max-width: calc(100% - 16px);
+  font-size: 12px;
+  line-height: 1.25;
+  background: var(--flood);
+  pointer-events: none;
+}
+.copy-feedback:empty { display: none; }
 .sound-feedback {
   margin: 6px 0 0;
   font-size: 12px;
