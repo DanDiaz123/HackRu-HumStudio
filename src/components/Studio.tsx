@@ -8,7 +8,7 @@ import { download } from "@/lib/download";
 import { exportMidi } from "@/lib/midi";
 import { pasteCopiedNotes, type NoteClipboard } from "@/lib/note-clipboard";
 import { deleteNoteById, repeatFirstHalf, replaceDrumPartNotes } from "@/lib/note-edit";
-import { type LoadedProject, MAX_PROJECT_CHARS, MAX_PROJECT_NOTES, STORAGE_KEY, readAutosave, newProjectMeta, parseProject, serializeProject } from "@/lib/persistence/project";
+import { type LoadedProject, MAX_PROJECT_BYTES, MAX_PROJECT_NOTES, STORAGE_KEY, readAutosave, newProjectMeta, parseProject, serializeProject } from "@/lib/persistence/project";
 import {
   DEFAULT_HARMONY,
   type Key,
@@ -721,7 +721,7 @@ export default function Studio() {
     const request = ++projectRequestRef.current;
     setOpeningProject(true);
     try {
-      if (file.size > MAX_PROJECT_CHARS) throw new Error("This is not a valid HumStudio project: file is too large.");
+      if (file.size > MAX_PROJECT_BYTES) throw new Error("This is not a valid HumStudio project: file is too large.");
       const p = parseProject(await file.text());
       if (!mountedRef.current || request !== projectRequestRef.current) return;
       remember();

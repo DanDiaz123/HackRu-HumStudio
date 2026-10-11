@@ -159,10 +159,14 @@ Escape cancels selection or a preview. Ctrl+V pastes at the current playhead (be
 
 New saves/autosaves use **schema v3** and restore each track's settings and note-only regeneration sources. v2 imports apply their old global Snap/Sensitivity to every instrument; v1 imports put notes on Melody and use Medium sensitivity. Legacy autosaves are read without deleting their storage entries. Older or hand-edited notes remain intact when Sensitivity changes because their missing original detection variants cannot be recovered.
 
+Save, Open and autosave share a **2,000,000-byte UTF-8 limit**, including non-ASCII note IDs and names. Oversized exports show an error and keep the current notes. Imports reject IDs reused by another instrument or drum lane in active notes or saved regeneration sources; one instrument's sensitivity alternatives may share IDs.
+
 The new optional browser regression suite uses the same existing Playwright setup:
 ```bash
 node src/tests/browser/per-track-copy.mjs <path-to-playwright-package> [http://localhost:3000]
 ```
+
+Run `node src/tests/browser/persistence-boundaries.mjs <path-to-playwright-package> [base-url]` for profile-ID ownership, Unicode file boundaries, oversized-save recovery and unchanged state after rejected imports.
 
 ## File structure
 

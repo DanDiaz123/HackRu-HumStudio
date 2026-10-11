@@ -131,6 +131,70 @@ test("a reopened take switches profiles and grid without analysis frames or chan
   assert.deepEqual(musical(currentTrack(off, "melody").notes), musical(high.takes.melody.variants.high));
   assert.equal(off.takes.melody.bpm, 93);
 });
+
+function sharedSourceProject() {
+  const note: Note = { id: "shared-source", midi: 64, startBeat: 1, durationBeats: 1, velocity: 0.8 };
+  const p = fullState(state({
+    tracks: initialTracks().map(t => ({ ...t, sample: false, notes: t.instrument.id === "melody" ? [note] : [] })),
+  }));
+  return toProject({ ...p, regeneration: { takes: { melody: { bpm: 120, sources: {
+    low: { notes: [{ ...note }], phraseIds: [0] }, medium: { notes: [{ ...note }], phraseIds: [0] },
+    high: { notes: [{ ...note, midi: 67 }], phraseIds: [0] },
+  } } }, snapSources: { melody: [{ ...note }] }, pickedKey: null, harmonyDriver: null } });
+}
+
+test("imports reject IDs shared by another instrument's active notes or dormant sources", () => {
+  for (const boundary of ["active", "profile", "snap", "profile-to-snap"]) {
+    const p = sharedSourceProject(), data = p.regeneration!;
+    const bassNote = { ...data.takes.melody.sources.low.notes[0], midi: 40 };
+    if (boundary === "active") {
+      p.tracks[0].notes[0].id = "active-melody";
+      p.tracks.find(t => t.instrumentId === "bass")!.notes = [bassNote];
+    }
+    else if (boundary === "profile") data.takes.bass = { bpm: 120, sources: {
+      low: { notes: [bassNote], phraseIds: [0] }, medium: { notes: [], phraseIds: [] }, high: { notes: [], phraseIds: [] },
+    } };
+    else {
+      // Hide the conflicting ID from active notes so only dormant ownership can catch it.
+      p.tracks[0].notes = [];
+      if (boundary === "snap") delete data.takes.melody;
+      else delete data.snapSources.melody;
+      data.snapSources.bass = [bassNote];
+    }
+    assert.throws(() => parseProject(JSON.stringify(p)), /duplicate note id/, boundary);
+  }
+});
+
+test("one instrument can reuse IDs across active notes, sensitivity alternatives and Snap sources", () => {
+  let opened = projectArrangementSnapshot(parseProject(JSON.stringify(sharedSourceProject())));
+  for (const level of NOTE_SENSITIVITY_LEVELS) {
+    const next = applyNoteSettings({ ...state(), ...opened, trackId: "melody", sensitivity: level });
+    assert.equal(currentTrack(next, "melody").notes[0].id, "shared-source");
+    const saved = saveState({ ...state(), ...next });
+    assert.deepEqual(parseProject(saved).tracks, next.tracks);
+    opened = projectArrangementSnapshot(parseProject(saved));
+  }
+});
+
+test("a drum sensitivity source cannot reuse the ID of a retained different drum lane", () => {
+  const p = sharedSourceProject(), data = p.regeneration!;
+  data.takes = { drums: { bpm: 120, drumPart: "kick", sources: {
+    low: { notes: [{ id: "retained-snare", midi: 36, startBeat: 2, durationBeats: 0.5, velocity: 0.8 }], phraseIds: [0] },
+    medium: { notes: [], phraseIds: [] }, high: { notes: [], phraseIds: [] },
+  } } };
+  p.tracks.find(t => t.instrumentId === "drums")!.notes =
+    [{ id: "retained-snare", midi: 38, startBeat: 0, durationBeats: 0.5, velocity: 0.8 }];
+  assert.throws(() => parseProject(JSON.stringify(p)), /duplicate note id/);
+});
+
+test("runtime settings reject duplicate materialized IDs atomically", () => {
+  const input = state({ takes: { melody: take() }, trackId: "melody", sensitivity: "low" });
+  const collision = currentTrack(input, "drums").notes[0].id;
+  input.takes.melody.variants.low = [{ ...input.takes.melody.variants.low[0], id: collision }];
+  const before = structuredClone(input);
+  assert.throws(() => applyNoteSettings(input), /duplicate note id/i);
+  assert.deepEqual(input, before);
+});
 test("manual unsnapped sources survive Save/Open and edited parts cannot restore old sensitivity variants", () => {
   const manual: Note = { id: "edited", midi: 67, startBeat: 0.28, durationBeats: 0.71, velocity: 0.7 };
   const input = state({ tracks: initialTracks().map(t => t.instrument.id === "melody" ? { ...t, notes: [manual], sample: false } : t),

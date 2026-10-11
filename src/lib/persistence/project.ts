@@ -10,7 +10,7 @@ import { DRUM_PARTS, INSTRUMENTS, QUANT_BEATS, TOTAL_BEATS, drumPart, normalizeS
 export const STORAGE_KEY = "humstudio:project:v3";
 export const LEGACY_STORAGE_KEYS = ["humstudio:project:v2", "humstudio:project:v1"] as const;
 export const MAX_REGENERATION_NOTES = 30_000;
-export const MAX_PROJECT_CHARS = 2_000_000;
+export const MAX_PROJECT_BYTES = 2_000_000;
 export const MAX_PROJECT_NOTES = 10_000;
 const MAX_TEXT = 200;
 
@@ -74,8 +74,12 @@ export function toProject(p: LoadedProject, now = new Date()): ProjectV3 {
 /** Bound exports so every successful save can be reopened by the importer. */
 export function serializeProject(p: LoadedProject, now?: Date): string {
   const json = JSON.stringify(toProject(p, now));
-  if (json.length > MAX_PROJECT_CHARS) throw new RangeError("This project file is too large. Clear unused parts before saving.");
+  if (isProjectTooLarge(json)) throw new RangeError("This project file is too large. Clear unused parts before saving.");
   return json;
+}
+/** UTF-8 matches File.size and downloaded Blobs; reject huge strings before allocating an encoded copy. */
+function isProjectTooLarge(json: string): boolean {
+  return json.length > MAX_PROJECT_BYTES || new TextEncoder().encode(json).byteLength > MAX_PROJECT_BYTES;
 }
 /** Recover valid legacy autosaves without deleting any older storage entries. */
 export function readAutosave(storage: Pick<Storage, "getItem">): LoadedProject | null {
@@ -146,7 +150,7 @@ const emptyTrack = (i: (typeof INSTRUMENTS)[number]): Track =>
 /** Validate untrusted JSON fully, or throw with a user-facing message. Never partially applies. */
 export function parseProject(input: string): LoadedProject {
   if (typeof input !== "string") fail("file must be JSON text");
-  if (input.length > MAX_PROJECT_CHARS) fail("file is too large");
+  if (isProjectTooLarge(input)) fail("file is too large");
   let raw: unknown;
   try {
     raw = JSON.parse(input);
@@ -213,12 +217,24 @@ export function parseProject(input: string): LoadedProject {
   };
 }
 
-/** IDs may repeat across alternatives, but every individual source is bounded and validated. */
+/** IDs may repeat within a part's alternatives, but cannot be claimed by another instrument or drum lane. */
 function regeneration(input: unknown, tracks: Map<string, Track>): RegenerationData {
   const raw = strictObject(input, ["takes", "snapSources", "pickedKey", "harmonyDriver"], "regeneration");
   const ids = [...tracks.keys()];
   const savedTakes = strictObject(raw.takes, ids, "take list");
   const savedSources = strictObject(raw.snapSources, ids, "snap sources");
+  const owners = new Map<string, string>();
+  const claimIds = (id: string, source: readonly Note[]) => {
+    const track = tracks.get(id)!;
+    for (const note of source) {
+      // Other drum lanes survive a profile swap, so they must own different IDs too.
+      const owner = track.instrument.kind === "drums" ? `${id}:${note.midi}` : id;
+      const previous = owners.get(note.id);
+      if (previous !== undefined && previous !== owner) fail("duplicate note id across parts");
+      owners.set(note.id, owner);
+    }
+  };
+  for (const [id, track] of tracks) claimIds(id, track.notes);
   const takes: Record<string, TakeSource> = {};
   let count = 0;
   for (const [id, value] of Object.entries(savedTakes)) {
@@ -232,6 +248,7 @@ function regeneration(input: unknown, tracks: Map<string, Track>): RegenerationD
     for (const level of ["low", "medium", "high"] as const) {
       const profile = strictObject(profiles[level], ["notes", "phraseIds"], "profile");
       const detected = notes(profile.notes, new Set());
+      claimIds(id, detected);
       count += detected.length;
       if (count > MAX_REGENERATION_NOTES) fail("too many regeneration notes");
       if (!Array.isArray(profile.phraseIds) || profile.phraseIds.length !== detected.length ||
@@ -246,7 +263,11 @@ function regeneration(input: unknown, tracks: Map<string, Track>): RegenerationD
     takes[id] = { bpm: take.bpm as number, sources, ...(take.drumPart ? { drumPart: take.drumPart as DrumPart } : {}) };
   }
   const seen = new Set<string>();
-  const snapSources = Object.fromEntries(Object.entries(savedSources).map(([id, value]) => [id, notes(value, seen)]));
+  const snapSources = Object.fromEntries(Object.entries(savedSources).map(([id, value]) => {
+    const source = notes(value, seen);
+    claimIds(id, source);
+    return [id, source];
+  }));
   let pickedKey: Key | null = null;
   if (raw.pickedKey !== null) {
     const key = strictObject(raw.pickedKey, ["tonic", "mode"], "picked key");

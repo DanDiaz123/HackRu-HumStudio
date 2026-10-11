@@ -151,5 +151,11 @@ export function applyNoteSettings(input: NoteSettingsInput): {
   });
   if (tracks.reduce((count, track) => count + track.notes.length, 0) > MAX_PROJECT_NOTES)
     throw new RangeError("This project can hold at most " + MAX_PROJECT_NOTES.toLocaleString() + " notes. Remove notes before generating or repeating a part.");
+  // Validate the materialized voices too, before a setting change can enter history or autosave.
+  const ids = new Set<string>();
+  for (const track of tracks) for (const note of track.notes) {
+    if (ids.has(note.id)) throw new RangeError("These settings would create a duplicate note id. Your notes were kept.");
+    ids.add(note.id);
+  }
   return { tracks, harmony, takes, snapSources };
 }

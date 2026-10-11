@@ -3,7 +3,8 @@ import { test } from "node:test";
 import ToneMidi from "@tonejs/midi";
 import { midiBytes } from "../lib/midi.ts";
 import { DEFAULT_HARMONY } from "../lib/music/harmony.ts";
-import { type LoadedProject, MAX_PROJECT_CHARS, MAX_PROJECT_NOTES, parseProject, serializeProject, toProject } from "../lib/persistence/project.ts";
+import { createNoteClipboard, pasteCopiedNotes } from "../lib/note-clipboard.ts";
+import { type LoadedProject, LEGACY_STORAGE_KEYS, STORAGE_KEY, MAX_PROJECT_BYTES, MAX_PROJECT_NOTES, parseProject, readAutosave, serializeProject, toProject } from "../lib/persistence/project.ts";
 import { INSTRUMENTS, initialTracks, toggleTrackFlag } from "../lib/tracks.ts";
 
 const { Midi } = ToneMidi; // CommonJS package: Node has no named export
@@ -34,6 +35,51 @@ test("T-08: a project round-trips every track, setting and the harmony", () => {
   assert.equal(after.tracks.find(track => track.instrument.id === "drums")?.drumPart, "kick");
 });
 
+function unicodeProjectAfterPaste(): LoadedProject {
+  const before = project();
+  before.tracks = before.tracks.map(track => ({ ...track, notes: [], sample: false, quantize: "off" }));
+  before.tracks[0].notes = Array.from({ length: 4500 }, (_, i) => ({
+    id: "音".repeat(100) + i, midi: 60 + i % 25, startBeat: Math.floor(i / 25) / 16, durationBeats: 0.03125, velocity: 0.8,
+  }));
+  const saved = serializeProject(before);
+  assert.ok(new Blob([saved]).size <= MAX_PROJECT_BYTES);
+  const imported = parseProject(saved), melody = imported.tracks[0];
+  let sequence = 0;
+  melody.notes = pasteCopiedNotes(melody, createNoteClipboard("melody", melody.notes), 16, 4500,
+    melody.notes.map(note => note.id), () => "copy-" + ++sequence);
+  return imported;
+}
+
+test("Unicode projects that exceed the file byte limit after paste cannot be saved", () => {
+  const large = unicodeProjectAfterPaste(), json = JSON.stringify(toProject(large));
+  assert.ok(json.length < MAX_PROJECT_BYTES);
+  assert.ok(new Blob([json]).size > MAX_PROJECT_BYTES);
+  assert.throws(() => serializeProject(large), /too large/);
+});
+
+test("the parser and autosave reject Unicode JSON over the file byte limit", () => {
+  const json = JSON.stringify(toProject(unicodeProjectAfterPaste()));
+  assert.throws(() => parseProject(json), /file is too large/);
+  const legacy = serializeProject(project());
+  const entries = new Map([[STORAGE_KEY, json], [LEGACY_STORAGE_KEYS[0], legacy]]), before = new Map(entries);
+  assert.deepEqual(readAutosave({ getItem: key => entries.get(key) ?? null }), parseProject(legacy));
+  assert.deepEqual(entries, before);
+});
+
+test("Open accepts exactly the UTF-8 byte limit and rejects one extra byte", () => {
+  for (const name of ["ASCII", "Café", "音", "🎵"]) {
+    const p = project();
+    p.meta.name = name;
+    p.tracks[0].notes[0].id = name + "-note";
+    const saved = serializeProject(p);
+    assert.deepEqual(parseProject(saved).tracks, p.tracks);
+    const exact = saved + " ".repeat(MAX_PROJECT_BYTES - new Blob([saved]).size);
+    assert.equal(new Blob([exact]).size, MAX_PROJECT_BYTES);
+    assert.deepEqual(parseProject(exact).tracks, p.tracks);
+    assert.throws(() => parseProject(exact + " "), /file is too large/);
+  }
+});
+
 test("legacy multi-solo imports select the first fixed category without dropping any drum or project notes", () => {
   const before = JSON.parse(serializeProject(project()));
   before.tracks.reverse();
@@ -62,7 +108,7 @@ test("saving writes one solo without mutating state, and exclusive solo selectio
 
 test("T-09: invalid files throw instead of loading part of them", () => {
   const bad = [
-    "", "{", "[]", "null", " ".repeat(MAX_PROJECT_CHARS + 1),
+    "", "{", "[]", "null", " ".repeat(MAX_PROJECT_BYTES + 1),
     json((p) => { p.schemaVersion = 4; }),
     json((p) => { p.bpm = 400; }),
     json((p) => { (p.tracks as Record<string, unknown>[])[0].quantize = "1/3"; }),
