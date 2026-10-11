@@ -24,7 +24,7 @@ This split reflects the **existing repository**, not a blank project. At the tim
 
 **Product-scope clarification:** The repository now implements the **multitrack, instrument-specific editor** and live spectrogram/reveal sequence. The app produces a generated instrument arrangement inspired by a monophonic hum, using deterministic DSP and harmony rules; it does not claim faithful transcription, machine learning, or a backend. Remaining unchecked work is validation on real hardware, deployment, listening, and presentation.
 
-## 1.1 Education Track definition of success
+### 1.1 Education Track definition of success
 
 [HackRU's Education Track](https://www.hackru.org/) focuses on building an educated community. The value proposition is **music-theory concepts made tangible** for someone who can hum but cannot yet identify or enter the notes. The main demo should make these three learner actions visible:
 
