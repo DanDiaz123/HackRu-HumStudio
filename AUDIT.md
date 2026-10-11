@@ -50,3 +50,37 @@ The full dependency audit reports five high-severity entries in the development 
 Synthetic browser tests do not prove physical-microphone accuracy or human listening quality. Repeated pitches separated only by brief near-silence can still merge; re-attacks within the 100 ms dropout recovery window are intentionally suppressed. Next integration step: tune the three profiles with real humming on the demo microphone and listen to playback/export in a MIDI player.
 
 Temporary browser tools, synthetic audio, and screenshots stay in ignored test/build directories; project dependencies and the lockfile were not changed.
+
+## Startup loading and codebase cleanup audit - 2026-10-11
+
+### Changes
+
+- Automatically preload the selected sound for all five instruments after project restoration, including empty/muted tracks. Open and Undo/Redo preload changed choices. Unused catalog presets remain on demand.
+- Separate browser initialization from gesture-driven audio resume in `src/lib/audio/audio-lifecycle.ts` and `src/lib/playback.ts`. Startup/Play share one engine; pending initialization/resume cannot revive a disposed studio. A failed resume can retry without discarding loaded samples.
+- Keep runtime loading status across project restoration when the sound stays unchanged. Startup does not resume audio, start transport, alter notes, block editing, or change history/persistence contracts.
+- Fix duplicate sample disposal after load cancellation and after a retired voice lease outlives manager disposal. Regressions assert exactly one disposal per resource.
+- Normalize smplr's deprecated bare progress callback to the supported options form.
+- Share deterministic sample fixtures across browser suites; cover every instrument family instead of relying on upstream downloads or intentionally failing whole families.
+- Correct stale documentation about startup loading, implemented persistence, and note-only regeneration storage.
+
+### Scope and source review
+
+Reviewed startup/gesture concurrency, engine scheduling/count-in, sample loads/switches/leases, microphone/worklet cleanup, project validation/serialization, note editing/copying, generation/settings snapshots, MIDI/download boundaries, browser-only access, and repository configuration. Searched application/public sources for unsafe evaluation, HTML injection sinks, sensitive logging, credentials and network/storage operations. No unsafe evaluation, HTML injection sink, tracked credential, microphone upload, new server/auth boundary, or new network host was found in these paths. The existing strict project validation and note limits remain in place. This review is not a penetration test or proof that every possible defect is absent.
+
+### Verification completed
+
+- `npm run lint`: passed, no warnings.
+- `npx tsc --noEmit`: passed.
+- `npm test`: 213 passed, no failures/skips; includes startup/gesture deduplication, cancellation/retry, SSR guards, all-track preparation and exactly-once resource disposal.
+- `npm run build`: passed.
+- `startup-sounds.mjs`: Edge checks passed at 1280/390/320 px. All five selected sounds downloaded before user input; the app made no audio resume calls and did not start playback. Play reused preloaded assets. Restored empty/muted choices, failed Bass with independent ready tracks, Retry, Open, Undo/Redo and autosave reload passed.
+- `studio-interactions.mjs` and `per-track-copy.mjs`: passed against the production app in Edge at 1280/390/320 px with no unexpected console/page errors. Capture/count-in/reveal, drum editing, note gestures, clipboard groups, persistence/history, independent settings, sound switches/fallback, transport controls, MIDI export and layout checks remained intact. The 320 px startup editor screenshot was visually inspected.
+- Production dependency audit: zero findings. Full dependency audit: five existing high-severity development findings, all rooted in `braces`; npm's proposed downgrade would mismatch Next 16. The published [advisory](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm) still lists no patched version.
+
+### Remaining concerns
+
+- Installed smplr 1.1.0's ElectricPiano fetches its fixed SFZ manifest through its internal `fetchOk`, bypassing the application's storage callback and its redirect/timeout policy. Confirmed in the installed package source map (`../src/electric-piano.ts`). All preset IDs and initial SFZ URLs are fixed; project input cannot supply URLs, and sample-buffer requests still use the restricted callback. The manager's 20-second fallback prevents a stalled manifest from blocking the UI, but does not abort that internal fetch. A supported upstream storage/abort hook is needed to enforce the same network policy for these manifests; no global fetch override or dependency fork was introduced.
+- No physical microphone, human listening, other-browser or current upstream availability verification was performed. Synthetic decoding/interaction tests do not establish instrument timbre or live transcription accuracy.
+- Startup now downloads five selected sounds instead of only audible tracks. It may use more initial bandwidth/memory; it never downloads the entire 20-preset catalog.
+
+Dependencies/lockfile are unchanged. New browser fixtures/results and screenshots use ignored `.test-build/`; only source, regressions and documentation belong in the change.

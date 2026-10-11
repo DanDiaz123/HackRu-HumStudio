@@ -33,7 +33,7 @@ export function createSmplrFactory(context: AudioContext): (preset: InstrumentPr
       const expected = new Set(json.groups.flatMap(group => group.regions.map(region => region.sample)));
       if (!expected.size || expected.size > 256)
         throw new Error("Unexpected sample manifest size.");
-      const buffers = typeof options === "function" ? await loader.load(json, options) : await loader.load(json, options);
+      const buffers = await loader.load(json, typeof options === "function" ? { onProgress: options } : options);
       if ([...expected].some(name => !buffers.has(name)))
         throw new Error("Required sample buffers are missing.");
       return buffers;

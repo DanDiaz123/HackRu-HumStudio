@@ -22,6 +22,7 @@ import {
 } from "@/lib/music/harmony";
 import { applyNoteSettings, captureArrangementSnapshot, projectArrangementSnapshot, type ArrangementSnapshot as Snapshot, type RecordedTakes, type SnapSources } from "@/lib/music/arrangement-settings";
 import * as playback from "@/lib/playback";
+import type { PlaybackEngine } from "@/lib/audio/playback-engine";
 import { presetForTrack } from "@/lib/audio/instrument-presets";
 import type { PresetStatus } from "@/lib/audio/preset-manager";
 import {
@@ -134,6 +135,7 @@ export default function Studio() {
 
   const busy = openingProject || startingAudio || phase === "requesting" || phase === "recording" || phase === "generating" || phase === "revealing";
   const zoomed = tracks.find((t) => t.instrument.id === zoomedId) ?? null;
+  const soundSelections = tracks.map(track => track.presetId).join("\n");
 
   /** Keep event/async snapshots current immediately, including a failed take restored before the next effect. */
   const commitTracks = useCallback((next: Track[]) => {
@@ -214,14 +216,36 @@ export default function Studio() {
     return true;
   }
 
-  /** Connect runtime loading feedback after a user gesture, outside serializable Track[]. */
-  async function connectAudio() {
-    const engine = await playback.ensureAudio();
-    if (!mountedRef.current) throw new Error("page closed");
+  /** Share loading feedback between automatic preloads and user-gesture audio startup. */
+  const subscribeToPresets = useCallback((engine: PlaybackEngine) => {
     unsubscribePresets.current ??= engine.subscribePresets(status => {
       if (arrangementRef.current.tracks.find(track => track.instrument.id === status.trackId)?.presetId !== status.presetId) return;
       setPresetStatuses(previous => ({ ...previous, [status.trackId]: status }));
     });
+  }, []);
+
+  // Wait for storage restoration; Open/undo preload changed sounds even on empty/muted tracks.
+  useEffect(() => {
+    if (!restored) return;
+    let cancelled = false;
+    void playback.initializeAudio().then(engine => {
+      if (cancelled || !mountedRef.current) return;
+      subscribeToPresets(engine);
+      return engine.prepare(arrangementRef.current.tracks);
+    }).catch(() => {
+      if (cancelled || !mountedRef.current) return;
+      setPresetStatuses(Object.fromEntries(arrangementRef.current.tracks.map(track => [track.instrument.id, {
+        trackId: track.instrument.id, presetId: track.presetId, state: "fallback",
+        message: "Sounds could not load. Check your output device and retry this sound.",
+      }])));
+    });
+    return () => { cancelled = true; };
+  }, [restored, soundSelections, subscribeToPresets]);
+
+  async function connectAudio() {
+    const engine = await playback.ensureAudio();
+    if (!mountedRef.current) throw new Error("page closed");
+    subscribeToPresets(engine);
     return engine;
   }
 
@@ -660,7 +684,6 @@ export default function Studio() {
     restore(projectArrangementSnapshot(p));
     setZoomedId(null);
     setPlaybackError("");
-    setPresetStatuses({});
   }
   // Restore the autosave once, after mount (localStorage is browser-only). A bad save is ignored, not loaded.
   useEffect(() => {

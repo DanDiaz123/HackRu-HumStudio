@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createPlaybackEngine, type PlaybackBackend, type PlaybackState, type PlaybackVoice } from "../lib/audio/playback-engine.ts";
+import { createAudioLifecycle } from "../lib/audio/audio-lifecycle.ts";
 import * as playback from "../lib/playback.ts";
 import { TOTAL_BEATS, toggleTrackFlag, type Track } from "../lib/tracks.ts";
 import { playbackFixtureTracks } from "./fixtures/playback.ts";
@@ -523,4 +524,104 @@ test("invalid count-in BPM preserves playing audio and an already active count-i
   engine.stop();
   assert.equal(await counting, false);
   engine.dispose();
+});
+
+test("browser audio initialization is shared and never unlocks or starts playback", async () => {
+  const backend = new FakeBackend();
+  let loads = 0, creations = 0, unlocks = 0;
+  const audio = createAudioLifecycle(async () => {
+    loads++;
+    return { createEngine: () => { creations++; return createPlaybackEngine(backend); }, unlock: async () => { unlocks++; } };
+  });
+  const [first, second] = await Promise.all([audio.initialize(), audio.initialize()]);
+  assert.equal(first, second);
+  assert.equal(await audio.initialize(), first);
+  assert.equal(audio.getEngine(), first);
+  assert.equal(loads, 1);
+  assert.equal(creations, 1);
+  assert.equal(unlocks, 0);
+  assert.equal(backend.starts, 0);
+  assert.equal(backend.calls.length, 0, "preloading creates no sounding voices");
+  audio.dispose();
+  assert.equal(audio.getEngine(), null);
+});
+
+test("startup and simultaneous gesture requests share one engine and one resume", async () => {
+  const backend = new FakeBackend();
+  let loads = 0, unlocks = 0;
+  const audio = createAudioLifecycle(async () => {
+    loads++;
+    return { createEngine: () => createPlaybackEngine(backend), unlock: async () => { unlocks++; } };
+  });
+  const [startup, first, second] = await Promise.all([audio.initialize(), audio.ensure(), audio.ensure()]);
+  assert.equal(startup, first);
+  assert.equal(first, second);
+  assert.equal(loads, 1);
+  assert.equal(unlocks, 1);
+  assert.equal(backend.starts, 0);
+  audio.dispose();
+});
+
+test("disposal during module loading prevents an old startup from replacing a new studio", async () => {
+  const pending: (() => void)[] = [];
+  let creations = 0;
+  const audio = createAudioLifecycle(() => new Promise(resolve => {
+    pending.push(() => resolve({ createEngine: () => { creations++; return createPlaybackEngine(new FakeBackend()); }, unlock: async () => {} }));
+  }));
+  const old = audio.initialize();
+  const cancelled = assert.rejects(old, /cancelled/);
+  audio.dispose();
+  const next = audio.initialize();
+  pending[0]();
+  await cancelled;
+  pending[1]();
+  const engine = await next;
+  assert.equal(creations, 1);
+  assert.equal(audio.getEngine(), engine);
+  audio.dispose();
+});
+
+test("disposal during an audio resume rejects its stale gesture without clearing a newer engine", async () => {
+  let resume!: () => void;
+  let loads = 0;
+  const audio = createAudioLifecycle(async () => ({
+    createEngine: () => { loads++; return createPlaybackEngine(new FakeBackend()); },
+    unlock: () => new Promise<void>(resolve => { resume = resolve; }),
+  }));
+  const oldEngine = await audio.initialize();
+  const oldGesture = audio.ensure();
+  await Promise.resolve();
+  const cancelled = assert.rejects(oldGesture, /cancelled/);
+  audio.dispose();
+  const next = await audio.initialize();
+  resume();
+  await cancelled;
+  assert.notEqual(next, oldEngine);
+  assert.equal(audio.getEngine(), next);
+  assert.equal(loads, 2);
+  audio.dispose();
+});
+
+test("module and resume failures can be retried while preserving a preloaded engine", async () => {
+  let loads = 0, unlocks = 0;
+  const audio = createAudioLifecycle(async () => {
+    if (++loads === 1) throw new Error("module failed");
+    return { createEngine: () => createPlaybackEngine(new FakeBackend()), unlock: async () => {
+      if (++unlocks === 1) throw new Error("resume failed");
+    } };
+  });
+  await assert.rejects(audio.initialize(), /module failed/);
+  const engine = await audio.initialize();
+  await assert.rejects(audio.ensure(), /resume failed/);
+  assert.equal(audio.getEngine(), engine);
+  assert.equal(await audio.ensure(), engine);
+  assert.equal(loads, 2);
+  assert.equal(unlocks, 2);
+  audio.dispose();
+});
+
+test("browser startup preload refuses server-side initialization", async () => {
+  assert.equal(typeof window, "undefined");
+  await assert.rejects(playback.initializeAudio(), /only available in a browser/);
+  assert.equal(playback.getEngine(), null);
 });

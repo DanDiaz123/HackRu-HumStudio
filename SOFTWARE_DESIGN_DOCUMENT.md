@@ -280,7 +280,7 @@ A 1/16-note grid is `0.25` quarter-note beats; 1/8 is `0.5`, 1/4 is `1.0`. Snap 
 
 ## 9. Audio playback design
 
-- Initialize audio **only in a user gesture handler**, awaiting `Tone.start()` before playback.
+- Initialize browser sample resources after project restoration without resuming audio or starting transport. Preload all five selected sounds, including empty/muted tracks; await `Tone.start()` in a user gesture handler before playback or capture.
 - Instrument voices on one shared `Tone.getTransport()`: smplr presets on Tone's underlying audio context, with the existing `PolySynth`/percussion sounds retained as fallback. Expanded tracks select their own serializable `presetId` without changing notes. Lazy loading, stale-request guards, and shared buffer reuse live in `preset-manager.ts`/`smplr-backend.ts`. Unique per-attack stop handles preserve overlapping equal pitches. Kit-specific aliases play the same GM drum notes; regular note-offs leave one-shots intact. Mute/solo are applied at schedule time.
 - Studio keeps Solo exclusive in canonical state, independently of Mute; muted tracks stay silent even if soloed. Older multi-solo files keep the first soloed category in fixed instrument order without changing notes. Sample loading/failure feedback stays inside the relevant Sound section so it cannot move the ruler or track region.
 - Set transport BPM from the canonical studio BPM state; schedule track notes at their beat positions, converting beats to musical ticks/transport positions rather than hard-coding wall-clock seconds.

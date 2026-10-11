@@ -41,9 +41,8 @@ export function createPresetManager(
   }
   function retire(resource: Resource) {
     resource.retired = true;
-    if (resource.users === 0) {
+    if (resource.users === 0 && resources.delete(resource)) {
       resource.sample.dispose();
-      resources.delete(resource);
     }
   }
   function sync(tracks: readonly Track[]) {
@@ -55,7 +54,6 @@ export function createPresetManager(
       if (entry?.preset.id === preset.id) return;
       if (entry?.pending) {
         entry.pending.cancel();
-        entry.pending.sample.dispose();
         entry.pending = undefined;
       }
       if (!entry) {
@@ -84,10 +82,17 @@ export function createPresetManager(
       fail(entry);
       return Promise.resolve();
     }
+    let released = false;
+    const releaseSample = () => {
+      if (released) return;
+      released = true;
+      sample.dispose();
+    };
     let cancel = () => {};
     const waited = new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error("Sample loading timed out.")), loadTimeoutMs);
-      cancel = () => { clearTimeout(timer); reject(new Error("Sample loading cancelled.")); };
+      // Cancellation and the rejection handler share cleanup, so a node is freed exactly once.
+      cancel = () => { clearTimeout(timer); releaseSample(); reject(new Error("Sample loading cancelled.")); };
       sample.ready.then(() => { clearTimeout(timer); resolve(); }, error => { clearTimeout(timer); reject(error); });
     });
     const promise = waited.then(() => {
@@ -102,7 +107,7 @@ export function createPresetManager(
       emit(entry);
       readyListeners.forEach(listener => listener());
     }).catch(() => {
-      sample.dispose();
+      releaseSample();
       if (!disposed && entry.pending?.sample === sample) {
         entry.pending = undefined;
         fail(entry);
@@ -157,7 +162,6 @@ export function createPresetManager(
       disposed = true;
       entries.forEach(entry => {
         entry.pending?.cancel();
-        entry.pending?.sample.dispose();
       });
       resources.forEach(resource => resource.sample.dispose());
       resources.clear();
