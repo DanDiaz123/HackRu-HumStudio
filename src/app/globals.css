@@ -966,6 +966,42 @@ button.lane:focus-visible {
   color: var(--ink);
 }
 
+/* Theory agent (dialog reuses .help chrome) */
+.theory .ghost-btn {
+  width: 100%;
+  min-width: 0;
+  padding: 0 8px;
+}
+.theory-dialog .theory-key {
+  margin: -6px 0 14px;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--text);
+}
+.theory-dialog .theory-status {
+  margin: 0 0 14px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.theory-dialog .theory-status p {
+  margin: 0 0 10px;
+}
+.theory-dialog .theory-text {
+  margin: 0 0 14px;
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+.theory-dialog .theory-caveat {
+  margin: 0 0 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
 /* Editing in the zoomed lane */
 .notes-area.editable.on {
   cursor: crosshair;

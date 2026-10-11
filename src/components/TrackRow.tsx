@@ -29,6 +29,7 @@ import {
 } from "@/lib/tracks";
 import { BackIcon, MicIcon, RecordIcon, StopIcon } from "./icons";
 import Spectrogram from "./Spectrogram";
+import TheoryPanel from "./TheoryPanel";
 
 export type Phase = "idle" | "requesting" | "recording" | "generating" | "revealing" | "done" | "error";
 
@@ -461,6 +462,10 @@ export default function TrackRow(p: Props) {
             <div>
               <dt>Role</dt>
               <dd>{ROLE[inst.id]}</dd>
+            </div>
+            <div>
+              <dt>Agent</dt>
+              <dd><TheoryPanel harmony={p.harmony} /></dd>
             </div>
           </dl>
         )}
