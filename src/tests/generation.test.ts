@@ -209,3 +209,17 @@ test("Snap never creates same-pitch overlaps from hand-edited notes", () => {
   const dupes = snapNotesToGrid(instrument("keys"), [notes[0], { ...notes[0], id: "d", startBeat: 0.05 }], "1/4");
   assert.equal(dupes.length, 1);
 });
+
+test("Snap never creates same-pitch overlaps from hand-edited notes", () => {
+  const notes = [
+    { id: "a", midi: 60, startBeat: 0, durationBeats: 1.1, velocity: 0.8 },
+    { id: "b", midi: 60, startBeat: 1.15, durationBeats: 1, velocity: 0.8 },
+    { id: "c", midi: 62, startBeat: 0.5, durationBeats: 2, velocity: 0.8 },
+  ];
+  const snapped = snapNotesToGrid(instrument("keys"), notes, "1/4");
+  const [a, b] = snapped.filter(n => n.midi === 60).sort((x, y) => x.startBeat - y.startBeat);
+  assert.ok(a.startBeat + a.durationBeats <= b.startBeat + 1e-9);
+  assert.equal(snapped.length, 3);
+  const dupes = snapNotesToGrid(instrument("keys"), [notes[0], { ...notes[0], id: "d", startBeat: 0.05 }], "1/4");
+  assert.equal(dupes.length, 1);
+});
