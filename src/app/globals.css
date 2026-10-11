@@ -337,6 +337,7 @@ button:disabled {
   gap: 4px;
 }
 .ms button {
+  position: relative;
   width: 24px;
   height: 24px;
   border: 1.5px solid var(--ink);
@@ -347,6 +348,27 @@ button:disabled {
 .ms button[aria-pressed="true"] {
   background: var(--ink);
   color: var(--flood);
+}
+/* Keep explanations inside the spine, including collapsed rows, without taking layout space. */
+.ms button::after {
+  content: attr(aria-label);
+  position: absolute;
+  right: calc(100% + 4px);
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  padding: 4px 6px;
+  background: var(--ink);
+  color: var(--flood);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+}
+.ms button:hover::after,
+.ms button:focus-visible::after {
+  opacity: 1;
 }
 
 .lane {
@@ -658,6 +680,13 @@ button.lane:focus-visible {
   font-weight: 700;
   color: var(--ink);
 }
+.pitch-labels span.selected {
+  background: rgb(0 0 0 / 0.08);
+}
+.pitch-labels span.selected b {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
 /* Above the notes, so a note on beat 1 can't hide its row's name. */
 .pitch-labels b {
   position: relative;
@@ -944,6 +973,12 @@ button.lane:focus-visible {
 }
 .notes-area.editable.on .note {
   cursor: grab;
+}
+.note.background {
+  opacity: 0.65;
+}
+.notes-area.editable.on .note.background {
+  cursor: default;
 }
 .notes-area.editable .note.dragging {
   cursor: grabbing;

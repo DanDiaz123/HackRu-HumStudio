@@ -67,6 +67,8 @@ interface Props {
   harmony: Harmony;
   quantize: QuantizeDivision;
   onEditNotes: (notes: Note[]) => void;
+  /** Delete from the full track, independent of the selected drum editing lane. */
+  onDeleteNote: (noteId: string) => void;
   onClear: () => void;
   onRepeat: () => void;
   demo: boolean;
@@ -91,6 +93,7 @@ function NoteBars({ notes, inst, reveal, label, cls }: { notes: Note[]; inst: In
     <span
       key={n.id}
       className={cls ? cls(n) : reveal ? "note set" : "note"}
+      onContextMenu={event => event.preventDefault()}
       style={
         {
           left: `${beatX(n.startBeat)}%`,
@@ -117,7 +120,8 @@ function PitchLabels({ track }: { track: Track }) {
   return (
     <div className="pitch-labels" aria-hidden style={{ "--rows": pitchRows(inst) } as CSSProperties}>
       {labels.map((l) => (
-        <span key={l.midi} style={{ top: `${noteY(l.midi, inst)}%`, height: `${noteH(inst)}%` }}>
+        <span key={l.midi} className={inst.kind === "drums" && l.midi === drumPart(track.drumPart).midi ? "selected" : undefined}
+          style={{ top: `${noteY(l.midi, inst)}%`, height: `${noteH(inst)}%` }}>
           <b>{l.text}</b>
         </span>
       ))}
@@ -195,16 +199,20 @@ function LivePitch({ frames, harmony }: { frames: HumFrame[]; harmony: Harmony }
 type Drag = { id: string; mode: "move" | "start" | "end"; x0: number; y0: number; grab: number; orig: Note; draft: Note; moved: boolean };
 
 /** The zoomed lane's notes, editable: drag to move, drag either edge to stretch, click empty space to add,
- * double-click or Delete to remove, arrows to nudge (Shift stretches). Notes on one pitch never overlap:
+ * right-click, double-click or Delete to remove, arrows to nudge (Shift stretches). Notes on one pitch never overlap:
  * a move onto another note slides to the nearest free spot (or stays put), a stretch stops at the neighbour.
  * Drag state stays here; Studio gets one commit per edit. */
 function EditableNotes(p: {
   notes: Note[];
+  /** Visible unselected drum lanes: deletion is allowed, pitch/time edits are not. */
+  backgroundNotes: Note[];
+  selectedMidi?: number;
   inst: Instrument;
   quantize: QuantizeDivision;
   label?: (midi: number) => string;
   disabled: boolean;
   onEdit: (notes: Note[]) => void;
+  onDelete: (noteId: string) => void;
 }) {
   const { notes, inst } = p;
   const area = useRef<HTMLDivElement>(null);
@@ -217,10 +225,11 @@ function EditableNotes(p: {
     return { beat: ((e.clientX - r.left) / r.width) * TOTAL_BEATS, row: ((e.clientY - r.top) / r.height) * pitchRows(inst) };
   };
   const replace = (n: Note) => p.onEdit(notes.map((x) => (x.id === n.id ? n : x)));
-  const remove = (n: Note) => p.onEdit(notes.filter((x) => x.id !== n.id));
+  const remove = (n: Note) => p.onDelete(n.id);
+  const editable = (n: Note) => p.selectedMidi === undefined || n.midi === p.selectedMidi;
 
   function grab(e: PointerEvent, n: Note, mode: Drag["mode"]) {
-    if (p.disabled || e.button) return;
+    if (p.disabled || e.button || !editable(n)) return;
     e.stopPropagation();
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     setDrag({ id: n.id, mode, x0: e.clientX, y0: e.clientY, grab: at(e).beat - n.startBeat, orig: n, draft: n, moved: false });
@@ -231,7 +240,7 @@ function EditableNotes(p: {
     const { beat, row } = at(e);
     const o = drag.orig;
     const draft =
-      drag.mode === "move" ? moveNote(o, { startBeat: snap(beat - drag.grab), midi: rowMidi(row, inst) }, notes, step) ?? drag.draft
+      drag.mode === "move" ? moveNote(o, { startBeat: snap(beat - drag.grab), midi: p.selectedMidi ?? rowMidi(row, inst) }, notes, step) ?? drag.draft
       : resizeNote(o, drag.mode, snap(beat), notes, minLen);
     setDrag({ ...drag, moved, draft });
   }
@@ -242,7 +251,7 @@ function EditableNotes(p: {
   function add(e: PointerEvent) {
     if (p.disabled || e.button || e.target !== e.currentTarget) return;
     const { beat, row } = at(e);
-    const n = addNote({ id: noteId(), midi: rowMidi(row, inst), startBeat: Math.min(TOTAL_BEATS - minLen, Math.floor(beat / step) * step), durationBeats: minLen, velocity: 0.8 }, notes, minLen);
+    const n = addNote({ id: noteId(), midi: p.selectedMidi ?? rowMidi(row, inst), startBeat: Math.min(TOTAL_BEATS - minLen, Math.floor(beat / step) * step), durationBeats: minLen, velocity: 0.8 }, notes, minLen);
     if (n) p.onEdit([...notes, n]);
   }
   function key(e: KeyboardEvent, n: Note) {
@@ -251,6 +260,8 @@ function EditableNotes(p: {
     if (e.key === "Delete" || e.key === "Backspace") {
       remove(n);
       area.current?.focus();
+    } else if (!editable(n)) {
+      return;
     } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
       const d = e.key === "ArrowLeft" ? -nudge : nudge;
       const next = e.shiftKey
@@ -258,6 +269,7 @@ function EditableNotes(p: {
         : moveNote(n, { startBeat: n.startBeat + d, midi: n.midi }, notes, nudge, 0);
       if (next) replace(next);
     } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+      if (p.selectedMidi !== undefined) { e.preventDefault(); return; }
       const next = moveNote(n, { startBeat: n.startBeat, midi: rowMidi(noteRow(n.midi, inst) + (e.key === "ArrowUp" ? -1 : 1), inst) }, notes, nudge, 0);
       if (next) replace(next);
     } else if (e.key === "Escape" && drag) {
@@ -279,23 +291,28 @@ function EditableNotes(p: {
       onPointerUp={drop}
       onPointerCancel={() => setDrag(null)}
     >
-      {notes.map((stored) => {
+      {[...p.backgroundNotes, ...notes].map((stored) => {
         const n = drag?.id === stored.id ? drag.draft : stored;
         const beats = +n.durationBeats.toFixed(2);
         return (
           <span
             key={n.id}
-            className={`note${drag?.id === n.id && drag.moved ? " dragging" : ""}`}
+            className={`note${editable(stored) ? "" : " background"}${drag?.id === n.id && drag.moved ? " dragging" : ""}`}
             role="button"
             tabIndex={p.disabled ? -1 : 0}
             aria-label={`${pitchName(n.midi)}, beat ${+(n.startBeat + 1).toFixed(2)}, ${beats} beat${beats === 1 ? "" : "s"}`}
             style={{ left: `${beatX(n.startBeat)}%`, width: `${beatX(n.durationBeats)}%`, top: `${noteY(n.midi, inst)}%`, height: `${h}%` }}
             onPointerDown={(e) => grab(e, stored, "move")}
-            onDoubleClick={() => !p.disabled && remove(stored)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (!p.disabled) { setDrag(null); remove(stored); }
+            }}
+            onDoubleClick={() => !p.disabled && editable(stored) && remove(stored)}
             onKeyDown={(e) => key(e, stored)}
           >
             {p.label && <span className="note-label">{p.label(n.midi)}</span>}
-            {!p.disabled && (
+            {!p.disabled && editable(stored) && (
               <>
                 <span className="note-edge start" onPointerDown={(e) => grab(e, stored, "start")} />
                 <span className="note-edge" onPointerDown={(e) => grab(e, stored, "end")} />
@@ -343,10 +360,11 @@ export default function TrackRow(p: Props) {
   const preset = presetForTrack(inst.id, track.presetId);
   const soundStatus = p.presetStatus?.presetId === preset.id ? p.presetStatus : undefined;
   const selectedDrumPart = inst.kind === "drums" ? drumPart(track.drumPart) : null;
-  const visibleNotes = zoomed && selectedDrumPart
+  const editableNotes = selectedDrumPart
     ? track.notes.filter((note) => note.midi === selectedDrumPart.midi)
     : track.notes;
-  const hasNotes = visibleNotes.length > 0;
+  const backgroundNotes = selectedDrumPart ? track.notes.filter(note => note.midi !== selectedDrumPart.midi) : [];
+  const hasNotes = (zoomed ? editableNotes : track.notes).length > 0;
   const style = { "--flood": inst.color } as CSSProperties;
   const labels = inst.kind === "drums" ? undefined : p.noteLabel;
   const pitched = inst.kind !== "drums";
@@ -365,8 +383,8 @@ export default function TrackRow(p: Props) {
           </button>
           <div className="ms">
             {/* Disabled while busy: re-scheduling mid-take would play the backing tracks into the mic. */}
-            <button aria-pressed={track.muted} aria-label={`Mute ${name}`} onClick={() => p.onToggle("muted")} disabled={p.busy}>M</button>
-            <button aria-pressed={track.solo} aria-label={`Solo ${name}`} onClick={() => p.onToggle("solo")} disabled={p.busy}>S</button>
+            <button aria-pressed={track.muted} aria-label={`Mute ${name}`} title={`Mute ${name}`} onClick={() => p.onToggle("muted")} disabled={p.busy}>M</button>
+            <button aria-pressed={track.solo} aria-label={`Solo ${name}`} title={`Solo ${name}`} onClick={() => p.onToggle("solo")} disabled={p.busy}>S</button>
           </div>
         </div>
         <button className="lane" onClick={p.onOpen} disabled={p.busy} aria-label={`Open ${name} track to record a hum`}>
@@ -463,7 +481,7 @@ export default function TrackRow(p: Props) {
           )}
           {!recording && !working && (
             <div className="part-actions">
-              <button className="ghost-btn" onClick={p.onRepeat} disabled={p.busy || !visibleNotes.some((n) => n.startBeat < TOTAL_BEATS / 2)}
+              <button className="ghost-btn" onClick={p.onRepeat} disabled={p.busy || !editableNotes.some((n) => n.startBeat < TOTAL_BEATS / 2)}
                 title="Copy bars 1-4 over bars 5-8">Repeat 1–4</button>
               <button className="ghost-btn" onClick={p.onClear} disabled={p.busy || !hasNotes} title="Remove every note in this part (undoable)">Clear</button>
             </div>
@@ -484,6 +502,7 @@ export default function TrackRow(p: Props) {
         {pitched && (r ? r.step >= 2 && <LaneChords harmony={r.harmony} stamp /> : p.learn && <LaneChords harmony={p.harmony} />)}
         {r ? (
           <div className="notes-area">
+            {selectedDrumPart && <NoteBars notes={r.final.filter(note => note.midi !== selectedDrumPart.midi)} inst={inst} cls={() => "note background"} />}
             <RevealNotes r={selectedDrumPart ? {
               ...r,
               raw: r.raw.filter(note => note.midi === selectedDrumPart.midi),
@@ -491,8 +510,9 @@ export default function TrackRow(p: Props) {
             } : r} inst={inst} />
           </div>
         ) : (
-          !working && (
-            <EditableNotes notes={visibleNotes} inst={inst} quantize={p.quantize} label={labels} disabled={p.busy} onEdit={p.onEditNotes} />
+          (!working || selectedDrumPart) && (
+            <EditableNotes notes={editableNotes} backgroundNotes={backgroundNotes} selectedMidi={selectedDrumPart?.midi}
+              inst={inst} quantize={p.quantize} label={labels} disabled={p.busy} onEdit={p.onEditNotes} onDelete={p.onDeleteNote} />
           )
         )}
         {recording && p.learn && pitched && <LivePitch frames={p.frames} harmony={p.harmony} />}
@@ -503,7 +523,7 @@ export default function TrackRow(p: Props) {
             <p className="gen-stage">{step.sub}</p>
           </div>
         )}
-        {phase === "idle" && !hasNotes && (
+        {phase === "idle" && !track.notes.length && (
           <div className="prompt">
             <MicIcon width={28} height={28} />
             <p>Hum the {name.toLowerCase()}</p>

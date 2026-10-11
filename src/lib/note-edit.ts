@@ -1,5 +1,5 @@
 // Editing rules for the zoomed lane. Pure, so the gestures in TrackRow stay thin and testable.
-import { type Note, TOTAL_BEATS } from "./tracks.ts";
+import { DRUM_PARTS, type DrumPart, type Note, TOTAL_BEATS } from "./tracks.ts";
 
 const EPS = 1e-6;
 const MAX_SEARCH_STEPS = 10_000;
@@ -15,6 +15,22 @@ const minimumLength = (minLen: number) => {
   if (!Number.isFinite(minLen) || minLen <= 0 || minLen > TOTAL_BEATS)
     throw new RangeError("Minimum note length must be positive and within the song.");
 };
+
+/** Delete exactly one ID from the full track, including an unselected drum lane. Never mutates notes. */
+export function deleteNoteById(notes: readonly Note[], id: string): Note[] {
+  return notes.filter(note => note.id !== id);
+}
+
+/** Replace only the selected drum lane; reject cross-lane edits and preserve the other note objects. */
+export function replaceDrumPartNotes(notes: readonly Note[], part: DrumPart, replacement: readonly Note[]): Note[] {
+  const selected = DRUM_PARTS.find(option => option.id === part);
+  if (!selected || !replacement.every(note => validNote(note) && note.midi === selected.midi))
+    throw new RangeError("Drum edits must belong to the selected part.");
+  const next = [...notes.filter(note => note.midi !== selected.midi), ...replacement];
+  if (new Set(next.map(note => note.id)).size !== next.length)
+    throw new RangeError("Drum edits require unique note ids.");
+  return next.sort((a, b) => a.startBeat - b.startBeat || a.midi - b.midi || a.id.localeCompare(b.id));
+}
 
 /** True when `n` stays inside the timeline and touches no other note on its pitch (end-to-start is fine). */
 export function fits(n: Note, notes: readonly Note[]): boolean {

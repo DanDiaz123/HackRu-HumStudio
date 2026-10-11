@@ -6,7 +6,7 @@ import { DEFAULT_NOTE_SENSITIVITY, NOTE_SENSITIVITY_LEVELS, NOTE_SENSITIVITY_PRE
 import { type HumFrame, micErrorMessage, startDemoHum, startMic } from "@/lib/hum";
 import { download } from "@/lib/download";
 import { exportMidi } from "@/lib/midi";
-import { repeatFirstHalf } from "@/lib/note-edit";
+import { deleteNoteById, repeatFirstHalf, replaceDrumPartNotes } from "@/lib/note-edit";
 import { type LoadedProject, MAX_PROJECT_CHARS, MAX_PROJECT_NOTES, STORAGE_KEY, newProjectMeta, parseProject, serializeProject } from "@/lib/persistence/project";
 import {
   DEFAULT_HARMONY,
@@ -31,6 +31,8 @@ import {
   type Track,
   beatX,
   initialTracks,
+  normalizeSoloTracks,
+  toggleTrackFlag,
   midiName,
   noteId,
   drumPart,
@@ -132,8 +134,9 @@ export default function Studio() {
 
   /** Keep event/async snapshots current immediately, including a failed take restored before the next effect. */
   const commitTracks = useCallback((next: Track[]) => {
-    arrangementRef.current = { ...arrangementRef.current, tracks: next };
-    setTracks(next);
+    const normalized = normalizeSoloTracks(next);
+    arrangementRef.current = { ...arrangementRef.current, tracks: normalized };
+    setTracks(normalized);
   }, []);
   const pushHistory = useCallback((s: Snapshot) => {
     const h = historyRef.current;
@@ -525,11 +528,10 @@ export default function Studio() {
 
   /** A hand edit replaces the part's notes; an edited Sample is the user's part from then on. */
   function editNotes(id: string, notes: Note[], selectedPart?: DrumPart) {
+    if (busy) return;
     const track = arrangementRef.current.tracks.find(t => t.instrument.id === id);
     if (selectedPart && track?.instrument.kind === "drums") {
-      const midi = drumPart(selectedPart).midi;
-      notes = [...track.notes.filter(note => note.midi !== midi), ...notes]
-        .sort((a, b) => a.startBeat - b.startBeat || a.midi - b.midi || a.id.localeCompare(b.id));
+      notes = replaceDrumPartNotes(track.notes, selectedPart, notes);
     }
     const total = notes.length + arrangementRef.current.tracks.reduce((count, track) => count + (track.instrument.id === id ? 0 : track.notes.length), 0);
     if (total > MAX_PROJECT_NOTES) { setFileError(`This project can hold at most ${MAX_PROJECT_NOTES.toLocaleString()} notes. Remove notes before adding or repeating a part.`); return; }
@@ -539,9 +541,18 @@ export default function Studio() {
     commitTracks(arrangementRef.current.tracks.map((t) => (t.instrument.id === id ? { ...t, notes, sample: false } : t)));
   }
 
+  /** Deletion spans visible drum lanes, so it bypasses the selected-part replacement contract. */
+  function deleteNote(id: string, noteId: string) {
+    if (busy) return;
+    const track = arrangementRef.current.tracks.find(t => t.instrument.id === id);
+    if (!track?.notes.some(note => note.id === noteId)) return;
+    editNotes(id, deleteNoteById(track.notes, noteId));
+  }
+
   function toggle(id: string, key: "muted" | "solo") {
+    if (busy) return;
     remember();
-    commitTracks(arrangementRef.current.tracks.map((t) => (t.instrument.id === id ? { ...t, [key]: !t[key] } : t)));
+    commitTracks(toggleTrackFlag(arrangementRef.current.tracks, id, key));
   }
 
   // Undo / redo
@@ -844,12 +855,6 @@ export default function Studio() {
       {playbackError && <p role="alert">{playbackError}</p>}
       {fileError && <p className="sound-notice" role="alert">{fileError}</p>}
       {storageError && <p className="sound-notice" role="status">{storageError}</p>}
-      {Object.values(presetStatuses).some(status => status.state === "loading") && (
-        <p className="sound-notice" role="status">Loading selected sounds…</p>
-      )}
-      {Object.values(presetStatuses).filter(status => status.state === "fallback").map(status => (
-        <p key={status.trackId} className="sound-notice" role="status">{status.message}</p>
-      ))}
       {countInBeat !== null && <p role="status" aria-live="polite">Count-in: {countInBeat}</p>}
 
       <div className="ruler-row">
@@ -884,6 +889,7 @@ export default function Studio() {
             harmony={harmony}
             quantize={quantize}
             onEditNotes={(notes) => editNotes(t.instrument.id, notes, t.drumPart)}
+            onDeleteNote={(noteId) => deleteNote(t.instrument.id, noteId)}
             onClear={() => clearPart(t.instrument.id, t.drumPart)}
             onRepeat={() => repeatPart(t.instrument.id, t.drumPart)}
             demo={demo}

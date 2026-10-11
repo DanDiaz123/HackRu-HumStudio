@@ -1,10 +1,39 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { addNote, fits, moveNote, repeatFirstHalf, resizeNote } from "../lib/note-edit.ts";
+import { addNote, deleteNoteById, fits, moveNote, repeatFirstHalf, replaceDrumPartNotes, resizeNote } from "../lib/note-edit.ts";
 import type { Note } from "../lib/tracks.ts";
 
 const n = (id: string, midi: number, startBeat: number, durationBeats = 1): Note => ({ id, midi, startBeat, durationBeats, velocity: 0.8 });
 const lane = [n("a", 60, 0, 2), n("b", 60, 4, 2), n("c", 62, 2, 1)];
+
+test("deleting one note preserves every other melodic/drum note and never mutates the input", () => {
+  const notes = Object.freeze([36, 38, 42, 46, 49, 60].map((midi, i) => Object.freeze(n(`note-${i}`, midi, i))));
+  for (const target of notes) {
+    const result = deleteNoteById(notes, target.id);
+    assert.deepEqual(result, notes.filter(note => note !== target));
+    assert.ok(result.every(note => notes.includes(note)));
+  }
+  assert.deepEqual(deleteNoteById(notes, "missing"), notes);
+  assert.equal(notes.length, 6);
+});
+
+test("selected drum edits, Clear and Repeat preserve all background lanes without duplicated notes", () => {
+  const notes = Object.freeze([36, 38, 42, 46, 49].map((midi, i) => Object.freeze(n(`drum-${i}`, midi, i))));
+  const background = notes.filter(note => note.midi !== 36);
+  const kick = notes.filter(note => note.midi === 36);
+  const moved = moveNote(kick[0], { midi: 36, startBeat: 8 }, kick, 1)!;
+  const edited = replaceDrumPartNotes(notes, "kick", [resizeNote(moved, "end", 10, [moved], 1)]);
+  assert.deepEqual(edited.filter(note => note.midi !== 36), background);
+  assert.equal(edited.find(note => note.midi === 36)?.durationBeats, 2);
+  assert.deepEqual(replaceDrumPartNotes(notes, "kick", []), background);
+  const repeated = replaceDrumPartNotes(notes, "kick", repeatFirstHalf(kick, () => "kick-repeat"));
+  assert.deepEqual(repeated.filter(note => note.midi !== 36), background);
+  assert.deepEqual(repeated.filter(note => note.midi === 36).map(note => note.startBeat), [0, 16]);
+  assert.equal(new Set(repeated.map(note => note.id)).size, repeated.length);
+  assert.throws(() => replaceDrumPartNotes(notes, "kick", [notes[1]]), /selected part/);
+  assert.throws(() => replaceDrumPartNotes(notes, "kick", [{ ...kick[0], id: notes[1].id }]), /unique note ids/);
+  assert.equal(notes.length, 5);
+});
 
 test("notes on one pitch may touch but not overlap; other pitches and chords are free", () => {
   assert.ok(fits(n("x", 60, 2, 2), lane)); // fills the gap exactly

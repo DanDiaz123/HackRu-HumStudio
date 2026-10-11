@@ -18,7 +18,7 @@ export interface Track {
   instrument: Instrument;
   /** Serializable playback sound; category identity and MIDI notes stay unchanged. */
   presetId: string;
-  /** Selected rhythmic lane inside the Drums track; omitted for pitched tracks. */
+  /** Selected recording/editing lane; all drum lanes remain visible. Omitted for pitched tracks. */
   drumPart?: DrumPart;
   notes: Note[];
   muted: boolean;
@@ -87,6 +87,23 @@ export function initialTracks(): Track[] {
   return INSTRUMENTS.map((instrument) => {
     const notes = instrument.id === "drums" ? sampleDrums() : instrument.id === "keys" ? voiceChords(DEFAULT_HARMONY) : [];
     return { instrument, presetId: presetForTrack(instrument.id).id, ...(instrument.kind === "drums" ? { drumPart: "kick" as DrumPart } : {}), notes, muted: false, solo: false, sample: notes.length > 0 };
+  });
+}
+
+/** Keep the first soloed category in fixed instrument order when loading older multi-solo projects. */
+export function normalizeSoloTracks(tracks: readonly Track[]): Track[] {
+  const selected = INSTRUMENTS.find(inst => tracks.some(track => track.instrument.id === inst.id && track.solo))?.id;
+  return tracks.map(track => track.solo && track.instrument.id !== selected ? { ...track, solo: false } : track);
+}
+
+/** Toggle mute independently, or select one exclusive solo (clicking it again clears solo). */
+export function toggleTrackFlag(tracks: readonly Track[], id: string, key: "muted" | "solo"): Track[] {
+  const selected = tracks.find(track => track.instrument.id === id);
+  if (!selected) return [...tracks];
+  if (key === "muted") return tracks.map(track => track === selected ? { ...track, muted: !track.muted } : track);
+  return tracks.map(track => {
+    const solo = track === selected && !selected.solo;
+    return track.solo === solo ? track : { ...track, solo };
   });
 }
 
