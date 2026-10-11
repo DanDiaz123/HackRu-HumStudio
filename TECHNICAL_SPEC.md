@@ -1,18 +1,21 @@
 # HumStudio - Technical Specification
 
 **Status:** Implementation contract. Sections are marked **Implemented** (code exists in `src/`) or **Target** (agreed interface, not built yet). Implemented does not mean tested on a real microphone.
-**Version:** 1.2 (implemented persistence/editor revision) | **Date:** 2026-10-10
-**Target:** HackRU MVP - Next.js 16 App Router + React 19 + TypeScript + Tone.js 15 + Pitchy + `@tonejs/midi`
+**Version:** 1.3 (Education Track and Learn-mode contract) | **Date:** 2026-10-10
+**Target:** HackRU **Education Track** MVP - Next.js 16 App Router + React 19 + TypeScript + Tone.js 15 + smplr + Pitchy + `@tonejs/midi`
 
 This file tells implementers **what to build, which interfaces to share, what edge cases to handle, and how to prove it works**. For product rationale and scope, read [`SOFTWARE_DESIGN_DOCUMENT.md`](SOFTWARE_DESIGN_DOCUMENT.md) and [`PRODUCT.md`](PRODUCT.md). Coding agents must also read [`AGENTS.md`](AGENTS.md). Ownership of each module is in [`WORKLOAD_SPLIT.md`](WORKLOAD_SPLIT.md).
 
-> The app is a **multi-track instrument editor** (five fixed tracks). Generation sits behind `generateTrack(...)` and now uses deterministic melodic segmentation, harmony fitting, and quantization. The `Note` contract is unchanged; real-microphone tuning remains open.
+> The app is a **multi-track learning and instrument editor** (five fixed tracks). Generation sits behind `generateTrack(...)` and uses deterministic melodic segmentation, harmony fitting, and quantization. The `Note` contract is unchanged; real-microphone tuning remains open.
+>
+> **Education principle:** Learn mode is a derived, exploratory presentation of pitch, key, rhythm, and harmony—not a lesson engine, scoring model, or proof of student progress. The official [HackRU Education Track](https://www.hackru.org/) describes projects that build an educated community; our demo must show what a novice can understand by experimenting with sound.
 
 ## 0. Implementation priorities
 
 - **P0:** Five instrument tracks over 8 bars of 4/4 **(implemented)**; click-to-zoom **(implemented)**; BPM/play/pause/stop/rewind, mute/solo **(implemented)**; microphone acquisition, live spectrogram, loading state, animated reveal **(implemented)**; multi-track MIDI export **(implemented)**; clear errors and Demo hum fallback **(implemented)**; monophonic hum-to-notes for the selected instrument with Off/1/4/1/8/1/16 quantization **(implemented; real-microphone tuning pending)**; note editing in the zoomed track **(implemented)**; local autosave and JSON import/export of all tracks **(implemented)**; undo/redo and keyboard shortcuts **(implemented)**; five rhythm-only Drums parts selectable in the zoomed tab **(implemented)**.
-- **P1:** Four-beat playback count-in and metronome **(implemented; listening pending)**; recording count-in with click **(implemented; listening pending)**; instrument sound polish; deployment and demo rehearsal.
-- **P2:** Generation backend or ML model, Supabase, imported audio, effects, user-created tracks, collaboration.
+- **P0 — Education demonstration:** Learn toggle (default on), live pitch/degree/solfège/cents while recording, note-bar pitch and solfège labels, key selector, chord names/Roman numerals, playhead-linked chord highlight and track-role descriptions **(all implemented visually; novice walkthrough and physical-mic checks pending)**. Demonstrate one change-and-listen concept using Snap/note editing/mute/solo.
+- **P1:** Four-beat playback count-in and metronome **(implemented; listening pending)**; recording count-in with click **(implemented; listening pending)**; sampled instrument presets **(implemented; human listening pending)**; educator-facing explanatory copy; deployment and demo rehearsal.
+- **P2:** Guided ear-training/reference-tone exercises, learner progress with explicit opt-in, teacher-created lessons, nonvisual live-pitch feedback; generation backend or ML model, Supabase, imported audio, effects, user-created tracks, collaboration.
 
 **Integration milestone (implemented; listening pending):** sample and generated `Note[]` -> visible track clips -> Tone.js playback, with scheduling covered by regression fixtures. Real hum -> `generateTrack` -> selected-track notes is implemented; real-device tuning and listening remain open.
 
@@ -30,7 +33,8 @@ This file tells implementers **what to build, which interfaces to share, what ed
 | MIDI | `@tonejs/midi` | Encode a Standard MIDI File in browser. |
 | State | React state plus synchronized refs in `Studio.tsx` (implemented); reducer remains optional future refactor | Canonical `Track[]`; no Zustand/Redux. |
 | Persistence | `localStorage` + browser file download/upload | Implemented (`src/lib/persistence/project.ts`). No auth/backend in MVP. |
-| Testing | TypeScript + Node's built-in test runner | Playback, harmony, segmentation, and generation fixtures implemented. Manual browser checks remain required. |
+| Testing | TypeScript + Node's built-in test runner | Playback, harmony, segmentation, and generation fixtures; `harmony.test.ts` includes scale-degree/solfège/Roman-numeral tests. Manual browser checks remain required. |
+| Learn-theory derivation | `music/harmony.ts`, `TrackRow.tsx`, `Studio.tsx` | No API, AI inference service, classroom database, or new dependency; labels derive from current note/harmony state and frames. |
 
 Recommended: Node.js >= 20.9, npm, Chrome or Edge on desktop. Verify chosen package versions against the lockfile; do not rely on unverified snippets from a different Tone.js major version.
 
@@ -68,7 +72,9 @@ src/
     playback.ts              # implemented: browser-only playback facade
     midi.ts                  # implemented: multi-track export
     music/
-      types.ts               # implemented: Note, QuantizeDivision (legacy Project remains a compatibility contract)
+      types.ts               # implemented: Note, QuantizeDivision only
+      harmony.ts             # implemented: key/chord inference, names, roman numerals, solfege/degree
+      arrangement-settings.ts # implemented: cached takes, key and Snap regeneration
       timing.ts              # target: shared helpers (generate.ts has Hz/beat conversion)
       quantize.ts            # target: shared helpers (generate.ts uses tracks.ts QUANT_BEATS)
     audio/
@@ -90,7 +96,7 @@ The earlier plan's `StudioClient`/`TransportControls`/`RecordPanel`/`useRecorder
 
 ## 3. Shared TypeScript contracts
 
-`src/lib/music/types.ts` exists and is the source of truth; `src/lib/tracks.ts` re-exports `Note` and `QuantizeDivision` from it. Import these types everywhere; do not define incompatible local `Note` copies.
+`src/lib/music/types.ts` exists and is the source of truth for **two actual exports: `Note` and `QuantizeDivision`**. `src/lib/tracks.ts` re-exports them. The legacy `Project`, `PitchFrame`, `NoteSegment`, and `DetectorConfig` shapes shown below describe historical v1 or target contracts and are **not** exported from this file; use `ProjectV2` in `src/lib/persistence/project.ts` and the implemented `HumFrame`/segmentation types for current code. Do not create competing `Note` interfaces.
 
 ```ts
 export type QuantizeDivision = "off" | "1/4" | "1/8" | "1/16";
@@ -103,6 +109,7 @@ export interface Note {
   velocity: number;      // Normalized 0..1
 }
 
+// Historical v1 schema example (NOT exported from the current types.ts).
 export interface Project {
   schemaVersion: 1;
   id: string;
@@ -114,6 +121,7 @@ export interface Project {
   updatedAt: string;
 }
 
+// Target-only pitch/segment/config shapes (NOT implemented as types.ts exports).
 export interface PitchFrame {
   tSec: number;          // Seconds since actual recording began
   hz: number | null;     // Null = unvoiced or rejected frame
@@ -250,6 +258,33 @@ export const DEFAULT_HARMONY: Harmony; // C major, Am F C G x2 (the Keys sample)
 - **Keys re-picks the chords.** A Keys take keeps the key but sets each hummed bar's chord to the triad it plays (`chordsFromVoicing` reads it back from the notes).
 - After a Melody or Keys take, Studio re-voices a Sample Keys part (`voiceChords`) and re-fits every other generated pitched part to the new harmony.
 - The multi-track `Project` schema must store `harmony`.
+
+### 3.5 Learn-mode music-theory contract (implemented; no schema changes)
+
+`src/lib/music/harmony.ts` owns the theory used for education labels. `Studio.tsx` owns a simple `learn` Boolean view toggle (`useState(true)`); `TrackRow.tsx` receives `learn`, `harmony` and `noteLabel`. **Do not add `learn`, a score, or pitch-analysis frames to `ProjectV2` solely to implement this presentation.** On reload, Learn reverts to its UI default; key/chords and notes persist through the existing project format.
+
+Relevant **existing** interfaces:
+
+```ts
+// Implemented in src/lib/music/harmony.ts
+export function keyName(key: Key): string;
+export function chordName(chord: number[]): string;
+export function romanNumeral(chord: number[], key: Key): string;
+export function scaleDegree(midi: number, key: Key): number | null;
+export function solfege(midi: number, key: Key): string | null;
+// Key = { tonic: number /* 0..11 */, mode: "major" | "minor" }
+// Harmony extends Key with one triad of pitch classes per bar.
+```
+
+- **Scale degrees:** `scaleDegree` returns 1..7 for a diatonic note, otherwise `null`. In C major, MIDI 60 is degree 1, 64 is degree 3, and 61 is outside the key. Octaves do not change degree.
+- **Movable-do solfège:** `solfege` maps relative to the currently chosen/inferred tonic; major uses `do re mi fa sol la ti`; do-based minor uses `do re me fa sol le te`. Chromatic/out-of-scale notes get `null`, not a fabricated syllable. The `noteLabel` in `Studio.tsx` derives from `midiName(midi)` and `solfege(midi, harmony)` for visible NoteBars.
+- **Harmony:** `romanNumeral` recognizes a diatonic triad in the selected key, using uppercase major, lowercase minor, `°` diminished, and `?` for unmatched chords. In C major, [C,E,G] -> `I`, [G,B,D] -> `V`. The bar overlay uses `harmony.bars`, not a separate quiz answer key; `Studio.tsx` applies a `.now` class to the active chord on playhead movement.
+- **Live pitch:** During pitched-track recording and Learn on, `LivePitch` consumes the latest `HumFrame.hz` through `useLatestFrame` / animation frames. Calculate continuous MIDI `m = 69 + 12 * log2(hz / 440)`, nearest MIDI `n = round(m)`, and cents `round(100 * (m - n))`. Display the MIDI note name plus `solfege(n, harmony)`, degree or "outside the key," and signed cents. A null/unvoiced Hz value must display "no pitch" and hide the pitch needle. **Cents is relative to the nearest equal-tempered semitone, not an assessment score.**
+- **Key selection:** `KEYS` contains all 12 major and 12 minor tonic choices. Selecting a key in `Studio.tsx` may re-fit the actual arrangement to the new harmony—this is a **musical mutation**, unlike toggling Learn. Do not describe Key selection as merely changing labels. Harmony inference may be ambiguous for sparse melodies, so never call it ground truth.
+- **Track-role explanation:** The zoomed spine labels the selected role (Melody sets key/chords; Bass roots/fifths; Keys bar chords; Strings held tones; Drums rhythm kit). These describe the current deterministic role behavior rather than a formal curriculum.
+- **Current accessibility limit:** `LivePitch` is presently rendered with `aria-hidden`; the live readout is visual only. Do not claim full assistive-technology support until a deliberate nonvisual equivalent is built and tested.
+
+**Educational invariant:** A Learn on/off toggle does not alter `Track[]`, `Note[]`, MIDI output, transport state, presets or project storage. Other controls (Snap, Key, edits, Sensitivity) can change the music as designed, so demonstrate their effect honestly.
 
 ### Invariant checks
 
@@ -489,7 +524,7 @@ Do **not** label a DSP pitch detector as a trained neural model unless a model i
 
 ### 8.2 Transport and recording controls
 
-- **Transport bar (implemented):** wordmark, Rewind, Play/Pause, Stop, metronome, count-in, position, BPM, Key/chords, Snap (Off/1/4/1/8/1/16), Sensitivity (Low/Medium/High), Undo, Redo, Open project, Save project, keyboard shortcut help, and Export MIDI.
+- **Transport bar (implemented):** wordmark, Rewind, Play/Pause, Stop, metronome, count-in, **Learn**, position, BPM, Key/chords, Snap (Off/1/4/1/8/1/16), Sensitivity (Low/Medium/High), Undo, Redo, Open project, Save project, keyboard shortcut help, and Export MIDI.
 - **Zoomed header (implemented):** All tracks (back), instrument name, hint, Record / Stop / Re-record, Demo hum, and a status line with a filled-or-hollow mark plus text (e.g. "Demo hum 0:05.2", "Generating", "8 notes").
 - **Drums selector (implemented):** The zoomed Drums header includes Kick, Snare, Closed hat, Open hat, and Crash. The lane, editing gestures, Clear, Repeat, and recording target only the selected rhythm lane; hidden lanes remain in the same playable/exported Drums track.
 - A first Play or Record gesture awaits `Tone.start()`. Recording shares Tone's audio context and click clock; microphone analysis never connects to the speakers.
@@ -502,6 +537,28 @@ Do **not** label a DSP pitch detector as a trained neural model unless a model i
 - Provide status changes as text (not color only).
 - Implemented: `Escape` returns from a zoomed track to all tracks (ignored while recording/generating). Mute/solo use `aria-pressed` and filled vs hollow marks. Generation status uses `aria-live`. Reduced motion disables the zoom and reveal animations.
 - **Implemented:** `Space` toggles play/pause, `Escape` returns to all tracks, `R` records/stops, `1–5` opens tracks, `M/S` mute/solo, `K` toggles metronome, `L` toggles Learn, `Ctrl+Z`/`Ctrl+Shift+Z` undo/redo, `Ctrl+S` saves, and `?` opens shortcuts when focus is outside an input.
+
+### 8.4 Learn overlays and classroom-style demo behavior (implemented)
+
+The Education Track demonstration is an **interaction protocol**, not a new backend:
+
+1. Open **Melody**, leave Learn on (default), and record a steady monophonic phrase. `LivePitch` appears only while recording on melodic tracks; show the nearest note, scale degree/solfège and signed cents alongside the spectrogram.
+2. Stop; the reveal first shows raw note bars, then role-based fitted/snapped notes, followed by the key/chord context. Do not imply all generated parts are exact recordings: Bass is root/fifth, Keys is chord voicing, Strings is a sustained pad; Drums map onset timing to the selected hit lane.
+3. In the zoomed lane, show each note's pitch name/solfège and `LaneChords` chord symbols plus Roman numerals. The active bar receives the `now` class as the playhead moves. The spine shows the selected Key and Role.
+4. Compare a note before/after an edit, compare Snap Off vs a grid, or mute/solo to isolate Bass/Keys. Make the student **say or point out** what changed; the app does not measure learning outcomes.
+5. Show a manually selected Key if the inferred harmony seems implausible; call the prior value an estimated interpretation.
+
+Expected separation of concerns: the UI should call `romanNumeral`, `scaleDegree`, and `solfege` using current state; do not duplicate harmony rules in JSX. Keep live pitch updates outside React state on every audio hop and tear down animation frames on unmount. Never generate per-frame network requests, audio uploads, persistent voice samples, quizzes, or grades.
+
+**Suggested educational QA, separate from the existing musical fixtures:**
+- [x] Unit: `src/tests/harmony.test.ts` already checks C-major and A-minor Roman numerals, out-of-key degree `null`, `do/mi/sol`, and do-based minor `me`.
+- [ ] UI: Toggle Learn on/off and verify only theory overlays change; MIDI bytes and note state remain identical.
+- [ ] Browser: While recording stable A4, verify closest note, cents sign and silence state; note that microphone/Pitchy noise can affect readings. The indicator must not be called a grade.
+- [ ] UI: Verify the currently playing bar highlights the correct chord and Roman numeral, and key changes refresh derived labels and arrangement as specified.
+- [ ] Accessibility: Verify visible text, focus/contrast and reduced motion; improve nonvisual live pitch in a future scoped accessibility task.
+- [ ] Human: Ask a music beginner to locate a note, name one degree/chord, and hear a note edit. Record observations rather than claiming demonstrated learning impact.
+
+**No new data-model migration is required** for Learn display. The existing v2 schema saves `Harmony`, notes and track settings; there is no quiz/progress schema.
 
 ## 9. Tone.js playback service
 
@@ -689,6 +746,10 @@ type ProjectAction =
 | T-17 | `snapToScale(61)` in C major | 60 (ties go down) **(implemented)** |
 | T-18 | `inferHarmony` on a melody outlining C, F, G, C | C F G C, then C repeated into empty bars **(implemented)** |
 | T-19 | `fitToHarmony` Bass over Am; Drums | Only A/E inside 28..52; Drums unchanged **(implemented)** |
+| **T-20** | C major: `romanNumeral([0,4,7])`, `romanNumeral([7,11,2])` | `I`, `V` **(implemented in harmony.test.ts)** |
+| **T-21** | C major: MIDI 64, 61; C minor: MIDI 63 | Degree 3 / solfège `mi`; outside key `null`; minor `me` **(implemented in harmony.test.ts)** |
+| **T-22** | Learn toggle when a project has notes/chords | Derived UI labels only; no note/midi/saved project mutation **(manual browser regression still needed)** |
+| **T-23** | Stable voice at semitone, then silence | Live nearest note and signed cents; silence -> "no pitch" **(manual browser validation pending)** |
 
 ### Manual browser acceptance
 
@@ -711,10 +772,11 @@ type ProjectAction =
 - [x] Merge audit: all 170 tests, lint, `npx tsc --noEmit`, and `npm run build` pass (2026-10-10). See [`AUDIT.md`](AUDIT.md) for current browser checks and limitations.
 - [x] Automated desktop Edge checks load and play all 20 sampled sounds, preserve note bars and exported MIDI bytes, exercise fallback/retry and rapid/live switching, and confirm one shared audio clock. Output RMS is positive during playback and zero after Pause; this is audio analysis, not human listening.
 - [x] Automated Edge transport checks cover pause/resume, stop, rewind, 60/180 BPM, 32-beat looping, mute/solo, metronome, and playback count-in cancellation. Reload/navigation closes the old audio context. Human listening on the demo laptop remains required.
+- [ ] **Education Track sign-off:** Verify Learn controls and labels at the judging resolution; have a novice identify a pitch/degree and a bar chord, change an edit or Snap setting, and describe the audible difference. Physical-microphone cents behavior and human feedback are **not** yet evidenced.
 
 ### Benchmarks, explicitly aspirational
 
-For a clean 5-10 second single-voice melody, target >= 80% correct stable-note pitches, a perceptually useful quantized rhythm, and < 2 seconds from Stop to editable notes on a typical laptop. Measure empirically; do not claim compliance without testing.
+For a clean 5-10 second single-voice melody, target >= 80% correct stable-note pitches, a perceptually useful quantized rhythm, and < 2 seconds from Stop to editable notes on a typical laptop. **Educational usability hypothesis** (not yet tested): a novice can identify one sung note, one relative degree/chord, and one audible effect of editing within the demo. Measure empirically; do not claim compliance without testing.
 
 ## 14. Failure handling and demo preparation
 
@@ -744,7 +806,8 @@ The app ships labeled **Sample** parts (Keys, Drums) and a labeled **Demo hum**.
 7. Note editing in the zoomed track, wired to state and playback (Person 3).
 8. Multi-track JSON autosave + file round trip (Person 4).
 9. Exercise denied permissions, silence, repeated recordings, and bad import.
-10. Rehearse the exact 90-second demo and freeze nonessential features.
+10. Verify Learn mode: stable pitch note+degree+cents, no-pitch silence, note labels, key selector, Roman-numeral bar overlays and current-chord highlight.
+11. Rehearse the **Education Track** 90-second demo: illustrate a beginner learning one note/beat/chord through humming, editing and listening. Freeze nonessential features.
 
 ## 16. Sources / API references
 
@@ -755,3 +818,4 @@ The app ships labeled **Sample** parts (Keys, Drums) and a labeled **Demo hum**.
 - Tone.js package usage/audio-start guidance: https://www.npmjs.com/package/tone
 - `@tonejs/midi` usage: https://github.com/Tonejs/Midi
 - Microphone security and permissions: https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia
+- HackRU Education Track high-level definition: https://www.hackru.org/
